@@ -1,0 +1,95 @@
+.section .text
+.global _start
+
+_start:
+  # RV64I Base Instructions
+
+  # Integer computational - immediate
+  a0 = add sp 16              # addi
+  a1 = set-less-than sp 100   # slti
+  a2 = set-less-than-unsigned sp 100  # sltiu
+  a3 = xor t0 -1              # xori
+  a4 = or t0 255              # ori
+  a5 = and t0 0xFF            # andi
+  a6 = shift-left t0 2        # slli
+  a7 = shift-right t0 2       # srli
+  t0 = shift-right-arithmetic t1 2  # srai
+
+  # Integer computational - register
+  t1 = add a0 a1              # add
+  t2 = subtract a0 a1         # sub
+  t3 = shift-left a0 a1       # sll
+  t4 = set-less-than a0 a1    # slt
+  t5 = set-less-than-unsigned a0 a1  # sltu
+  t6 = xor a0 a1              # xor
+  s0 = shift-right a0 a1      # srl
+  s1 = shift-right-arithmetic a0 a1  # sra
+  s2 = or a0 a1               # or
+  s3 = and a0 a1              # and
+
+  # RV64I-specific 32-bit operations
+  s4 = add-word a0 16         # addiw
+  s5 = add-word a0 a1         # addw
+  s6 = subtract-word a0 a1    # subw
+  s7 = shift-left-word a0 2   # slliw
+  s8 = shift-left-word a0 a1  # sllw
+  s9 = shift-right-word a0 2  # srliw
+  s10 = shift-right-word a0 a1  # srlw
+  s11 = shift-right-arithmetic-word a0 2  # sraiw
+  t0 = shift-right-arithmetic-word a0 a1  # sraw
+
+  # Load instructions
+  t1 = load byte sp[0]        # lb
+  t2 = load half sp[2]        # lh
+  t3 = load word sp[4]        # lw
+  t4 = load double sp[8]      # ld
+  t5 = load unsigned byte sp[0]   # lbu
+  t6 = load unsigned half sp[2]   # lhu
+  a0 = load unsigned word sp[4]   # lwu
+
+  # Store instructions
+  sp[0] = store byte a0
+  sp[2] = store half a1
+  sp[4] = store word a2
+  sp[8] = store double a3
+
+  # Pseudo-operations
+  a0 = move a1                # mv
+  a1 = not a2                 # xori rd, rs, -1
+  a2 = negate a3              # sub rd, zero, rs
+  a3 = set-equal-zero a4      # sltiu rd, rs, 1
+  a4 = set-not-equal-zero a5  # sltu rd, zero, rs
+  a5 = sign-extend-word a6    # sext.w
+
+  # Control transfer
+  branch equal a0 a1 loop
+  branch not-equal a0 a1 skip
+  branch less-than a0 a1 less
+  branch greater-equal a0 a1 greater
+  branch less-than-unsigned a0 a1 lessu
+  branch greater-equal-unsigned a0 a1 greateru
+
+  jump exit
+  jump-link function
+  jump-link ra function
+  jump-register t0
+  jump-link-register t0
+  jump-link-register ra t0
+
+  # System instructions
+  environment-call
+  environment-break
+  fence-memory
+
+loop:
+  return
+
+skip:
+less:
+greater:
+lessu:
+greateru:
+function:
+exit:
+  a7 = 93
+  environment-call
