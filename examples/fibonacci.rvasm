@@ -1,0 +1,255 @@
+# Fibonacci Calculator for RISC-V64
+# Computes fibonacci numbers and prints them
+# For use with spike + pk (RISC-V Proxy Kernel)
+# Linux ABI syscalls
+
+.section .rodata
+prompt_msg:
+.string "Enter n for fib(n): "
+result_prefix:
+.string "fib("
+result_middle:
+.string ") = "
+newline:
+.string "\n"
+
+.section .bss
+.align 8
+input_buffer:
+.space 32
+
+.section .text
+.global _start
+
+_start:
+    # Print prompt
+  a0 = 1                          # stdout
+  a1 = prompt_msg                 # message
+  a2 = 20                         # length
+  a7 = 64                         # sys_write
+  environment-call
+
+    # Read input from stdin
+  a0 = 0                          # stdin
+  a1 = input_buffer               # buffer
+  a2 = 32                         # max bytes
+  a7 = 63                         # sys_read
+  environment-call
+
+    # Parse the input number (simple atoi)
+  a0 = input_buffer
+  jump-link parse_number
+  s0 = move a0                    # Save n in s0
+
+    # Compute fibonacci
+  a0 = move s0
+  jump-link fibonacci
+  s1 = move a0                    # Save result in s1
+
+    # Print "fib("
+  a0 = 1
+  a1 = result_prefix
+  a2 = 4
+  a7 = 64
+  environment-call
+
+    # Print n
+  a0 = move s0
+  jump-link print_number
+
+    # Print ") = "
+  a0 = 1
+  a1 = result_middle
+  a2 = 4
+  a7 = 64
+  environment-call
+
+    # Print result
+  a0 = move s1
+  jump-link print_number
+
+    # Print newline
+  a0 = 1
+  a1 = newline
+  a2 = 1
+  a7 = 64
+  environment-call
+
+    # Exit
+  a0 = 0
+  a7 = 93                         # sys_exit
+  environment-call
+
+
+# fibonacci: Compute nth Fibonacci number
+# Input: a0 = n
+# Output: a0 = fib(n)
+# Uses iterative algorithm to avoid stack overflow
+fibonacci:
+    # Handle base cases: fib(0) = 0, fib(1) = 1
+  t0 = set-less-than-unsigned a0 2
+  branch not-equal t0 zero fib_return
+
+    # Iterative fibonacci
+    # t0 = fib(i-2), initially 0
+    # t1 = fib(i-1), initially 1
+    # t2 = counter (i)
+    # a0 = n
+
+  t0 = 0                          # fib(0) = 0
+  t1 = 1                          # fib(1) = 1
+  t2 = 2                          # counter starts at 2
+
+fib_loop:
+    # Check if we're done
+  branch greater-equal t2 a0 fib_done
+
+    # Compute next fibonacci number
+  t3 = add t0 t1                  # fib(i) = fib(i-1) + fib(i-2)
+
+    # Shift values
+  t0 = move t1                    # fib(i-2) = old fib(i-1)
+  t1 = move t3                    # fib(i-1) = new fib(i)
+
+    # Increment counter
+  t2 = add t2 1
+
+  jump fib_loop
+
+fib_done:
+  a0 = move t1                    # Return fib(n)
+
+fib_return:
+  return
+
+
+# parse_number: Convert ASCII string to integer
+# Input: a0 = pointer to string
+# Output: a0 = parsed number
+# Clobbers: t0, t1, t2, t3
+parse_number:
+  t0 = move a0                    # Current position
+  t1 = 0                          # Accumulated result
+
+parse_loop:
+  t2 = load unsigned byte t0[0]   # Load character
+
+    # Check for newline or null terminator
+  t3 = set-equal-zero t2
+  branch not-equal t3 zero parse_done
+
+  t3 = add t2 -10                 # Check for '\n'
+  t3 = set-equal-zero t3
+  branch not-equal t3 zero parse_done
+
+    # Check if digit (0-9)
+  t3 = add t2 -48                 # '0' = 48
+  t4 = set-less-than-unsigned t3 10
+  branch equal t4 zero parse_done  # Not a digit, done
+
+    # result = result * 10 + digit
+  t1 = multiply t1 10
+  t1 = add t1 t3
+
+    # Next character
+  t0 = add t0 1
+  jump parse_loop
+
+parse_done:
+  a0 = move t1
+  return
+
+
+# print_number: Convert integer to ASCII and print
+# Input: a0 = number to print
+# Clobbers: t0-t6, a1, a2, a7
+print_number:
+    # Save registers
+  sp = add sp -32
+  sp[0] = store double ra
+  sp[8] = store double s0
+  sp[16] = store double s1
+
+  s0 = move a0                    # Save number
+
+    # Handle zero specially
+  branch not-equal s0 zero print_nonzero
+
+    # Print '0'
+  t0 = 48                         # '0'
+  sp[24] = store byte t0
+  a0 = 1                          # stdout
+  sp = add sp 24
+  a1 = move sp                    # pointer to '0'
+  sp = add sp -24
+  a2 = 1                          # length
+  a7 = 64                         # sys_write
+  environment-call
+  jump print_done
+
+print_nonzero:
+    # Build digits in reverse on stack
+  s1 = 0                          # Digit counter
+  t0 = move s0                    # Working copy
+
+print_digit_loop:
+    # Check if done
+  branch equal t0 zero print_reverse
+
+    # Get digit: digit = num % 10
+  t4 = 10                         # Divisor
+  t1 = remainder-unsigned t0 t4
+
+    # Convert to ASCII
+  t1 = add t1 48                  # '0' = 48
+
+    # Store on stack
+  t2 = add sp 24
+  t2 = add t2 s1
+  t2[0] = store byte t1
+
+    # Next digit
+  t0 = divide-unsigned t0 t4
+  s1 = add s1 1
+
+  jump print_digit_loop
+
+print_reverse:
+    # Now reverse and print the string
+  t0 = 0                          # Source index (from end)
+  t1 = add sp 24
+  t1 = add t1 s1
+  t1 = add t1 -1                  # Point to last digit
+
+  t2 = add sp 24                  # Destination (start of buffer)
+
+reverse_loop:
+  branch equal t0 s1 reverse_done
+
+    # Copy byte
+  t3 = load unsigned byte t1[0]
+  t2[0] = store byte t3
+
+    # Move pointers
+  t1 = add t1 -1                  # Source moves backward
+  t2 = add t2 1                   # Dest moves forward
+  t0 = add t0 1                   # Counter
+
+  jump reverse_loop
+
+reverse_done:
+    # Print the buffer
+  a0 = 1                          # stdout
+  a1 = add sp 24                  # Buffer
+  a2 = move s1                    # Length
+  a7 = 64                         # sys_write
+  environment-call
+
+print_done:
+    # Restore registers
+  ra = load double sp[0]
+  s0 = load double sp[8]
+  s1 = load double sp[16]
+  sp = add sp 32
+
+  return
