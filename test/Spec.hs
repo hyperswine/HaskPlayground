@@ -16,12 +16,7 @@ import System.Exit (exitFailure)
 -- ---------------------------------------------------------------------------
 
 knownRegisters :: [Text]
-knownRegisters =
-  ["zero", "ra", "sp", "gp", "tp"]
-    ++ ["t" <> T.pack (show i) | i <- [0 .. 6 :: Int]]
-    ++ ["s" <> T.pack (show i) | i <- [0 .. 11 :: Int]]
-    ++ ["a" <> T.pack (show i) | i <- [0 .. 7 :: Int]]
-    ++ ["x" <> T.pack (show i) | i <- [0 .. 31 :: Int]]
+knownRegisters = ["zero", "ra", "sp", "gp", "tp"] ++ ["t" <> T.pack (show i) | i <- [0 .. 6 :: Int]] ++ ["s" <> T.pack (show i) | i <- [0 .. 11 :: Int]] ++ ["a" <> T.pack (show i) | i <- [0 .. 7 :: Int]] ++ ["x" <> T.pack (show i) | i <- [0 .. 31 :: Int]]
 
 genRegister :: Gen Text
 genRegister = Gen.element knownRegisters
@@ -38,7 +33,7 @@ genNegativeImmediate = do
 
 genHexImmediate :: Gen Text
 genHexImmediate = do
-  digits <- Gen.list (Range.linear 1 8) (Gen.element (['0'..'9'] ++ ['a'..'f'] ++ ['A'..'F']))
+  digits <- Gen.list (Range.linear 1 8) (Gen.element (['0' .. '9'] ++ ['a' .. 'f'] ++ ['A' .. 'F']))
   pure ("0x" <> T.pack digits)
 
 genImmediate :: Gen Text
@@ -87,8 +82,7 @@ prop_isImmediate_hex = property $ do
 
 -- Empty string is never an immediate
 prop_isImmediate_rejectsEmpty :: Property
-prop_isImmediate_rejectsEmpty = property $
-  assert (not (isImmediate ""))
+prop_isImmediate_rejectsEmpty = property $ assert (not (isImmediate ""))
 
 -- Registers are not immediates
 prop_isImmediate_rejectsRegisters :: Property
@@ -116,6 +110,7 @@ prop_splitComment_noCommentWhenNoHash = property $ do
   assert (T.null commentResult)
 
 -- splitComment is a total function on arbitrary text (no '\n')
+-- USEFUL WAY TO DO THINGS
 prop_splitComment_nocrash :: Property
 prop_splitComment_nocrash = property $ do
   line <- forAll $ Gen.text (Range.linear 0 100) (Gen.filter (/= '\n') Gen.unicode)
@@ -164,8 +159,7 @@ prop_translateLine_nocrash = property $ do
 
 -- Empty lines are passed through unchanged
 prop_translateLine_emptyPassthrough :: Property
-prop_translateLine_emptyPassthrough = property $
-  translateLine "" === ""
+prop_translateLine_emptyPassthrough = property $ translateLine "" === ""
 
 -- Labels (lines ending with ':') pass through unchanged
 prop_translateLine_labelPassthrough :: Property
@@ -186,11 +180,7 @@ prop_translateLine_instructionsIndented :: Property
 prop_translateLine_instructionsIndented = property $ do
   dest <- forAll genRegister
   src <- forAll genRegister
-  op <- forAll $ Gen.element
-    [ "add", "subtract", "xor", "or", "and"
-    , "shift-left", "shift-right", "shift-right-arithmetic"
-    , "multiply", "divide", "remainder"
-    ]
+  op <- forAll $ Gen.element ["add", "subtract", "xor", "or", "and", "shift-left", "shift-right", "shift-right-arithmetic", "multiply", "divide", "remainder"]
   let line = dest <> " = " <> op <> " " <> src <> " " <> src
   assert (T.isPrefixOf "    " (translateLine line))
 
@@ -207,8 +197,7 @@ prop_translateLine_load_indented = property $ do
 -- Branch instructions are indented regardless of condition keyword
 prop_translateLine_branch_indented :: Property
 prop_translateLine_branch_indented = property $ do
-  cond <- forAll $ Gen.element
-    ["equal", "not-equal", "less-than", "greater-equal", "less-than-unsigned", "greater-equal-unsigned"]
+  cond <- forAll $ Gen.element ["equal", "not-equal", "less-than", "greater-equal", "less-than-unsigned", "greater-equal-unsigned"]
   r1 <- forAll genRegister
   r2 <- forAll genRegister
   target <- forAll $ Gen.text (Range.linear 1 20) Gen.alphaNum
@@ -230,20 +219,16 @@ prop_translateLine_commentPreserved = property $ do
 -- ---------------------------------------------------------------------------
 
 prop_translate_return :: Property
-prop_translate_return = property $
-  translateLine "return" === "    ret"
+prop_translate_return = property $ translateLine "return" === "    ret"
 
 prop_translate_ecall :: Property
-prop_translate_ecall = property $
-  translateLine "environment-call" === "    ecall"
+prop_translate_ecall = property $ translateLine "environment-call" === "    ecall"
 
 prop_translate_ebreak :: Property
-prop_translate_ebreak = property $
-  translateLine "environment-break" === "    ebreak"
+prop_translate_ebreak = property $ translateLine "environment-break" === "    ebreak"
 
 prop_translate_fence :: Property
-prop_translate_fence = property $
-  translateLine "fence-memory" === "    fence"
+prop_translate_fence = property $ translateLine "fence-memory" === "    fence"
 
 -- Immediate assignment: dest = <imm> → li dest, imm
 prop_translateAssignment_immediate :: Property
@@ -314,8 +299,7 @@ prop_translate_linecount = property $ do
 prop_translate_nocrash :: Property
 prop_translate_nocrash = property $ do
   numLines <- forAll $ Gen.int (Range.linear 0 10)
-  ls <- forAll $ Gen.list (Range.singleton numLines)
-    (Gen.text (Range.linear 0 80) (Gen.filter (/= '\n') Gen.unicode))
+  ls <- forAll $ Gen.list (Range.singleton numLines) (Gen.text (Range.linear 0 80) (Gen.filter (/= '\n') Gen.unicode))
   _ <- pure (translate (T.unlines ls))
   success
 
@@ -335,8 +319,7 @@ prop_translate_labelsUnchanged = property $ do
 
 -- An empty program translates to an empty output
 prop_translate_emptyProgram :: Property
-prop_translate_emptyProgram = property $
-  T.strip (translate "") === ""
+prop_translate_emptyProgram = property $ T.strip (translate "") === ""
 
 -- ---------------------------------------------------------------------------
 -- Main
@@ -344,42 +327,45 @@ prop_translate_emptyProgram = property $
 
 main :: IO ()
 main = do
-  ok <- checkParallel $ Group "RVAsm"
-    [ ("isRegister: known registers accepted",   prop_isRegister_knownRegisters)
-    , ("isRegister: non-registers rejected",     prop_isRegister_rejectsNonRegisters)
-    , ("isImmediate: decimal",                   prop_isImmediate_decimal)
-    , ("isImmediate: negative",                  prop_isImmediate_negative)
-    , ("isImmediate: hex",                       prop_isImmediate_hex)
-    , ("isImmediate: empty rejected",            prop_isImmediate_rejectsEmpty)
-    , ("isImmediate: registers rejected",        prop_isImmediate_rejectsRegisters)
-    , ("splitComment: code has no hash",         prop_splitComment_codeNoHash)
-    , ("splitComment: no hash => empty comment", prop_splitComment_noCommentWhenNoHash)
-    , ("splitComment: no crash",                 prop_splitComment_nocrash)
-    , ("parseMemoryOperand: bracket form",       prop_parseMemoryOperand_brackets)
-    , ("parseMemoryOperand: no brackets",        prop_parseMemoryOperand_noBrackets)
-    , ("parseMemoryOperand: no crash",           prop_parseMemoryOperand_nocrash)
-    , ("translateLine: no crash",                prop_translateLine_nocrash)
-    , ("translateLine: empty passthrough",       prop_translateLine_emptyPassthrough)
-    , ("translateLine: label passthrough",       prop_translateLine_labelPassthrough)
-    , ("translateLine: directive passthrough",   prop_translateLine_directivePassthrough)
-    , ("translateLine: ops are indented",        prop_translateLine_instructionsIndented)
-    , ("translateLine: load indented",           prop_translateLine_load_indented)
-    , ("translateLine: branch indented",         prop_translateLine_branch_indented)
-    , ("translateLine: comment preserved",       prop_translateLine_commentPreserved)
-    , ("translate: return => ret",               prop_translate_return)
-    , ("translate: environment-call => ecall",   prop_translate_ecall)
-    , ("translate: environment-break => ebreak", prop_translate_ebreak)
-    , ("translate: fence-memory => fence",       prop_translate_fence)
-    , ("translate: imm assignment => li",        prop_translateAssignment_immediate)
-    , ("translate: reg assignment => mv",        prop_translateAssignment_register)
-    , ("translate: add reg+imm => addi",         prop_translateImmOp_add)
-    , ("translate: add reg+reg => add",          prop_translateRegOp_add)
-    , ("translate: xor reg+reg => xor",          prop_translateRegOp_xor)
-    , ("translate: store standalone indented",   prop_translateStandalone_store)
-    , ("translate: line count preserved",        prop_translate_linecount)
-    , ("translate: no crash on programs",        prop_translate_nocrash)
-    , ("translate: directives unchanged",        prop_translate_directivesUnchanged)
-    , ("translate: labels unchanged",            prop_translate_labelsUnchanged)
-    , ("translate: empty program",               prop_translate_emptyProgram)
-    ]
+  ok <-
+    checkParallel $
+      Group
+        "RVAsm"
+        [ ("isRegister: known registers accepted", prop_isRegister_knownRegisters),
+          ("isRegister: non-registers rejected", prop_isRegister_rejectsNonRegisters),
+          ("isImmediate: decimal", prop_isImmediate_decimal),
+          ("isImmediate: negative", prop_isImmediate_negative),
+          ("isImmediate: hex", prop_isImmediate_hex),
+          ("isImmediate: empty rejected", prop_isImmediate_rejectsEmpty),
+          ("isImmediate: registers rejected", prop_isImmediate_rejectsRegisters),
+          ("splitComment: code has no hash", prop_splitComment_codeNoHash),
+          ("splitComment: no hash => empty comment", prop_splitComment_noCommentWhenNoHash),
+          ("splitComment: no crash", prop_splitComment_nocrash),
+          ("parseMemoryOperand: bracket form", prop_parseMemoryOperand_brackets),
+          ("parseMemoryOperand: no brackets", prop_parseMemoryOperand_noBrackets),
+          ("parseMemoryOperand: no crash", prop_parseMemoryOperand_nocrash),
+          ("translateLine: no crash", prop_translateLine_nocrash),
+          ("translateLine: empty passthrough", prop_translateLine_emptyPassthrough),
+          ("translateLine: label passthrough", prop_translateLine_labelPassthrough),
+          ("translateLine: directive passthrough", prop_translateLine_directivePassthrough),
+          ("translateLine: ops are indented", prop_translateLine_instructionsIndented),
+          ("translateLine: load indented", prop_translateLine_load_indented),
+          ("translateLine: branch indented", prop_translateLine_branch_indented),
+          ("translateLine: comment preserved", prop_translateLine_commentPreserved),
+          ("translate: return => ret", prop_translate_return),
+          ("translate: environment-call => ecall", prop_translate_ecall),
+          ("translate: environment-break => ebreak", prop_translate_ebreak),
+          ("translate: fence-memory => fence", prop_translate_fence),
+          ("translate: imm assignment => li", prop_translateAssignment_immediate),
+          ("translate: reg assignment => mv", prop_translateAssignment_register),
+          ("translate: add reg+imm => addi", prop_translateImmOp_add),
+          ("translate: add reg+reg => add", prop_translateRegOp_add),
+          ("translate: xor reg+reg => xor", prop_translateRegOp_xor),
+          ("translate: store standalone indented", prop_translateStandalone_store),
+          ("translate: line count preserved", prop_translate_linecount),
+          ("translate: no crash on programs", prop_translate_nocrash),
+          ("translate: directives unchanged", prop_translate_directivesUnchanged),
+          ("translate: labels unchanged", prop_translate_labelsUnchanged),
+          ("translate: empty program", prop_translate_emptyProgram)
+        ]
   unless ok exitFailure
