@@ -20,6 +20,7 @@ isImmediate t = case T.unpack t of
   ('-' : rest) -> all isDigit rest && not (null rest)
   s -> all isDigit s && not (null s)
 
+-- base[offset]
 parseMemoryOperand operand = case T.breakOn "[" operand of
   (base, rest) | not (T.null rest) -> let offset = T.takeWhile (/= ']') (T.drop 1 rest) in (T.strip base, T.strip offset)
   _ -> (T.strip operand, "0")
