@@ -24,6 +24,9 @@ source-repository head
   location: https://github.com/hyperswine/haskplayground
 
 library
+  exposed-modules:
+      Lib
+      RVAsm
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
