@@ -1,3 +1,5 @@
 module Main where
 
-main = putStrLn "Hi"
+import qualified RVAsm
+
+main = RVAsm.main
