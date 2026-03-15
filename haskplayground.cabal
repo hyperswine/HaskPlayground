@@ -1,0 +1,140 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.38.0.
+--
+-- see: https://github.com/sol/hpack
+
+name:           haskplayground
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/haskplayground#readme>
+homepage:       https://github.com/hyperswine/haskplayground#readme
+bug-reports:    https://github.com/hyperswine/haskplayground/issues
+author:         Jasen Qin
+maintainer:     jasen.qin33@gmail.com
+copyright:      2025 Jasen Qin
+license:        GPL-3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/hyperswine/haskplayground
+
+library
+  other-modules:
+      Paths_haskplayground
+  hs-source-dirs:
+      src
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , array
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , clash-prelude
+    , containers
+    , directory
+    , filepath
+    , free
+    , hashable
+    , hedgehog
+    , http-conduit
+    , linear
+    , megaparsec
+    , mtl
+    , parsec
+    , parser-combinators
+    , process
+    , random
+    , recursion-schemes
+    , regex-tdfa
+    , row-types
+    , stm
+    , text
+    , time
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+executable haskplayground-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_haskplayground
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , array
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , clash-prelude
+    , containers
+    , directory
+    , filepath
+    , free
+    , hashable
+    , haskplayground
+    , hedgehog
+    , http-conduit
+    , linear
+    , megaparsec
+    , mtl
+    , parsec
+    , parser-combinators
+    , process
+    , random
+    , recursion-schemes
+    , regex-tdfa
+    , row-types
+    , stm
+    , text
+    , time
+    , unordered-containers
+    , vector
+  default-language: Haskell2010
+
+test-suite haskplayground-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_haskplayground
+  hs-source-dirs:
+      test
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      aeson
+    , array
+    , async
+    , base >=4.7 && <5
+    , bytestring
+    , clash-prelude
+    , containers
+    , directory
+    , filepath
+    , free
+    , hashable
+    , haskplayground
+    , hedgehog
+    , http-conduit
+    , linear
+    , megaparsec
+    , mtl
+    , parsec
+    , parser-combinators
+    , process
+    , random
+    , recursion-schemes
+    , regex-tdfa
+    , row-types
+    , stm
+    , text
+    , time
+    , unordered-containers
+    , vector
+  default-language: Haskell2010

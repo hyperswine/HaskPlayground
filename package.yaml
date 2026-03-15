@@ -1,0 +1,79 @@
+name:                haskplayground
+version:             0.1.0.0
+github:              "hyperswine/haskplayground"
+license:             GPL-3
+author:              "Jasen Qin"
+maintainer:          "jasen.qin33@gmail.com"
+copyright:           "2025 Jasen Qin"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+
+description:         Please see the README on GitHub at <https://github.com/githubuser/haskplayground#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- parsec
+- containers
+- mtl
+- array
+- random
+- recursion-schemes
+- regex-tdfa
+- linear
+- vector
+- bytestring
+- async
+- time
+- text
+- hashable
+- http-conduit
+- aeson
+- megaparsec
+- free
+- row-types
+- process
+- parser-combinators
+- stm
+- directory
+- filepath
+- clash-prelude
+- hedgehog
+- unordered-containers
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs: src
+
+executables:
+  haskplayground-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - haskplayground
+
+tests:
+  haskplayground-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - haskplayground
