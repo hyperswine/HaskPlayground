@@ -1,5 +1,6 @@
 module Main where
 
 import qualified RVAsm
+import qualified FPActors
 
-main = RVAsm.main
+main = FPActors.main
