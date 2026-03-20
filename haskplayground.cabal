@@ -27,6 +27,7 @@ library
   exposed-modules:
       FPActors
       Lib
+      MyHardware
       RVAsm
   other-modules:
       Paths_haskplayground
