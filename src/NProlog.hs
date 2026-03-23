@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-
   N Prolog syntax
   lambda prolog like, period terminator
@@ -47,24 +49,22 @@
     dont add the other things like assert/1 and cuts or anything
     X + Y is actually meant to be more like X #+ Y across the FD of Integer from 0..INF
 -}
-
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
-{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module NProlog where
 
+import qualified Control.Exception as CE
 import Control.Monad (foldM)
 import Control.Monad.Combinators.Expr
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import Data.List (dropWhileEnd, intercalate, isPrefixOf, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
-import Data.Void
-import qualified Control.Exception as CE
-import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
 import Data.Text (unpack)
+import Data.Void
 import Prettyprinter
 import Prettyprinter.Render.Terminal
 import System.Console.Haskeline
@@ -374,9 +374,7 @@ solve prog goals = solveGoals prog emptySubst goals 0
 solveGoals _ s [] _ = [s]
 solveGoals prog s (g : gs) c = case walk s g of
   -- Built-in: unify
-  Compound "unify" [a, b] -> case unify s a b of
-    Just s' -> solveGoals prog s' gs c
-    Nothing -> []
+  Compound "unify" [a, b] -> case unify s a b of Just s' -> solveGoals prog s' gs c; Nothing -> []
   Compound "equiv" [a, b] -> if deepWalk s a == deepWalk s b then solveGoals prog s gs c else []
   Compound "neq" [a, b] -> if deepWalk s a /= deepWalk s b then solveGoals prog s gs c else []
   Compound "gt" [a, b] -> numCompareGoal (>) s a b gs prog c
@@ -386,9 +384,7 @@ solveGoals prog s (g : gs) c = case walk s g of
   Compound "is" [lhs, rhs] ->
     let val = evalArith s rhs
      in case val of
-          Just v -> case unify s lhs v of
-            Just s' -> solveGoals prog s' gs c
-            Nothing -> []
+          Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c; Nothing -> []
           Nothing -> []
   Compound "call" (pred' : args) ->
     let goal = case pred' of
@@ -460,47 +456,23 @@ runProlog programSrc querySrc = do
 
 -- ─── Pretty Printing ─────────────────────────────────────────────────────────
 
-renderDoc :: Doc AnsiStyle -> String
 renderDoc = unpack . renderStrict . layoutPretty defaultLayoutOptions
 
-docErr :: String -> Doc AnsiStyle
 docErr msg = annotate (bold <> color Red) (pretty "Error: ") <> annotate (color Red) (pretty msg)
 
-docInfo :: String -> Doc AnsiStyle
 docInfo = annotate (colorDull Cyan) . pretty
 
-docSolution :: Map String Term -> Doc AnsiStyle
 docSolution s
   | Map.null s = annotate (bold <> color Green) (pretty "true.")
-  | otherwise =
-      hsep $
-        punctuate comma
-          [ annotate (color Yellow) (pretty v)
-              <+> annotate (colorDull White) (pretty "=")
-              <+> annotate (color Cyan) (pretty (show t))
-            | (v, t) <- Map.toList s
-          ]
+  | otherwise = hsep $ punctuate comma [annotate (color Yellow) (pretty v) <+> annotate (colorDull White) (pretty "=") <+> annotate (color Cyan) (pretty (show t)) | (v, t) <- Map.toList s]
 
 -- ─── Completion ───────────────────────────────────────────────────────────────
 
-progPreds :: Program -> [String]
-progPreds prog =
-  nub
-    [ name
-      | c <- prog,
-        let name = case clauseHead c of
-              Atom f -> f
-              Compound f _ -> f
-              _ -> "",
-        not (null name)
-    ]
+progPreds prog = nub [name | c <- prog, let name = case clauseHead c of Atom f -> f; Compound f _ -> f; _ -> "", not $ null name]
 
-prologComplete :: IORef Program -> CompletionFunc IO
 prologComplete progRef input@(leftRev, _) = do
   let left = reverse leftRev
-  if ":load " `isPrefixOf` left
-    then completeFilename input
-    else completeWord Nothing " \t,(.?" completeIdent input
+  if ":load " `isPrefixOf` left then completeFilename input else completeWord Nothing " \t,(.?" completeIdent input
   where
     completeIdent word = do
       prog <- readIORef progRef
@@ -509,31 +481,21 @@ prologComplete progRef input@(leftRev, _) = do
 
 -- ─── REPL ─────────────────────────────────────────────────────────────────────
 
-runPrologRepl :: IO ()
 runPrologRepl = do
   progRef <- newIORef ([] :: Program)
-  let settings =
-        (defaultSettings :: Settings IO)
-          { complete = prologComplete progRef,
-            historyFile = Just ".nprolog_history"
-          }
+
+  let settings = (defaultSettings :: Settings IO) {complete = prologComplete progRef, historyFile = Just ".nprolog_history"}
+
   runInputT settings $ do
-    outputStrLn $
-      renderDoc $
-        annotate (bold <> color Cyan) (pretty "NewProlog")
-          <> annotate (colorDull White) (pretty " — clauses: ")
-          <> annotate (colorDull Yellow) (pretty "color red.")
-          <+> annotate (colorDull White) (pretty "queries: ")
-          <> annotate (colorDull Yellow) (pretty "color X?")
-    outputStrLn $
-      renderDoc $
-        annotate (colorDull White) (pretty "Commands: :load <file>   :quit   Ctrl+D")
+    outputStrLn $ renderDoc $ annotate (bold <> color Cyan) (pretty "NewProlog") <> annotate (colorDull White) (pretty " — clauses: ") <> annotate (colorDull Yellow) (pretty "color red.") <+> annotate (colorDull White) (pretty "queries: ") <> annotate (colorDull Yellow) (pretty "color X?")
+    outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :quit   Ctrl+D")
     loop progRef
   where
     prompt = renderDoc $ annotate (bold <> color Blue) (pretty "?> ")
 
     loop progRef = do
       mline <- getInputLine prompt
+
       case mline of
         Nothing -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
         Just line -> handleLine progRef (dropWhileEnd (== ' ') line)
