@@ -9,6 +9,7 @@ import qualified Data.Text as T
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import NPrologTest (nPrologGroup)
 import RVAsm
 import System.Exit (exitFailure)
 
@@ -328,7 +329,7 @@ prop_translate_emptyProgram = property $ T.strip (translate "") === ""
 
 main :: IO ()
 main = do
-  ok <-
+  okRV <-
     checkParallel $
       Group
         "RVAsm"
@@ -369,4 +370,5 @@ main = do
           ("translate: labels unchanged", prop_translate_labelsUnchanged),
           ("translate: empty program", prop_translate_emptyProgram)
         ]
-  unless ok exitFailure
+  okNP <- checkParallel nPrologGroup
+  unless (okRV && okNP) exitFailure

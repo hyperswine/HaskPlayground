@@ -534,7 +534,20 @@ clpfdUnify prog s lhs rhs restGoals c =
     wa = deepWalk s lhs
     wb = deepWalk s rhs
 
-solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepWalk s) s)) rawSolutions
+-- Deep-walk all variable references AND evaluate any fully-ground arithmetic
+-- subterms, so that deferred constraints like N = 4 * R (solved after R = 2)
+-- display as N = 8 rather than N = mul 4 2.
+deepEval :: Subst -> Term -> Term
+deepEval s t = tryEval (deepWalk s t)
+  where
+    tryEval t' = case evalArith emptySubst t' of
+      Just v  -> v
+      Nothing -> case t' of
+        Compound f as -> Compound f (map tryEval as)
+        TList xs r    -> TList (map tryEval xs) (fmap tryEval r)
+        _             -> t'
+
+solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions
   where
     queryVars = nub $ concatMap termVars goals
     rawSolutions = solve prog goals
@@ -597,8 +610,7 @@ runPrologRepl = do
         Just line -> handleLine progRef (dropWhileEnd (== ' ') line)
 
     handleLine progRef trimmed = case trimmed of
-      ":quit" ->
-        outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+      ":quit" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
       _
         | take 5 trimmed == ":load" -> do
             let file = dropWhile (== ' ') (drop 5 trimmed)
