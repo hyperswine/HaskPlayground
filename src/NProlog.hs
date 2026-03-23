@@ -456,33 +456,28 @@ arithFreeVars (Var v) | v /= "_" = [v]
 arithFreeVars (Compound f [a, b]) | f `elem` arithOps = arithFreeVars a ++ arithFreeVars b
 arithFreeVars _ = []
 
--- Invert expr to solve for variable v given a target integer.
--- expr must be deepWalked.  Returns Just val if solvable.
+-- Invert expr to solve for variable v given a target integer. expr must be deepWalked.  Returns Just val if solvable.
 invertArith :: Subst -> Term -> String -> Integer -> Maybe Integer
 invertArith s t v target = case walk s t of
   Var x | x == v -> Just target
   Var _ -> Nothing
   IntLit _ -> Nothing
-  Compound "plus" [a, b] ->
-    case (evalArith s a, evalArith s b) of
-      (Just (IntLit va), _) -> invertArith s b v (target - va)
-      (_, Just (IntLit vb)) -> invertArith s a v (target - vb)
-      _ -> Nothing
-  Compound "minus" [a, b] ->
-    case (evalArith s a, evalArith s b) of
-      (Just (IntLit va), _) -> invertArith s b v (va - target)
-      (_, Just (IntLit vb)) -> invertArith s a v (target + vb)
-      _ -> Nothing
-  Compound "mul" [a, b] ->
-    case (evalArith s a, evalArith s b) of
-      (Just (IntLit va), _) | va /= 0, target `mod` va == 0 -> invertArith s b v (target `div` va)
-      (_, Just (IntLit vb)) | vb /= 0, target `mod` vb == 0 -> invertArith s a v (target `div` vb)
-      _ -> Nothing
-  Compound "div" [a, b] ->
-    case (evalArith s a, evalArith s b) of
-      (_, Just (IntLit vb)) | vb /= 0 -> invertArith s a v (target * vb)
-      (Just (IntLit va), _) | target /= 0, va `mod` target == 0 -> invertArith s b v (va `div` target)
-      _ -> Nothing
+  Compound "plus" [a, b] -> case (evalArith s a, evalArith s b) of
+    (Just (IntLit va), _) -> invertArith s b v (target - va)
+    (_, Just (IntLit vb)) -> invertArith s a v (target - vb)
+    _ -> Nothing
+  Compound "minus" [a, b] -> case (evalArith s a, evalArith s b) of
+    (Just (IntLit va), _) -> invertArith s b v (va - target)
+    (_, Just (IntLit vb)) -> invertArith s a v (target + vb)
+    _ -> Nothing
+  Compound "mul" [a, b] -> case (evalArith s a, evalArith s b) of
+    (Just (IntLit va), _) | va /= 0, target `mod` va == 0 -> invertArith s b v (target `div` va)
+    (_, Just (IntLit vb)) | vb /= 0, target `mod` vb == 0 -> invertArith s a v (target `div` vb)
+    _ -> Nothing
+  Compound "div" [a, b] -> case (evalArith s a, evalArith s b) of
+    (_, Just (IntLit vb)) | vb /= 0 -> invertArith s a v (target * vb)
+    (Just (IntLit va), _) | target /= 0, va `mod` target == 0 -> invertArith s b v (va `div` target)
+    _ -> Nothing
   _ -> Nothing
 
 -- Fallback enumeration bound when the range cannot be derived analytically
@@ -498,30 +493,20 @@ enumerationRange expr target = case expr of
   Compound "mul" _ -> [0 .. clpMaxDomain]
   _ -> [0 .. clpMaxDomain]
 
--- Resolve the arithmetic constraint  expr = target  against the domain.
--- Returns all solutions via the existing backtracking DFS.
+-- Resolve the arithmetic constraint  expr = target  against the domain. Returns all solutions via the existing backtracking DFS.
 solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> [Subst]
-solveArithConstraint prog s expr target restGoals c =
-  let expr' = deepWalk s expr
-      fvs = nub (arithFreeVars expr')
-  in case fvs of
-    [] ->
-      case evalArith s expr' of
-        Just (IntLit n) | n == target -> solveGoals prog s restGoals c
-        _ -> []
-    [v] ->
-      case invertArith s expr' v target of
-        Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c
-        _ -> []
-    _ ->
-      -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
-      let v = head fvs
-          range = enumerationRange expr' target
-      in concatMap
-           (\i ->
-              let s' = Map.insert v (IntLit i) s
-               in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c)
-           range
+solveArithConstraint prog s expr target restGoals c = case fvs of
+  [] -> case evalArith s expr' of
+    Just (IntLit n) | n == target -> solveGoals prog s restGoals c
+    _ -> []
+  [v] -> case invertArith s expr' v target of
+    Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c
+    _ -> []
+  -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
+  _ -> let v = head fvs; range = enumerationRange expr' target in concatMap (\i -> let s' = Map.insert v (IntLit i) s in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c) range
+  where
+    expr' = deepWalk s expr
+    fvs = nub $ arithFreeVars expr'
 
 -- Smart arithmetic unification: replaces plain structural unify for = goals.
 -- - Both sides ground and arithmetic → evaluate and check equality
@@ -533,24 +518,21 @@ solveArithConstraint prog s expr target restGoals c =
 -- - Non-arithmetic terms fall back to structural unify unchanged.
 clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> [Subst]
 clpfdUnify prog s lhs rhs restGoals c =
-  let wa = deepWalk s lhs
-      wb = deepWalk s rhs
-  in if not (isArithTerm wa) && not (isArithTerm wb)
+  if not (isArithTerm wa) && not (isArithTerm wb)
     then case unify s wa wb of
       Just s' -> solveGoals prog s' restGoals c
       Nothing -> []
     else case (evalArith s wa, evalArith s wb) of
-      (Just tv1, Just tv2) ->
-        if tv1 == tv2 then solveGoals prog s restGoals c else []
-      (Nothing, Just (IntLit n)) ->
-        solveArithConstraint prog s wa n restGoals c
-      (Just (IntLit n), Nothing) ->
-        solveArithConstraint prog s wb n restGoals c
-      _ ->
-        -- Deferred or float: fall back to structural unification
-        case unify s wa wb of
-          Just s' -> solveGoals prog s' restGoals c
-          Nothing -> []
+      (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c else []
+      (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c
+      (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c
+      -- Deferred or float: fall back to structural unification
+      _ -> case unify s wa wb of
+        Just s' -> solveGoals prog s' restGoals c
+        Nothing -> []
+  where
+    wa = deepWalk s lhs
+    wb = deepWalk s rhs
 
 solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepWalk s) s)) rawSolutions
   where
