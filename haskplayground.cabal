@@ -55,6 +55,8 @@ library
     , mtl
     , parsec
     , parser-combinators
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , process
     , random
     , recursion-schemes
@@ -95,6 +97,8 @@ executable haskplayground-exe
     , mtl
     , parsec
     , parser-combinators
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , process
     , random
     , recursion-schemes
@@ -137,6 +141,8 @@ test-suite haskplayground-test
     , mtl
     , parsec
     , parser-combinators
+    , prettyprinter
+    , prettyprinter-ansi-terminal
     , process
     , random
     , recursion-schemes

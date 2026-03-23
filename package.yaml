@@ -42,6 +42,8 @@ dependencies:
 - hedgehog
 - unordered-containers
 - haskeline
+- prettyprinter
+- prettyprinter-ansi-terminal
 
 ghc-options:
 - -Wall

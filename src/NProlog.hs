@@ -12,11 +12,13 @@
 
   Operators:
     Infix only for most, except negative numbers
+
     +, -, /, *, %, ^, =, !=, ., ==
     1 + 1 --> (plus 1 1)
     x.y --> (access x y)
     x = y --> (unify x y)
     x == y --> (equiv x y)
+
     etc.
 
   Numbers:
@@ -54,12 +56,18 @@ module NProlog where
 
 import Control.Monad (foldM)
 import Control.Monad.Combinators.Expr
-import Data.List (dropWhileEnd, intercalate, nub)
+import Data.List (dropWhileEnd, intercalate, isPrefixOf, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Void
-import System.IO (BufferMode (..), hFlush, hSetBuffering, isEOF, stdout)
+import qualified Control.Exception as CE
+import Control.Monad.IO.Class (liftIO)
+import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
+import Data.Text (unpack)
+import Prettyprinter
+import Prettyprinter.Render.Terminal
+import System.Console.Haskeline
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -450,53 +458,117 @@ runProlog programSrc querySrc = do
 
   if null solns then return ["false."] else return $ map showSolution solns
 
-runPrologRepl = do
-  hSetBuffering stdout LineBuffering
+-- ─── Pretty Printing ─────────────────────────────────────────────────────────
 
-  putStrLn "NewProlog REPL. Enter clauses like `color red.` or query with `color X?`"
-  putStrLn "Commands: :load <file>, :quit"
+renderDoc :: Doc AnsiStyle -> String
+renderDoc = unpack . renderStrict . layoutPretty defaultLayoutOptions
 
-  repl []
+docErr :: String -> Doc AnsiStyle
+docErr msg = annotate (bold <> color Red) (pretty "Error: ") <> annotate (color Red) (pretty msg)
+
+docInfo :: String -> Doc AnsiStyle
+docInfo = annotate (colorDull Cyan) . pretty
+
+docSolution :: Map String Term -> Doc AnsiStyle
+docSolution s
+  | Map.null s = annotate (bold <> color Green) (pretty "true.")
+  | otherwise =
+      hsep $
+        punctuate comma
+          [ annotate (color Yellow) (pretty v)
+              <+> annotate (colorDull White) (pretty "=")
+              <+> annotate (color Cyan) (pretty (show t))
+            | (v, t) <- Map.toList s
+          ]
+
+-- ─── Completion ───────────────────────────────────────────────────────────────
+
+progPreds :: Program -> [String]
+progPreds prog =
+  nub
+    [ name
+      | c <- prog,
+        let name = case clauseHead c of
+              Atom f -> f
+              Compound f _ -> f
+              _ -> "",
+        not (null name)
+    ]
+
+prologComplete :: IORef Program -> CompletionFunc IO
+prologComplete progRef input@(leftRev, _) = do
+  let left = reverse leftRev
+  if ":load " `isPrefixOf` left
+    then completeFilename input
+    else completeWord Nothing " \t,(.?" completeIdent input
   where
-    repl prog = do
-      putStr "?> "
-      hFlush stdout
+    completeIdent word = do
+      prog <- readIORef progRef
+      let preds = nub (progPreds prog ++ [":quit", ":load"])
+      return [simpleCompletion p | p <- preds, word `isPrefixOf` p]
 
-      done <- isEOF
+-- ─── REPL ─────────────────────────────────────────────────────────────────────
 
-      if done
-        then putStrLn "Bye!"
-        else do
-          line <- getLine
+runPrologRepl :: IO ()
+runPrologRepl = do
+  progRef <- newIORef ([] :: Program)
+  let settings =
+        (defaultSettings :: Settings IO)
+          { complete = prologComplete progRef,
+            historyFile = Just ".nprolog_history"
+          }
+  runInputT settings $ do
+    outputStrLn $
+      renderDoc $
+        annotate (bold <> color Cyan) (pretty "NewProlog")
+          <> annotate (colorDull White) (pretty " — clauses: ")
+          <> annotate (colorDull Yellow) (pretty "color red.")
+          <+> annotate (colorDull White) (pretty "queries: ")
+          <> annotate (colorDull Yellow) (pretty "color X?")
+    outputStrLn $
+      renderDoc $
+        annotate (colorDull White) (pretty "Commands: :load <file>   :quit   Ctrl+D")
+    loop progRef
+  where
+    prompt = renderDoc $ annotate (bold <> color Blue) (pretty "?> ")
 
-          let trimmed = dropWhileEnd (== ' ') line
+    loop progRef = do
+      mline <- getInputLine prompt
+      case mline of
+        Nothing -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+        Just line -> handleLine progRef (dropWhileEnd (== ' ') line)
 
-          case trimmed of
-            ":quit" -> putStrLn "Bye!"
-            _
-              | take 5 trimmed == ":load" -> do
-                  let file = dropWhile (== ' ') (drop 5 trimmed)
-                  contents <- readFile file
-                  case parseProgram contents of
-                    Left err -> putStrLn ("Parse error: " ++ err) >> repl prog
-                    Right prog' -> do
-                      putStrLn ("Loaded " ++ show (length prog') ++ " clauses.")
-                      repl (prog ++ prog')
-              | not (null trimmed) && last trimmed == '?' -> do
-                  let queryStr = init trimmed
-                  case parseGoals queryStr of
-                    Left err -> putStrLn ("Parse error: " ++ err)
-                    Right goals -> do
-                      let solns = solveAll prog goals
-                      if null solns
-                        then putStrLn "false."
-                        else mapM_ (putStrLn . showSolution) solns
-                  repl prog
-              | null trimmed -> repl prog
-              | otherwise -> do
-                  -- Try to parse as a clause
-                  case parseProgram trimmed of
-                    Left err -> putStrLn ("Parse error: " ++ err) >> repl prog
-                    Right clauses -> do
-                      putStrLn ("Added " ++ show (length clauses) ++ " clause(s).")
-                      repl (prog ++ clauses)
+    handleLine progRef trimmed = case trimmed of
+      ":quit" ->
+        outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+      _
+        | take 5 trimmed == ":load" -> do
+            let file = dropWhile (== ' ') (drop 5 trimmed)
+            result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
+            case result of
+              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef
+              Right contents -> case parseProgram contents of
+                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+                Right prog' -> do
+                  liftIO $ modifyIORef progRef (++ prog')
+                  outputStrLn (renderDoc $ docInfo ("Loaded " ++ show (length prog') ++ " clause(s) from " ++ show file ++ "."))
+                  loop progRef
+        | not (null trimmed) && last trimmed == '?' -> do
+            let queryStr = init trimmed
+            case parseGoals queryStr of
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+              Right goals -> do
+                prog <- liftIO (readIORef progRef)
+                let solns = solveAll prog goals
+                if null solns
+                  then outputStrLn (renderDoc $ annotate (bold <> color Red) (pretty "false."))
+                  else mapM_ (outputStrLn . renderDoc . docSolution) solns
+                loop progRef
+        | null trimmed -> loop progRef
+        | otherwise -> do
+            case parseProgram trimmed of
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+              Right clauses -> do
+                liftIO $ modifyIORef progRef (++ clauses)
+                outputStrLn (renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s)."))
+                loop progRef
