@@ -2,5 +2,6 @@ module Main where
 
 import qualified RVAsm
 import qualified FPActors
+import qualified NProlog
 
-main = FPActors.main
+main = NProlog.runPrologRepl

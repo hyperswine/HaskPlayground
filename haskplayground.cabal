@@ -47,6 +47,7 @@ library
     , filepath
     , free
     , hashable
+    , haskeline
     , hedgehog
     , http-conduit
     , linear
@@ -85,6 +86,7 @@ executable haskplayground-exe
     , filepath
     , free
     , hashable
+    , haskeline
     , haskplayground
     , hedgehog
     , http-conduit
@@ -109,6 +111,7 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      NPrologTest
       Paths_haskplayground
   hs-source-dirs:
       test
@@ -125,6 +128,7 @@ test-suite haskplayground-test
     , filepath
     , free
     , hashable
+    , haskeline
     , haskplayground
     , hedgehog
     , http-conduit

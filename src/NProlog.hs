@@ -1,16 +1,65 @@
+{-
+  N Prolog syntax
+  lambda prolog like, period terminator
+  Strings are "" which are just list of char codes
+  Chars with ''
+  identifiers lower case
+  variables upper case
+
+  Clauses:
+    pred Var1 Var2 <- goal1 Var1 (compoundterm1 Var2 Var2), goal2.
+    color red.
+
+  Operators:
+    Infix only for most, except negative numbers
+    +, -, /, *, %, ^, =, !=, ., ==
+    1 + 1 --> (plus 1 1)
+    x.y --> (access x y)
+    x = y --> (unify x y)
+    x == y --> (equiv x y)
+    etc.
+
+  Numbers:
+    1, 3.3, -4.4. Integers and decimals
+
+  Lists:
+    [1, 2, 3], [X | Y]
+
+  DCGs:
+    mypred A B C -> p A, d B, c C.
+
+  Comments:
+    #
+
+  Special things:
+    call/2: call(Pred, Args)
+    phrase_from_file/2
+    phrase_to_file/2
+
+  Semantics:
+    Universal modus ponens, typical prolog style semantics of unification and backtracking, DFS search of goals
+    Nothing too different
+    The + and other things use a CLP like thing by default
+
+  NOTES:
+    dont add the other things like assert/1 and cuts or anything
+    X + Y is actually meant to be more like X #+ Y across the FD of Integer from 0..INF
+-}
+
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module NProlog where
 
 import Control.Monad (foldM)
 import Control.Monad.Combinators.Expr
-import Data.List (intercalate, nub)
+import Data.List (dropWhileEnd, intercalate, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe)
 import Data.Void
-import System.IO (BufferMode (..), hFlush, hIsEOF, hSetBuffering, isEOF, stdin, stdout)
+import System.IO (BufferMode (..), hFlush, hSetBuffering, isEOF, stdout)
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -404,7 +453,7 @@ runProlog programSrc querySrc = do
 runPrologRepl = do
   hSetBuffering stdout LineBuffering
 
-  putStrLn "NewProlog REPL. Enter clauses, then query with ?- goal1, goal2."
+  putStrLn "NewProlog REPL. Enter clauses like `color red.` or query with `color X?`"
   putStrLn "Commands: :load <file>, :quit"
 
   repl []
@@ -420,19 +469,21 @@ runPrologRepl = do
         else do
           line <- getLine
 
-          case line of
+          let trimmed = dropWhileEnd (== ' ') line
+
+          case trimmed of
             ":quit" -> putStrLn "Bye!"
             _
-              | take 5 line == ":load" -> do
-                  let file = dropWhile (== ' ') (drop 5 line)
+              | take 5 trimmed == ":load" -> do
+                  let file = dropWhile (== ' ') (drop 5 trimmed)
                   contents <- readFile file
                   case parseProgram contents of
                     Left err -> putStrLn ("Parse error: " ++ err) >> repl prog
                     Right prog' -> do
                       putStrLn ("Loaded " ++ show (length prog') ++ " clauses.")
                       repl (prog ++ prog')
-              | take 2 line == "?-" -> do
-                  let queryStr = dropWhile (== ' ') (drop 2 line)
+              | not (null trimmed) && last trimmed == '?' -> do
+                  let queryStr = init trimmed
                   case parseGoals queryStr of
                     Left err -> putStrLn ("Parse error: " ++ err)
                     Right goals -> do
@@ -441,12 +492,11 @@ runPrologRepl = do
                         then putStrLn "false."
                         else mapM_ (putStrLn . showSolution) solns
                   repl prog
-              | null line -> repl prog
+              | null trimmed -> repl prog
               | otherwise -> do
                   -- Try to parse as a clause
-                  case parseProgram line of
-                    Left err -> putStrLn ("Parse error: " ++ err)
+                  case parseProgram trimmed of
+                    Left err -> putStrLn ("Parse error: " ++ err) >> repl prog
                     Right clauses -> do
                       putStrLn ("Added " ++ show (length clauses) ++ " clause(s).")
                       repl (prog ++ clauses)
-                  repl prog
