@@ -92,6 +92,14 @@ data TopLevel = TLClause Clause | TLQuery [Term] deriving (Show, Eq)
 
 type Program = [Clause]
 
+-- Unfold a cons chain (produced by :: or expandList) into its elements and optional tail.
+unfoldCons :: Term -> ([Term], Maybe Term)
+unfoldCons (Compound "cons" [h, t]) = let (xs, rest) = unfoldCons t in (h : xs, rest)
+unfoldCons (Atom "nil")             = ([], Nothing)
+unfoldCons (TList xs Nothing)       = (xs, Nothing)
+unfoldCons (TList xs (Just r))      = let (ys, rest) = unfoldCons r in (xs ++ ys, rest)
+unfoldCons t                        = ([], Just t)
+
 instance Show Term where
   show (Atom s) = s
   show (Var s) = s
@@ -99,6 +107,9 @@ instance Show Term where
   show (FloatLit d) = show d
   show (CharLit c) = ['\'', c, '\'']
   show (StrLit s) = show s
+  show t@(Compound "cons" _) =
+    let (xs, rest) = unfoldCons t
+    in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
   show (Compound f as) = f ++ " " ++ unwords (map showArg as)
     where
       showArg t@(Compound _ (_ : _)) = "(" ++ show t ++ ")"
@@ -211,7 +222,9 @@ operatorTable =
       InfixL $ binOp "mod" <$ try (symbol "%")
     ],
     [ InfixL $ binOp "plus" <$ try (symbol "+"),
-      InfixL $ binOp "minus" <$ try (symbol "-")
+      InfixL $ binOp "minus" <$ try (symbol "-" <* notFollowedBy (char '>'))
+    ],
+    [ InfixR $ binOp "cons" <$ try (symbol "::")
     ],
     [ InfixN $ binOp "access" <$ try (char '.' *> lookAhead (letterChar <|> char '_'))
     ],
@@ -261,6 +274,11 @@ desugarDCG hd body = Clause hd' body'
     sVars = [Var $ "S" ++ show i | i <- [0 .. n]]
 
     addArgs t sa sb = case t of
+      -- List terminals: [a, b, c] in body means Sa = [a, b, c | Sb]
+      TList [] Nothing    -> Compound "unify" [sa, sb]
+      TList xs  Nothing   -> Compound "unify" [sa, TList xs (Just sb)]
+      TList xs  (Just r)  -> Compound "unify" [sa, TList xs (Just r)] -- non-standard, pass through
+      -- Normal non-terminals
       Atom f -> Compound f [sa, sb]
       Compound f args -> Compound f $ args ++ [sa, sb]
       _ -> Compound "call" [t, sa, sb]
@@ -357,17 +375,27 @@ unify' s (IntLit a) (IntLit b) | a == b = Just s
 unify' s (FloatLit a) (FloatLit b) | a == b = Just s
 unify' s (CharLit a) (CharLit b) | a == b = Just s
 unify' s (StrLit a) (StrLit b) | a == b = Just s
+-- Cons cells produced by :: operator: normalize to TList for unified list handling
+unify' s (Compound "cons" [h, t]) u = unify' s (TList [h] (Just t)) u
+unify' s u (Compound "cons" [h, t]) = unify' s u (TList [h] (Just t))
 -- Compound terms
 unify' s (Compound f1 as1) (Compound f2 as2) | f1 == f2 && length as1 == length as2 = foldM (\s' (a, b) -> unify s' a b) s (zip as1 as2)
--- List unification
-unify' s (TList [] Nothing) (TList [] Nothing) = Just s
-unify' s (TList (x : xs) rest) (TList (y : ys) rest2) = do s' <- unify s x y; unify s' (TList xs rest) (TList ys rest2)
-unify' s (TList [] Nothing) (TList [] (Just t)) = unify s t (TList [] Nothing)
-unify' s (TList [] (Just t)) (TList [] Nothing) = unify s t (TList [] Nothing)
-unify' s (TList [] (Just t)) (TList ys rest) = unify s t (TList ys rest)
-unify' s (TList xs rest) (TList [] (Just t)) = unify s (TList xs rest) t
-unify' s (TList xs rest) t2 = unify s (expandList xs rest) t2
-unify' s t1 (TList xs rest) = unify s t1 (expandList xs rest)
+-- Atom "nil" is the empty list []
+unify' s (Atom "nil") (TList [] Nothing)   = Just s
+unify' s (TList [] Nothing) (Atom "nil")   = Just s
+-- List unification: exhaustive structural cases
+unify' s (TList [] Nothing)  (TList [] Nothing)   = Just s
+unify' s (TList [] Nothing)  (TList [] (Just t))  = unify s t (TList [] Nothing)
+unify' s (TList [] (Just r)) (TList [] Nothing)   = unify s r (TList [] Nothing)
+unify' s (TList [] (Just r)) (TList [] (Just t))  = unify s r t
+unify' s (TList [] Nothing)  (TList (_:_) _)      = Nothing
+unify' s (TList (_:_) _)     (TList [] Nothing)   = Nothing
+unify' s (TList [] (Just r)) (TList ys s2)        = unify s r (TList ys s2)
+unify' s (TList xs r)        (TList [] (Just t))  = unify s (TList xs r) t
+unify' s (TList (x:xs) r)    (TList (y:ys) s2)   = do s' <- unify s x y; unify s' (TList xs r) (TList ys s2)
+-- TList vs any non-variable non-cons non-list term: fail
+unify' s (TList _ _) _ = Nothing
+unify' s _ (TList _ _) = Nothing
 -- OTHERWISE fail
 unify' _ _ _ = Nothing
 
@@ -419,6 +447,13 @@ solveGoals prog s (g : gs) c = case walk s g of
           Atom f -> Compound f args
           Compound f as' -> Compound f (as' ++ args)
           _ -> Compound "call" (pred' : args)
+     in solveGoals prog s (goal : gs) c
+  -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
+  Compound "phrase" [nt, lst] ->
+    let goal = case nt of
+          Atom f        -> Compound f [lst, TList [] Nothing]
+          Compound f as -> Compound f (as ++ [lst, TList [] Nothing])
+          _             -> Compound "call" [nt, lst, TList [] Nothing]
      in solveGoals prog s (goal : gs) c
   Compound "write" [_] -> solveGoals prog s gs c
   Atom "nl" -> solveGoals prog s gs c

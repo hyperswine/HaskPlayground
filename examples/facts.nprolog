@@ -14,3 +14,9 @@ parse_ab -> parse_a, parse_b.
 ab (X :: Y :: Xs) [X, Y] <- X = a, Y = b.
 
 myab AB <- phrase parse_ab AB.
+
+> factorial 5 R?
+> myab [a, b]?
+> myab [a]?
+> myab [a, b, c]?
+> select [a, b, c] R?
