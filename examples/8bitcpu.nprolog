@@ -1,0 +1,187 @@
+# ─── 8-bit CPU Simulator in N Prolog ─────────────────────────────────────────
+#
+# CPU state:  cpu(PC, A, B, ZF, CF)
+#   PC  — program counter (instruction address)
+#   A   — accumulator register (0-255)
+#   B   — B register (0-255)
+#   ZF  — zero flag  (1 = last result was zero,  0 = non-zero)
+#   CF  — carry flag (1 = last add/inc overflowed 8 bits, 0 = no overflow)
+#
+# Program memory:  instr(Address, Instruction)
+#
+# Instruction set:
+#   lda Imm   — A := Imm mod 256, update ZF, clear CF
+#   ldb Imm   — B := Imm mod 256
+#   add       — A := (A + B) mod 256, update ZF and CF
+#   sub       — A := (A - B + 256) mod 256, update ZF, clear CF
+#   inc       — A := (A + 1) mod 256, update ZF and CF
+#   dec       — A := (A - 1 + 256) mod 256, update ZF, clear CF
+#   mova      — A := B, update ZF
+#   movb      — B := A
+#   jmp Addr  — PC := Addr  (unconditional)
+#   jz  Addr  — if ZF=1 then PC := Addr  else PC := PC+1
+#   jnz Addr  — if ZF=0 then PC := Addr  else PC := PC+1
+#   nop       — PC := PC+1, flags unchanged
+#   hlt       — halt: state is unchanged (step is identity)
+
+# ─── Flag helpers ─────────────────────────────────────────────────────────────
+
+# zflag(Value, ZeroFlag)
+zflag 0 1.
+zflag V 0 <- V != 0.
+
+# cflag(Sum8, CarryFlag)  — carry when 8-bit sum overflows
+cflag S C <- C is S / 256.
+
+# ─── Instruction stepping ─────────────────────────────────────────────────────
+
+# lda Imm — load immediate into A
+step (cpu PC _ B _ _) (cpu NPC NA B NZ 0) <-
+  instr PC (lda Imm),
+  NA is Imm % 256,
+  NPC is PC + 1,
+  zflag NA NZ.
+
+# ldb Imm — load immediate into B
+step (cpu PC A _ _ CF) (cpu NPC A NB _ CF) <-
+  instr PC (ldb Imm),
+  NB is Imm % 256,
+  NPC is PC + 1.
+
+# add — A := A + B (8-bit), update ZF and CF
+step (cpu PC A B _ _) (cpu NPC NA B NZ NC) <-
+  instr PC add,
+  Sum is A + B,
+  NA is Sum % 256,
+  NPC is PC + 1,
+  zflag NA NZ,
+  cflag Sum NC.
+
+# sub — A := A - B (wrapping), update ZF, set CF to 0
+step (cpu PC A B _ _) (cpu NPC NA B NZ 0) <-
+  instr PC sub,
+  NA is (A - B + 256) % 256,
+  NPC is PC + 1,
+  zflag NA NZ.
+
+# inc — A := A + 1 (8-bit), update ZF and CF
+step (cpu PC A B _ _) (cpu NPC NA B NZ NC) <-
+  instr PC inc,
+  Sum is A + 1,
+  NA is Sum % 256,
+  NPC is PC + 1,
+  zflag NA NZ,
+  cflag Sum NC.
+
+# dec — A := A - 1 (wrapping), update ZF
+step (cpu PC A B _ _) (cpu NPC NA B NZ 0) <-
+  instr PC dec,
+  NA is (A - 1 + 256) % 256,
+  NPC is PC + 1,
+  zflag NA NZ.
+
+# mova — A := B, update ZF
+step (cpu PC _ B _ _) (cpu NPC B B NZ 0) <-
+  instr PC mova,
+  NPC is PC + 1,
+  zflag B NZ.
+
+# movb — B := A
+step (cpu PC A _ _ CF) (cpu NPC A A _ CF) <-
+  instr PC movb,
+  NPC is PC + 1.
+
+# jmp Addr — unconditional jump
+step (cpu PC A B ZF CF) (cpu Addr A B ZF CF) <-
+  instr PC (jmp Addr).
+
+# jz Addr — jump if ZF = 1
+step (cpu PC A B 1 CF) (cpu Addr A B 1 CF) <-
+  instr PC (jz Addr).
+
+# jz fall-through when ZF = 0
+step (cpu PC A B 0 CF) (cpu NPC A B 0 CF) <-
+  instr PC (jz _),
+  NPC is PC + 1.
+
+# jnz Addr — jump if ZF = 0
+step (cpu PC A B 0 CF) (cpu Addr A B 0 CF) <-
+  instr PC (jnz Addr).
+
+# jnz fall-through when ZF = 1
+step (cpu PC A B 1 CF) (cpu NPC A B 1 CF) <-
+  instr PC (jnz _),
+  NPC is PC + 1.
+
+# nop
+step (cpu PC A B ZF CF) (cpu NPC A B ZF CF) <-
+  instr PC nop,
+  NPC is PC + 1.
+
+# hlt — halt: state does not change
+step (cpu PC A B ZF CF) (cpu PC A B ZF CF) <-
+  instr PC hlt.
+
+# ─── Execution engine ─────────────────────────────────────────────────────────
+
+# run(StateIn, Steps, StateOut)
+# Runs the CPU for exactly Steps instruction cycles.
+run S 0 S.
+run S N SF <-
+  N > 0,
+  step S S1,
+  N1 is N - 1,
+  run S1 N1 SF.
+
+# ─── Example program A: 45 + 200 = 245 ───────────────────────────────────────
+#
+# addr 0:  lda 45   — A = 45
+# addr 1:  ldb 200  — B = 200
+# addr 2:  add      — A = 245, CF = 0  (no overflow)
+# addr 3:  hlt
+#
+# Initial state: cpu(0, 0, 0, 0, 0)
+# Query (3 steps to reach hlt):
+#   run (cpu 0 0 0 0 0) 3 R?
+
+instr 0 (lda 45).
+instr 1 (ldb 200).
+instr 2 add.
+instr 3 hlt.
+
+# ─── Example program B: countdown loop ───────────────────────────────────────
+# (comment out program A's instr facts and uncomment these to run)
+#
+# Counts A down from 5 to 0 using dec and jnz.
+#
+# addr 0:  lda 5    — A = 5
+# addr 1:  dec      — A = A - 1, set ZF when A reaches 0
+# addr 2:  jnz 1    — if ZF=0, jump back to addr 1
+# addr 3:  hlt      — A = 0
+#
+# Steps to reach hlt: 1 (lda) + 5*(dec + jnz or fall-through) = 11 steps
+# Query:
+#   run (cpu 0 0 0 0 0) 11 R?
+#
+# instr 0 (lda 5).
+# instr 1 dec.
+# instr 2 (jnz 1).
+# instr 3 hlt.
+
+# ─── Example program C: overflow detection ───────────────────────────────────
+# (comment out other instr facts and uncomment these)
+#
+# Adds 200 + 100 = 300, which overflows 8 bits: result = 44, CF = 1
+#
+# addr 0:  lda 200
+# addr 1:  ldb 100
+# addr 2:  add       — A = 44, CF = 1
+# addr 3:  hlt
+#
+# Query:
+#   run (cpu 0 0 0 0 0) 3 R?
+#
+# instr 0 (lda 200).
+# instr 1 (ldb 100).
+# instr 2 add.
+# instr 3 hlt.
