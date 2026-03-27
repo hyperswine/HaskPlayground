@@ -1,8 +1,8 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module NPrologTest where
 
-import Data.List (sort)
 import qualified Data.Map.Strict as Map
 import Hedgehog hiding (Var)
 import qualified Hedgehog.Gen as Gen
@@ -14,35 +14,35 @@ import NProlog
 -- ---------------------------------------------------------------------------
 
 -- Run a query against an empty program, return all solutions
-query :: String -> Either String [[( String, String )]]
+query :: String -> Either String [[(String, String)]]
 query qs = case parseGoals qs of
   Left err -> Left err
   Right goals ->
     let prog = []
         solns = solveAll prog goals
-     in Right [ [ (v, show t) | (v, t) <- Map.toList s ] | s <- solns ]
+     in Right [[(v, show t) | (v, t) <- Map.toList s] | s <- solns]
 
 -- Run a query and return the first solution's bindings as a flat map
 queryFirst :: String -> Maybe (Map.Map String String)
 queryFirst qs = case query qs of
   Right (s : _) -> Just (Map.fromList s)
-  _             -> Nothing
+  _ -> Nothing
 
 -- Assert a query has exactly one solution with the given bindings
-assertBindings :: MonadTest m => String -> [(String, String)] -> m ()
+assertBindings :: (MonadTest m) => String -> [(String, String)] -> m ()
 assertBindings qs expected = do
   r <- case query qs of
     Left err -> do annotate err; failure
     Right ss -> pure ss
   case r of
-    []    -> do annotate ("no solutions for: " ++ qs); failure
-    (s:_) -> Map.fromList s === Map.fromList expected
+    [] -> do annotate ("no solutions for: " ++ qs); failure
+    (s : _) -> Map.fromList s === Map.fromList expected
 
 -- Assert a query fails (no solutions)
-assertFails :: MonadTest m => String -> m ()
+assertFails :: (MonadTest m) => String -> m ()
 assertFails qs = case query qs of
   Right [] -> success
-  Right _  -> do annotate ("expected failure but got solutions: " ++ qs); failure
+  Right _ -> do annotate ("expected failure but got solutions: " ++ qs); failure
   Left err -> do annotate err; failure
 
 -- ---------------------------------------------------------------------------
@@ -51,14 +51,14 @@ assertFails qs = case query qs of
 
 genAtomName :: Gen String
 genAtomName = do
-  c  <- Gen.element ['a'..'z']
-  cs <- Gen.list (Range.linear 0 8) (Gen.element $ ['a'..'z'] ++ ['0'..'9'] ++ "_")
+  c <- Gen.element ['a' .. 'z']
+  cs <- Gen.list (Range.linear 0 8) (Gen.element $ ['a' .. 'z'] ++ ['0' .. '9'] ++ "_")
   pure (c : cs)
 
 genVarName :: Gen String
 genVarName = do
-  c  <- Gen.element ['A'..'Z']
-  cs <- Gen.list (Range.linear 0 8) (Gen.element $ ['A'..'Z'] ++ ['a'..'z'] ++ ['0'..'9'])
+  c <- Gen.element ['A' .. 'Z']
+  cs <- Gen.list (Range.linear 0 8) (Gen.element $ ['A' .. 'Z'] ++ ['a' .. 'z'] ++ ['0' .. '9'])
   pure (c : cs)
 
 genSmallInt :: Gen Integer
@@ -77,7 +77,7 @@ prop_parse_atom = property $ do
   name <- forAll genAtomName
   case parseTerm name of
     Right (Atom a) -> a === name
-    _              -> do annotate ("failed to parse atom: " ++ name); failure
+    _ -> do annotate ("failed to parse atom: " ++ name); failure
 
 -- An integer literal round-trips through the parser
 prop_parse_intlit :: Property
@@ -85,7 +85,7 @@ prop_parse_intlit = property $ do
   n <- forAll $ Gen.integral (Range.linear 0 9999)
   case parseTerm (show n) of
     Right (IntLit m) -> m === n
-    _                -> failure
+    _ -> failure
 
 -- A variable name is parsed as Var
 prop_parse_var :: Property
@@ -93,7 +93,7 @@ prop_parse_var = property $ do
   v <- forAll genVarName
   case parseTerm v of
     Right (Var v') -> v' === v
-    _              -> do annotate ("failed to parse var: " ++ v); failure
+    _ -> do annotate ("failed to parse var: " ++ v); failure
 
 -- A list literal parses without error
 prop_parse_list_nocrash :: Property
@@ -102,7 +102,7 @@ prop_parse_list_nocrash = property $ do
   let src = "[" ++ intercalate0 ", " (map show ns) ++ "]"
   case parseTerm src of
     Right _ -> success
-    Left _  -> failure
+    Left _ -> failure
 
 -- Arithmetic expression parses to a compound node
 prop_parse_arith_compound :: Property
@@ -111,7 +111,7 @@ prop_parse_arith_compound = property $ do
   b <- forAll genSmallInt
   case parseTerm (show a ++ " + " ++ show b) of
     Right (Compound "plus" [IntLit x, IntLit y]) -> x === a >> y === b
-    _                                             -> failure
+    _ -> failure
 
 -- Nested arithmetic parses without error
 prop_parse_arith_nested_nocrash :: Property
@@ -121,16 +121,16 @@ prop_parse_arith_nested_nocrash = property $ do
   c <- forAll genSmallInt
   case parseTerm (show a ++ " + " ++ show b ++ " * " ++ show c) of
     Right _ -> success
-    Left _  -> failure
+    Left _ -> failure
 
 -- Comparison operators parse correctly
 prop_parse_comparison_operators :: Property
 prop_parse_comparison_operators = property $ do
-  op  <- forAll $ Gen.element [(">=","gte"),("<=","lte"),(">","gt"),("<","lt")]
+  op <- forAll $ Gen.element [(">=", "gte"), ("<=", "lte"), (">", "gt"), ("<", "lt")]
   let (sym, expected) = op
   case parseTerm ("1 " ++ sym ++ " 2") of
     Right (Compound f [IntLit 1, IntLit 2]) -> f === expected
-    _                                        -> failure
+    _ -> failure
 
 -- Unification operator parses to (unify l r)
 prop_parse_unify_op :: Property
@@ -139,7 +139,7 @@ prop_parse_unify_op = property $ do
   b <- forAll genSmallInt
   case parseTerm (show a ++ " = " ++ show b) of
     Right (Compound "unify" [IntLit x, IntLit y]) -> x === a >> y === b
-    _                                              -> failure
+    _ -> failure
 
 -- Parser does not crash on arbitrary short strings
 prop_parse_nocrash :: Property
@@ -170,7 +170,7 @@ prop_unify_atom_different = property $ do
 -- A variable unifies with any atom
 prop_unify_var_binds_atom :: Property
 prop_unify_var_binds_atom = property $ do
-  v    <- forAll genVarName
+  v <- forAll genVarName
   name <- forAll genAtomName
   case unify emptySubst (Var v) (Atom name) of
     Just s -> deepWalk s (Var v) === Atom name
@@ -216,7 +216,7 @@ prop_deepWalk_chain :: Property
 prop_deepWalk_chain = property $ do
   a <- forAll genSmallInt
   -- X -> Y -> IntLit a
-  let s  = Map.fromList [("X", Var "Y"), ("Y", IntLit a)]
+  let s = Map.fromList [("X", Var "Y"), ("Y", IntLit a)]
   deepWalk s (Var "X") === IntLit a
 
 -- ---------------------------------------------------------------------------
@@ -287,7 +287,7 @@ prop_eval_nested = property $ do
 -- X = atom  binds X
 prop_ground_unify_atom :: Property
 prop_ground_unify_atom = property $ do
-  v    <- forAll genVarName
+  v <- forAll genVarName
   name <- forAll genAtomName
   assertBindings (v ++ " = " ++ name) [(v, name)]
 
@@ -304,7 +304,7 @@ prop_ground_unify_equal_atoms = property $ do
   name <- forAll genAtomName
   case query (name ++ " = " ++ name) of
     Right _ -> success
-    Left _  -> failure
+    Left _ -> failure
 
 -- Unifying two different atoms fails
 prop_ground_unify_diff_atoms :: Property
@@ -344,11 +344,12 @@ prop_clp_single_unknown_mul = property $ do
     ("N = " ++ show a ++ " * X, X = " ++ show b)
     [("N", show n), ("X", show b)]
 
--- Subtraction: N = a - b
+-- Subtraction: N = a - b (only when a >= b so result stays in [0..INF])
 prop_clp_subtraction :: Property
 prop_clp_subtraction = property $ do
-  a <- forAll genSmallInt
   b <- forAll genSmallInt
+  d <- forAll genSmallInt -- d = a - b >= 0
+  let a = b + d
   v <- forAll genVarName
   assertBindings (v ++ " = " ++ show a ++ " - " ++ show b) [(v, show (a - b))]
 
@@ -401,7 +402,7 @@ prop_equiv_equal = property $ do
   n <- forAll genSmallInt
   case query (show n ++ " == " ++ show n) of
     Right _ -> success
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
 
 prop_equiv_unequal :: Property
 prop_equiv_unequal = property $ do
@@ -416,7 +417,7 @@ prop_neq_different = property $ do
   b <- forAll $ Gen.filter (/= a) genSmallInt
   case query (show a ++ " != " ++ show b) of
     Right _ -> success
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
 
 prop_neq_same_fails :: Property
 prop_neq_same_fails = property $ do
@@ -430,11 +431,11 @@ prop_neq_same_fails = property $ do
 -- A fact clause is matched by a goal
 prop_clause_fact :: Property
 prop_clause_fact = property $ do
-  f    <- forAll genAtomName
-  arg  <- forAll genAtomName
+  f <- forAll genAtomName
+  arg <- forAll genAtomName
   let prog = f ++ " " ++ arg ++ "."
   case parseProgram prog of
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
     Right p ->
       let solns = solveAll p [Compound f [Atom arg]]
        in assert (length solns >= 1)
@@ -442,11 +443,11 @@ prop_clause_fact = property $ do
 -- A rule fires using a fact
 prop_clause_rule_fires :: Property
 prop_clause_rule_fires = property $ do
-  base  <- forAll genAtomName
-  rule  <- forAll $ Gen.filter (/= base) genAtomName
+  base <- forAll genAtomName
+  rule <- forAll $ Gen.filter (/= base) genAtomName
   let prog = base ++ " a.\n" ++ rule ++ " X <- " ++ base ++ " X."
   case parseProgram prog of
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
     Right p ->
       let solns = solveAll p [Compound rule [NProlog.Var "Z"]]
        in assert (length solns >= 1)
@@ -464,12 +465,13 @@ prop_builtin_true :: Property
 prop_builtin_true = property $ do
   case query "true" of
     Right _ -> success
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
 
 -- fail/0 never succeeds
 prop_builtin_fail :: Property
-prop_builtin_fail = property $
-  assertFails "fail"
+prop_builtin_fail =
+  property $
+    assertFails "fail"
 
 -- ---------------------------------------------------------------------------
 -- § 8  List unification
@@ -482,17 +484,17 @@ prop_list_head_tail = property $ do
   t1 <- forAll genAtomName
   t2 <- forAll genAtomName
   case query ("H = " ++ h ++ ", T = [" ++ t1 ++ ", " ++ t2 ++ "], [H|T] = [" ++ h ++ ", " ++ t1 ++ ", " ++ t2 ++ "]") of
-    Right (s:_) -> do
+    Right (s : _) -> do
       Map.lookup "H" (Map.fromList s) === Just h
-    Right []    -> do annotate "no solutions"; failure
-    Left e      -> do annotate e; failure
+    Right [] -> do annotate "no solutions"; failure
+    Left e -> do annotate e; failure
 
 -- Empty list unifies with itself
 prop_list_empty_self :: Property
 prop_list_empty_self = property $
   case query "X = [], X = []" of
     Right _ -> success
-    Left e  -> do annotate e; failure
+    Left e -> do annotate e; failure
 
 -- ---------------------------------------------------------------------------
 -- § 9  runProlog IO interface
@@ -502,16 +504,16 @@ prop_runProlog_nocrash :: Property
 prop_runProlog_nocrash = property $ do
   a <- forAll genSmallInt
   b <- forAll genSmallInt
-  result <- evalIO $ runProlog "" ("X = " ++ show a ++ " + " ++ show b)
+  let result = runProlog "" ("X = " ++ show a ++ " + " ++ show b)
   case result of
     Right solns -> assert (length solns >= 1)
-    Left _      -> failure
+    Left _ -> failure
 
 prop_runProlog_false :: Property
 prop_runProlog_false = property $ do
   a <- forAll genAtomName
   b <- forAll $ Gen.filter (/= a) genAtomName
-  result <- evalIO $ runProlog "" (a ++ " = " ++ b)
+  let result = runProlog "" (a ++ " = " ++ b)
   result === Right ["false."]
 
 -- ---------------------------------------------------------------------------
@@ -523,89 +525,95 @@ prop_golden_chain_arithmetic = property $ do
   assertBindings "N = 4 * R, R = 2" [("N", "8"), ("R", "2")]
 
 prop_golden_both_ground_reduce :: Property
-prop_golden_both_ground_reduce = property $
-  assertBindings "N = 4 * 2" [("N", "8")]
+prop_golden_both_ground_reduce =
+  property $
+    assertBindings "N = 4 * 2" [("N", "8")]
 
 prop_golden_prefix_known :: Property
-prop_golden_prefix_known = property $
-  assertBindings "R = 2, N = R * 2" [("N", "4"), ("R", "2")]
+prop_golden_prefix_known =
+  property $
+    assertBindings "R = 2, N = R * 2" [("N", "4"), ("R", "2")]
 
 prop_golden_backsolve :: Property
-prop_golden_backsolve = property $
-  assertBindings "N = 4 * R, N = 12" [("N", "12"), ("R", "3")]
+prop_golden_backsolve =
+  property $
+    assertBindings "N = 4 * R, N = 12" [("N", "12"), ("R", "3")]
 
 prop_golden_three_unknowns :: Property
-prop_golden_three_unknowns = property $
-  assertBindings "A = B * C, B = 2, C = 3" [("A", "6"), ("B", "2"), ("C", "3")]
+prop_golden_three_unknowns =
+  property $
+    assertBindings "A = B * C, B = 2, C = 3" [("A", "6"), ("B", "2"), ("C", "3")]
 
 -- ---------------------------------------------------------------------------
 -- Helpers (local)
 -- ---------------------------------------------------------------------------
 
 intercalate0 :: String -> [String] -> String
-intercalate0 _ []     = ""
-intercalate0 _ [x]    = x
-intercalate0 sep (x:xs) = x ++ sep ++ intercalate0 sep xs
+intercalate0 _ [] = ""
+intercalate0 _ [x] = x
+intercalate0 sep (x : xs) = x ++ sep ++ intercalate0 sep xs
 
 -- ---------------------------------------------------------------------------
 -- Groups exported for Spec.hs
 -- ---------------------------------------------------------------------------
 
 nPrologGroup :: Group
-nPrologGroup = Group "NProlog"
-  [ ("parse: atom roundtrip",                prop_parse_atom)
-  , ("parse: intlit roundtrip",              prop_parse_intlit)
-  , ("parse: var roundtrip",                 prop_parse_var)
-  , ("parse: list no crash",                 prop_parse_list_nocrash)
-  , ("parse: arith compound",                prop_parse_arith_compound)
-  , ("parse: nested arith no crash",         prop_parse_arith_nested_nocrash)
-  , ("parse: comparison operators",          prop_parse_comparison_operators)
-  , ("parse: unify operator",                prop_parse_unify_op)
-  , ("parse: no crash on arbitrary input",   prop_parse_nocrash)
-  , ("unify: atom self",                     prop_unify_atom_self)
-  , ("unify: atom different",                prop_unify_atom_different)
-  , ("unify: var binds atom",                prop_unify_var_binds_atom)
-  , ("unify: var self",                      prop_unify_var_self)
-  , ("unify: intlit equal/unequal",          prop_unify_intlit)
-  , ("unify: compound match",                prop_unify_compound_match)
-  , ("unify: compound diff functor",         prop_unify_compound_diff_functor)
-  , ("deepWalk: chain resolution",           prop_deepWalk_chain)
-  , ("eval: intlit identity",                prop_eval_intlit)
-  , ("eval: plus",                           prop_eval_plus)
-  , ("eval: minus",                          prop_eval_minus)
-  , ("eval: mul",                            prop_eval_mul)
-  , ("eval: div",                            prop_eval_div)
-  , ("eval: mod",                            prop_eval_mod)
-  , ("eval: free var => Nothing",            prop_eval_free_var)
-  , ("eval: nested expression",              prop_eval_nested)
-  , ("query: unify atom",                    prop_ground_unify_atom)
-  , ("query: unify int",                     prop_ground_unify_int)
-  , ("query: equal atoms succeed",           prop_ground_unify_equal_atoms)
-  , ("query: different atoms fail",          prop_ground_unify_diff_atoms)
-  , ("CLP: both ground",                     prop_clp_both_ground)
-  , ("CLP: deferred mul",                    prop_clp_deferred_mul)
-  , ("CLP: single unknown mul",              prop_clp_single_unknown_mul)
-  , ("CLP: subtraction",                     prop_clp_subtraction)
-  , ("CLP: gt comparison",                   prop_clp_gt)
-  , ("CLP: lt comparison",                   prop_clp_lt)
-  , ("CLP: is/2 eval",                       prop_is_eval)
-  , ("query: variable chain",                prop_unify_chain_via_query)
-  , ("query: equiv equal",                   prop_equiv_equal)
-  , ("query: equiv unequal fails",           prop_equiv_unequal)
-  , ("query: neq different",                 prop_neq_different)
-  , ("query: neq same fails",               prop_neq_same_fails)
-  , ("clause: fact matched",                 prop_clause_fact)
-  , ("clause: rule fires",                   prop_clause_rule_fires)
-  , ("clause: unknown predicate fails",      prop_clause_unknown_predicate)
-  , ("builtin: true succeeds",               prop_builtin_true)
-  , ("builtin: fail fails",                  prop_builtin_fail)
-  , ("list: head/tail unification",          prop_list_head_tail)
-  , ("list: empty list self-unifies",        prop_list_empty_self)
-  , ("runProlog: no crash",                  prop_runProlog_nocrash)
-  , ("runProlog: false when no solutions",   prop_runProlog_false)
-  , ("golden: N=4*R,R=2 => N=8",            prop_golden_chain_arithmetic)
-  , ("golden: N=4*2 => N=8",                prop_golden_both_ground_reduce)
-  , ("golden: R=2,N=R*2 => N=4",            prop_golden_prefix_known)
-  , ("golden: N=4*R,N=12 => R=3",           prop_golden_backsolve)
-  , ("golden: A=B*C,B=2,C=3 => A=6",        prop_golden_three_unknowns)
-  ]
+nPrologGroup =
+  Group
+    "NProlog"
+    [ ("parse: atom roundtrip", prop_parse_atom),
+      ("parse: intlit roundtrip", prop_parse_intlit),
+      ("parse: var roundtrip", prop_parse_var),
+      ("parse: list no crash", prop_parse_list_nocrash),
+      ("parse: arith compound", prop_parse_arith_compound),
+      ("parse: nested arith no crash", prop_parse_arith_nested_nocrash),
+      ("parse: comparison operators", prop_parse_comparison_operators),
+      ("parse: unify operator", prop_parse_unify_op),
+      ("parse: no crash on arbitrary input", prop_parse_nocrash),
+      ("unify: atom self", prop_unify_atom_self),
+      ("unify: atom different", prop_unify_atom_different),
+      ("unify: var binds atom", prop_unify_var_binds_atom),
+      ("unify: var self", prop_unify_var_self),
+      ("unify: intlit equal/unequal", prop_unify_intlit),
+      ("unify: compound match", prop_unify_compound_match),
+      ("unify: compound diff functor", prop_unify_compound_diff_functor),
+      ("deepWalk: chain resolution", prop_deepWalk_chain),
+      ("eval: intlit identity", prop_eval_intlit),
+      ("eval: plus", prop_eval_plus),
+      ("eval: minus", prop_eval_minus),
+      ("eval: mul", prop_eval_mul),
+      ("eval: div", prop_eval_div),
+      ("eval: mod", prop_eval_mod),
+      ("eval: free var => Nothing", prop_eval_free_var),
+      ("eval: nested expression", prop_eval_nested),
+      ("query: unify atom", prop_ground_unify_atom),
+      ("query: unify int", prop_ground_unify_int),
+      ("query: equal atoms succeed", prop_ground_unify_equal_atoms),
+      ("query: different atoms fail", prop_ground_unify_diff_atoms),
+      ("CLP: both ground", prop_clp_both_ground),
+      ("CLP: deferred mul", prop_clp_deferred_mul),
+      ("CLP: single unknown mul", prop_clp_single_unknown_mul),
+      ("CLP: subtraction", prop_clp_subtraction),
+      ("CLP: gt comparison", prop_clp_gt),
+      ("CLP: lt comparison", prop_clp_lt),
+      ("CLP: is/2 eval", prop_is_eval),
+      ("query: variable chain", prop_unify_chain_via_query),
+      ("query: equiv equal", prop_equiv_equal),
+      ("query: equiv unequal fails", prop_equiv_unequal),
+      ("query: neq different", prop_neq_different),
+      ("query: neq same fails", prop_neq_same_fails),
+      ("clause: fact matched", prop_clause_fact),
+      ("clause: rule fires", prop_clause_rule_fires),
+      ("clause: unknown predicate fails", prop_clause_unknown_predicate),
+      ("builtin: true succeeds", prop_builtin_true),
+      ("builtin: fail fails", prop_builtin_fail),
+      ("list: head/tail unification", prop_list_head_tail),
+      ("list: empty list self-unifies", prop_list_empty_self),
+      ("runProlog: no crash", prop_runProlog_nocrash),
+      ("runProlog: false when no solutions", prop_runProlog_false),
+      ("golden: N=4*R,R=2 => N=8", prop_golden_chain_arithmetic),
+      ("golden: N=4*2 => N=8", prop_golden_both_ground_reduce),
+      ("golden: R=2,N=R*2 => N=4", prop_golden_prefix_known),
+      ("golden: N=4*R,N=12 => R=3", prop_golden_backsolve),
+      ("golden: A=B*C,B=2,C=3 => A=6", prop_golden_three_unknowns)
+    ]
