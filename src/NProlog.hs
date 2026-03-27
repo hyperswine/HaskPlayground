@@ -424,46 +424,52 @@ renameVars m (Compound f as) = Compound f $ map (renameVars m) as
 renameVars m (TList xs rest) = TList (map (renameVars m) xs) (fmap (renameVars m) rest)
 renameVars _ t = t
 
-solve prog goals = solveGoals prog emptySubst goals 0
+-- Maximum clause-attempts per search branch before giving up.
+-- Prevents infinite loops caused by unbounded recursive predicates.
+maxSolverFuel :: Int
+maxSolverFuel = 100000
+
+solve prog goals = solveGoals prog emptySubst goals 0 maxSolverFuel
 
 -- all goals satisfied
-solveGoals _ s [] _ = [s]
-solveGoals prog s (g : gs) c = case walk s g of
+solveGoals _ s [] _ _ = [s]
+solveGoals _ _ _ _ 0 = []
+solveGoals prog s (g : gs) c fuel = case walk s g of
   -- Built-in: unify
-  Compound "unify" [a, b] -> clpfdUnify prog s a b gs c
-  Compound "equiv" [a, b] -> if deepWalk s a == deepWalk s b then solveGoals prog s gs c else []
-  Compound "neq" [a, b] -> if deepWalk s a /= deepWalk s b then solveGoals prog s gs c else []
-  Compound "gt" [a, b] -> numCompareGoal (>) s a b gs prog c
-  Compound "lt" [a, b] -> numCompareGoal (<) s a b gs prog c
-  Compound "gte" [a, b] -> numCompareGoal (>=) s a b gs prog c
-  Compound "lte" [a, b] -> numCompareGoal (<=) s a b gs prog c
+  Compound "unify" [a, b] -> clpfdUnify prog s a b gs c fuel
+  Compound "equiv" [a, b] -> if deepWalk s a == deepWalk s b then solveGoals prog s gs c fuel else []
+  Compound "neq" [a, b] -> if deepWalk s a /= deepWalk s b then solveGoals prog s gs c fuel else []
+  Compound "gt" [a, b] -> numCompareGoal (>) s a b gs prog c fuel
+  Compound "lt" [a, b] -> numCompareGoal (<) s a b gs prog c fuel
+  Compound "gte" [a, b] -> numCompareGoal (>=) s a b gs prog c fuel
+  Compound "lte" [a, b] -> numCompareGoal (<=) s a b gs prog c fuel
   Compound "is" [lhs, rhs] ->
     let val = evalArith s rhs
      in case val of
-          Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c; Nothing -> []
+          Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []
           Nothing -> []
   Compound "call" (pred' : args) ->
     let goal = case pred' of
           Atom f -> Compound f args
           Compound f as' -> Compound f (as' ++ args)
           _ -> Compound "call" (pred' : args)
-     in solveGoals prog s (goal : gs) c
+     in solveGoals prog s (goal : gs) c fuel
   -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
   Compound "phrase" [nt, lst] ->
     let goal = case nt of
           Atom f        -> Compound f [lst, TList [] Nothing]
           Compound f as -> Compound f (as ++ [lst, TList [] Nothing])
           _             -> Compound "call" [nt, lst, TList [] Nothing]
-     in solveGoals prog s (goal : gs) c
-  Compound "write" [_] -> solveGoals prog s gs c
-  Atom "nl" -> solveGoals prog s gs c
-  Atom "true" -> solveGoals prog s gs c
+     in solveGoals prog s (goal : gs) c fuel
+  Compound "write" [_] -> solveGoals prog s gs c fuel
+  Atom "nl" -> solveGoals prog s gs c fuel
+  Atom "true" -> solveGoals prog s gs c fuel
   Atom "fail" -> []
   -- Normal goal: try each clause
-  goal -> concatMap (tryClause prog s goal gs c) prog
+  goal -> concatMap (\clause -> tryClause prog s goal gs c clause fuel) prog
 
-tryClause prog s goal restGoals counter clause
-  | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter'
+tryClause prog s goal restGoals counter clause fuel
+  | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter' (fuel - 1)
   | otherwise = []
   where
     (Clause hd body, counter') = freshenClause counter clause
@@ -488,8 +494,8 @@ toDouble (IntLit n) = fromIntegral n
 toDouble (FloatLit d) = d
 toDouble _ = 0 / 0
 
-numCompareGoal cmp s a b gs prog c = case (evalArith s a, evalArith s b) of
-  (Just va, Just vb) | cmp (toDouble va) (toDouble vb) -> solveGoals prog s gs c
+numCompareGoal cmp s a b gs prog c fuel = case (evalArith s a, evalArith s b) of
+  (Just va, Just vb) | cmp (toDouble va) (toDouble vb) -> solveGoals prog s gs c fuel
   _ -> []
 
 evalArith s t = case deepWalk s t of
@@ -573,38 +579,16 @@ enumerationRange expr target = case expr of
   _ -> [0 .. clpMaxDomain]
 
 -- Resolve the arithmetic constraint  expr = target  against the domain. Returns all solutions via the existing backtracking DFS.
-solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> [Subst]
--- solveArithConstraint prog s expr target restGoals c =
---   let expr' = deepWalk s expr
---       fvs = nub (arithFreeVars expr')
---    in case fvs of
---         [] ->
---           case evalArith s expr' of
---             Just (IntLit n) | n == target -> solveGoals prog s restGoals c
---             _ -> []
---         [v] ->
---           case invertArith s expr' v target of
---             Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c
---             _ -> []
---         _ ->
---           -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
---           let v = head fvs
---               range = enumerationRange expr' target
---            in concatMap
---                 ( \i ->
---                     let s' = Map.insert v (IntLit i) s
---                      in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c
---                 )
---                 range
-solveArithConstraint prog s expr target restGoals c = case fvs of
+solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> Int -> [Subst]
+solveArithConstraint prog s expr target restGoals c fuel = case fvs of
   [] -> case evalArith s expr' of
-    Just (IntLit n) | n == target -> solveGoals prog s restGoals c
+    Just (IntLit n) | n == target -> solveGoals prog s restGoals c fuel
     _ -> []
   [v] -> case invertArith s expr' v target of
-    Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c
+    Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c fuel
     _ -> []
   -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
-  _ -> let v = head fvs; range = enumerationRange expr' target in concatMap (\i -> let s' = Map.insert v (IntLit i) s in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c) range
+  _ -> let v = head fvs; range = enumerationRange expr' target in concatMap (\i -> let s' = Map.insert v (IntLit i) s in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c fuel) range
   where
     expr' = deepWalk s expr
     fvs = nub $ arithFreeVars expr'
@@ -617,25 +601,25 @@ solveArithConstraint prog s expr target restGoals c = case fvs of
 --   which binds the variable to the expression; the constraint is re-evaluated
 --   whenever a subsequent = goal fully resolves both sides.
 -- - Non-arithmetic terms fall back to structural unify unchanged.
-clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> [Subst]
-clpfdUnify prog s lhs rhs restGoals c =
+clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> Int -> [Subst]
+clpfdUnify prog s lhs rhs restGoals c fuel =
   let wa = deepWalk s lhs
       wb = deepWalk s rhs
    in if not (isArithTerm wa) && not (isArithTerm wb)
         then case unify s wa wb of
-          Just s' -> solveGoals prog s' restGoals c
+          Just s' -> solveGoals prog s' restGoals c fuel
           Nothing -> []
         else case (evalArith s wa, evalArith s wb) of
           (Just tv1, Just tv2) ->
-            if tv1 == tv2 then solveGoals prog s restGoals c else []
+            if tv1 == tv2 then solveGoals prog s restGoals c fuel else []
           (Nothing, Just (IntLit n)) ->
-            solveArithConstraint prog s wa n restGoals c
+            solveArithConstraint prog s wa n restGoals c fuel
           (Just (IntLit n), Nothing) ->
-            solveArithConstraint prog s wb n restGoals c
+            solveArithConstraint prog s wb n restGoals c fuel
           _ ->
             -- Deferred or float: fall back to structural unification
             case unify s wa wb of
-              Just s' -> solveGoals prog s' restGoals c
+              Just s' -> solveGoals prog s' restGoals c fuel
               Nothing -> []
 
 -- solveAll prog goals = map normalizeSoln rawSolutions
