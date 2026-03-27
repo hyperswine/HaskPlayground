@@ -50,7 +50,10 @@
     X + Y is actually meant to be more like X #+ Y across the FD of Integer from 0..INF
 -}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+
+{-# HLINT ignore "Replace case with fromMaybe" #-}
 
 module NProlog where
 
@@ -400,10 +403,26 @@ solveGoals prog s (g : gs) c = case walk s g of
   goal -> concatMap (tryClause prog s goal gs c) prog
 
 tryClause prog s goal restGoals counter clause
-  | Just s' <- unify s goal hd = solveGoals prog s' (body ++ restGoals) counter'
+  | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter'
   | otherwise = []
   where
     (Clause hd body, counter') = freshenClause counter clause
+
+-- Eagerly reduce any fully-ground arithmetic sub-expressions in a term.
+-- This ensures goals like `factorial (N - 1) R` with N=5 evaluate
+-- the sub-expression to `factorial 4 R` before head unification.
+normArithTerm :: Subst -> Term -> Term
+normArithTerm s t = case deepWalk s t of
+  Compound f as
+    | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] ->
+        let as' = map (normArithTerm s) as
+            t' = Compound f as'
+         in case evalArith s t' of
+              Just v -> v
+              Nothing -> t'
+  Compound f as -> Compound f (map (normArithTerm s) as)
+  TList xs rest -> TList (map (normArithTerm s) xs) (fmap (normArithTerm s) rest)
+  t' -> t'
 
 toDouble (IntLit n) = fromIntegral n
 toDouble (FloatLit d) = d
@@ -495,6 +514,28 @@ enumerationRange expr target = case expr of
 
 -- Resolve the arithmetic constraint  expr = target  against the domain. Returns all solutions via the existing backtracking DFS.
 solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> [Subst]
+-- solveArithConstraint prog s expr target restGoals c =
+--   let expr' = deepWalk s expr
+--       fvs = nub (arithFreeVars expr')
+--    in case fvs of
+--         [] ->
+--           case evalArith s expr' of
+--             Just (IntLit n) | n == target -> solveGoals prog s restGoals c
+--             _ -> []
+--         [v] ->
+--           case invertArith s expr' v target of
+--             Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c
+--             _ -> []
+--         _ ->
+--           -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
+--           let v = head fvs
+--               range = enumerationRange expr' target
+--            in concatMap
+--                 ( \i ->
+--                     let s' = Map.insert v (IntLit i) s
+--                      in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c
+--                 )
+--                 range
 solveArithConstraint prog s expr target restGoals c = case fvs of
   [] -> case evalArith s expr' of
     Just (IntLit n) | n == target -> solveGoals prog s restGoals c
@@ -518,21 +559,41 @@ solveArithConstraint prog s expr target restGoals c = case fvs of
 -- - Non-arithmetic terms fall back to structural unify unchanged.
 clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> [Subst]
 clpfdUnify prog s lhs rhs restGoals c =
-  if not (isArithTerm wa) && not (isArithTerm wb)
-    then case unify s wa wb of
-      Just s' -> solveGoals prog s' restGoals c
-      Nothing -> []
-    else case (evalArith s wa, evalArith s wb) of
-      (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c else []
-      (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c
-      (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c
-      -- Deferred or float: fall back to structural unification
-      _ -> case unify s wa wb of
-        Just s' -> solveGoals prog s' restGoals c
-        Nothing -> []
-  where
-    wa = deepWalk s lhs
-    wb = deepWalk s rhs
+  let wa = deepWalk s lhs
+      wb = deepWalk s rhs
+   in if not (isArithTerm wa) && not (isArithTerm wb)
+        then case unify s wa wb of
+          Just s' -> solveGoals prog s' restGoals c
+          Nothing -> []
+        else case (evalArith s wa, evalArith s wb) of
+          (Just tv1, Just tv2) ->
+            if tv1 == tv2 then solveGoals prog s restGoals c else []
+          (Nothing, Just (IntLit n)) ->
+            solveArithConstraint prog s wa n restGoals c
+          (Just (IntLit n), Nothing) ->
+            solveArithConstraint prog s wb n restGoals c
+          _ ->
+            -- Deferred or float: fall back to structural unification
+            case unify s wa wb of
+              Just s' -> solveGoals prog s' restGoals c
+              Nothing -> []
+
+-- solveAll prog goals = map normalizeSoln rawSolutions
+--   if not (isArithTerm wa) && not (isArithTerm wb)
+--     then case unify s wa wb of
+--       Just s' -> solveGoals prog s' restGoals c
+--       Nothing -> []
+--     else case (evalArith s wa, evalArith s wb) of
+--       (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c else []
+--       (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c
+--       (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c
+--       -- Deferred or float: fall back to structural unification
+--       _ -> case unify s wa wb of
+--         Just s' -> solveGoals prog s' restGoals c
+--         Nothing -> []
+--   where
+--     wa = deepWalk s lhs
+--     wb = deepWalk s rhs
 
 -- Deep-walk all variable references AND evaluate any fully-ground arithmetic
 -- subterms, so that deferred constraints like N = 4 * R (solved after R = 2)
@@ -551,6 +612,18 @@ solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) 
   where
     queryVars = nub $ concatMap termVars goals
     rawSolutions = solve prog goals
+    normalizeSoln s = Map.filterWithKey (\k _ -> k `elem` queryVars) $ fmap (evalFully s . deepWalk s) s
+    -- Recursively evaluate any ground arithmetic sub-expressions in a value.
+    evalFully s t = case t of
+      Compound f as
+        | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] ->
+            let t' = Compound f (map (evalFully s) as)
+             in case evalArith s t' of
+                  Just v -> v
+                  Nothing -> t'
+      Compound f as -> Compound f (map (evalFully s) as)
+      TList xs rest -> TList (map (evalFully s) xs) (fmap (evalFully s) rest)
+      _ -> t
 
 showSolution s | Map.null s = "true."
 showSolution s = intercalate ", " [v ++ " = " ++ show t | (v, t) <- Map.toList s]
