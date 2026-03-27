@@ -717,7 +717,7 @@ runPrologRepl = do
     outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :quit   Ctrl+D")
     loop progRef
   where
-    prompt = renderDoc $ annotate (bold <> color Blue) (pretty "?> ")
+    prompt = renderDoc $ annotate (bold <> color Blue) (pretty "> ")
 
     loop progRef = do
       mline <- getInputLine prompt
