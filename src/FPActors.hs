@@ -2,6 +2,7 @@
 -- Run:     stack run -- +RTS -N8
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module FPActors where
 
