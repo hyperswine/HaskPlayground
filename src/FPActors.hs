@@ -1,5 +1,5 @@
 -- Compile: stack build --ghc-options="-O2 -threaded"
--- Run:     stack exec -- haskplayground-exe +RTS -N4
+-- Run:     stack run -- +RTS -N8
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TupleSections #-}
 
