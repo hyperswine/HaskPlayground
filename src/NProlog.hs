@@ -48,6 +48,15 @@
   NOTES:
     dont add the other things like assert/1 and cuts or anything
     X + Y is actually meant to be more like X #+ Y across the FD of Integer from 0..INF
+
+  Inline Eval:
+    Use > for top level evaluation
+    > x?
+    queries x in place after the entire file has fully loaded and prints it into the REPL
+
+  NEW:
+    :: and [] for lists
+    phrase/2 for DCGs
 -}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
@@ -78,6 +87,8 @@ import qualified Text.Megaparsec.Char.Lexer as L
 data Term = Atom String | Var String | IntLit Integer | FloatLit Double | CharLit Char | StrLit String | Compound String [Term] | TList [Term] (Maybe Term) deriving (Ord, Eq)
 
 data Clause = Clause {clauseHead :: Term, clauseBody :: [Term]} deriving (Show, Eq)
+
+data TopLevel = TLClause Clause | TLQuery [Term] deriving (Show, Eq)
 
 type Program = [Clause]
 
@@ -265,11 +276,25 @@ desugarDCG hd body = Clause hd' body'
 
 pProgram = sc *> many pClause <* eof
 
+pInlineQuery = do
+  symbol ">"
+  goals <- pGoals
+  symbol "." <|> symbol "?"
+  return goals
+
+pTopLevel = try (TLQuery <$> pInlineQuery) <|> (TLClause <$> pClause)
+
+pFile = sc *> many pTopLevel <* eof
+
 -- CONVERSION FROM PARSEC TO AST
 
 parseProgram input = case parse pProgram "<input>" input of
   Left err -> Left $ errorBundlePretty err
   Right p -> Right p
+
+parseFile input = case parse pFile "<input>" input of
+  Left err -> Left $ errorBundlePretty err
+  Right items -> Right items
 
 parseTerm input = case parse (sc *> pExpr <* eof) "<input>" input of
   Left err -> Left $ errorBundlePretty err
@@ -602,11 +627,11 @@ deepEval :: Subst -> Term -> Term
 deepEval s t = tryEval (deepWalk s t)
   where
     tryEval t' = case evalArith emptySubst t' of
-      Just v  -> v
+      Just v -> v
       Nothing -> case t' of
         Compound f as -> Compound f (map tryEval as)
-        TList xs r    -> TList (map tryEval xs) (fmap tryEval r)
-        _             -> t'
+        TList xs r -> TList (map tryEval xs) (fmap tryEval r)
+        _ -> t'
 
 solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions
   where
@@ -686,15 +711,20 @@ runPrologRepl = do
       ":quit" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
       _
         | take 5 trimmed == ":load" -> do
-            let file = dropWhile (== ' ') (drop 5 trimmed)
+            let raw = dropWhile (== ' ') (drop 5 trimmed)
+                file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
             result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
             case result of
               Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef
-              Right contents -> case parseProgram contents of
+              Right contents -> case parseFile contents of
                 Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
-                Right prog' -> do
-                  liftIO $ modifyIORef progRef (++ prog')
-                  outputStrLn (renderDoc $ docInfo ("Loaded " ++ show (length prog') ++ " clause(s) from " ++ show file ++ "."))
+                Right items -> do
+                  let clauses = [c | TLClause c <- items]
+                      queries = [gs | TLQuery gs <- items]
+                  liftIO $ modifyIORef progRef (++ clauses)
+                  outputStrLn (renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
+                  prog' <- liftIO (readIORef progRef)
+                  mapM_ (runInlineQuery prog') queries
                   loop progRef
         | not (null trimmed) && last trimmed == '?' -> do
             let queryStr = init trimmed
@@ -715,3 +745,13 @@ runPrologRepl = do
                 liftIO $ modifyIORef progRef (++ clauses)
                 outputStrLn (renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s)."))
                 loop progRef
+
+    runInlineQuery prog goals = do
+      let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))
+      outputStrLn $ renderDoc queryLabel
+      let solns = solveAll prog goals
+      if null solns
+        then outputStrLn (renderDoc $ annotate (bold <> color Red) (pretty "false."))
+        else mapM_ (outputStrLn . renderDoc . docSolution) solns
+
+main = runPrologRepl

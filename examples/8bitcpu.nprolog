@@ -185,3 +185,5 @@ instr 3 hlt.
 # instr 1 (ldb 100).
 # instr 2 add.
 # instr 3 hlt.
+
+> run (cpu 0 0 0 0 0) 3 R?

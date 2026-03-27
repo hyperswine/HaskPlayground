@@ -5,4 +5,4 @@ import qualified FPActors
 import qualified NProlog
 import qualified Gameloop
 
-main = Gameloop.main
+main = NProlog.main

@@ -1,2 +1,16 @@
 factorial 0 1.
 factorial N R <- R = R2 * N, factorial (N - 1) R2.
+
+# [] means nil. [a] means cons a nil, [a, b] so on. a :: b means cons a (cons b nil), a :: B means cons a B where B could be another list
+
+select [] [].
+select (X :: Xs) (X :: Res) <- select Xs Res.
+select (X :: Xs) Res <- select Xs Res.
+
+parse_a -> [a].
+parse_b -> [b].
+parse_ab -> parse_a, parse_b.
+
+ab (X :: Y :: Xs) [X, Y] <- X = a, Y = b.
+
+myab AB <- phrase parse_ab AB.
