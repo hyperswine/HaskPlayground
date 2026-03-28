@@ -1,5 +1,11 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-type-defaults #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
+
+{-# HLINT ignore "Replace case with fromMaybe" #-}
+
 {-
   N Prolog syntax
   lambda prolog like, period terminator
@@ -58,11 +64,6 @@
     :: and [] for lists
     phrase/2 for DCGs
 -}
-{-# OPTIONS_GHC -Wno-type-defaults #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# OPTIONS_GHC -Wno-unused-do-bind #-}
-
-{-# HLINT ignore "Replace case with fromMaybe" #-}
 
 module NProlog where
 
@@ -70,7 +71,7 @@ import qualified Control.Exception as CE
 import Control.Monad (foldM)
 import Control.Monad.Combinators.Expr
 import Control.Monad.IO.Class (liftIO)
-import Data.IORef (IORef, modifyIORef, newIORef, readIORef)
+import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import Data.List (dropWhileEnd, intercalate, isPrefixOf, nub)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -95,10 +96,10 @@ type Program = [Clause]
 -- Unfold a cons chain (produced by :: or expandList) into its elements and optional tail.
 unfoldCons :: Term -> ([Term], Maybe Term)
 unfoldCons (Compound "cons" [h, t]) = let (xs, rest) = unfoldCons t in (h : xs, rest)
-unfoldCons (Atom "nil")             = ([], Nothing)
-unfoldCons (TList xs Nothing)       = (xs, Nothing)
-unfoldCons (TList xs (Just r))      = let (ys, rest) = unfoldCons r in (xs ++ ys, rest)
-unfoldCons t                        = ([], Just t)
+unfoldCons (Atom "nil") = ([], Nothing)
+unfoldCons (TList xs Nothing) = (xs, Nothing)
+unfoldCons (TList xs (Just r)) = let (ys, rest) = unfoldCons r in (xs ++ ys, rest)
+unfoldCons t = ([], Just t)
 
 instance Show Term where
   show (Atom s) = s
@@ -109,7 +110,7 @@ instance Show Term where
   show (StrLit s) = show s
   show t@(Compound "cons" _) =
     let (xs, rest) = unfoldCons t
-    in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
+     in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
   show (Compound f as) = f ++ " " ++ unwords (map showArg as)
     where
       showArg t@(Compound _ (_ : _)) = "(" ++ show t ++ ")"
@@ -275,9 +276,9 @@ desugarDCG hd body = Clause hd' body'
 
     addArgs t sa sb = case t of
       -- List terminals: [a, b, c] in body means Sa = [a, b, c | Sb]
-      TList [] Nothing    -> Compound "unify" [sa, sb]
-      TList xs  Nothing   -> Compound "unify" [sa, TList xs (Just sb)]
-      TList xs  (Just r)  -> Compound "unify" [sa, TList xs (Just r)] -- non-standard, pass through
+      TList [] Nothing -> Compound "unify" [sa, sb]
+      TList xs Nothing -> Compound "unify" [sa, TList xs (Just sb)]
+      TList xs (Just r) -> Compound "unify" [sa, TList xs (Just r)] -- non-standard, pass through
       -- Normal non-terminals
       Atom f -> Compound f [sa, sb]
       Compound f args -> Compound f $ args ++ [sa, sb]
@@ -381,18 +382,18 @@ unify' s u (Compound "cons" [h, t]) = unify' s u (TList [h] (Just t))
 -- Compound terms
 unify' s (Compound f1 as1) (Compound f2 as2) | f1 == f2 && length as1 == length as2 = foldM (\s' (a, b) -> unify s' a b) s (zip as1 as2)
 -- Atom "nil" is the empty list []
-unify' s (Atom "nil") (TList [] Nothing)   = Just s
-unify' s (TList [] Nothing) (Atom "nil")   = Just s
+unify' s (Atom "nil") (TList [] Nothing) = Just s
+unify' s (TList [] Nothing) (Atom "nil") = Just s
 -- List unification: exhaustive structural cases
-unify' s (TList [] Nothing)  (TList [] Nothing)   = Just s
-unify' s (TList [] Nothing)  (TList [] (Just t))  = unify s t (TList [] Nothing)
-unify' s (TList [] (Just r)) (TList [] Nothing)   = unify s r (TList [] Nothing)
-unify' s (TList [] (Just r)) (TList [] (Just t))  = unify s r t
-unify' s (TList [] Nothing)  (TList (_:_) _)      = Nothing
-unify' s (TList (_:_) _)     (TList [] Nothing)   = Nothing
-unify' s (TList [] (Just r)) (TList ys s2)        = unify s r (TList ys s2)
-unify' s (TList xs r)        (TList [] (Just t))  = unify s (TList xs r) t
-unify' s (TList (x:xs) r)    (TList (y:ys) s2)   = do s' <- unify s x y; unify s' (TList xs r) (TList ys s2)
+unify' s (TList [] Nothing) (TList [] Nothing) = Just s
+unify' s (TList [] Nothing) (TList [] (Just t)) = unify s t (TList [] Nothing)
+unify' s (TList [] (Just r)) (TList [] Nothing) = unify s r (TList [] Nothing)
+unify' s (TList [] (Just r)) (TList [] (Just t)) = unify s r t
+unify' s (TList [] Nothing) (TList (_ : _) _) = Nothing
+unify' s (TList (_ : _) _) (TList [] Nothing) = Nothing
+unify' s (TList [] (Just r)) (TList ys s2) = unify s r (TList ys s2)
+unify' s (TList xs r) (TList [] (Just t)) = unify s (TList xs r) t
+unify' s (TList (x : xs) r) (TList (y : ys) s2) = do s' <- unify s x y; unify s' (TList xs r) (TList ys s2)
 -- TList vs any non-variable non-cons non-list term: fail
 unify' s (TList _ _) _ = Nothing
 unify' s _ (TList _ _) = Nothing
@@ -457,9 +458,9 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
   Compound "phrase" [nt, lst] ->
     let goal = case nt of
-          Atom f        -> Compound f [lst, TList [] Nothing]
+          Atom f -> Compound f [lst, TList [] Nothing]
           Compound f as -> Compound f (as ++ [lst, TList [] Nothing])
-          _             -> Compound "call" [nt, lst, TList [] Nothing]
+          _ -> Compound "call" [nt, lst, TList [] Nothing]
      in solveGoals prog s (goal : gs) c fuel
   Compound "write" [_] -> solveGoals prog s gs c fuel
   Atom "nl" -> solveGoals prog s gs c fuel
@@ -702,68 +703,88 @@ prologComplete progRef input@(leftRev, _) = do
   where
     completeIdent word = do
       prog <- readIORef progRef
-      let preds = nub (progPreds prog ++ [":quit", ":load"])
+      let preds = nub (progPreds prog ++ [":quit", ":load", ":reload"])
       return [simpleCompletion p | p <- preds, word `isPrefixOf` p]
 
 -- ─── REPL ─────────────────────────────────────────────────────────────────────
 
 runPrologRepl = do
   progRef <- newIORef ([] :: Program)
+  fileRef <- newIORef (Nothing :: Maybe FilePath)
 
   let settings = (defaultSettings :: Settings IO) {complete = prologComplete progRef, historyFile = Just ".nprolog_history"}
 
   runInputT settings $ do
     outputStrLn $ renderDoc $ annotate (bold <> color Cyan) (pretty "NewProlog") <> annotate (colorDull White) (pretty " — clauses: ") <> annotate (colorDull Yellow) (pretty "color red.") <+> annotate (colorDull White) (pretty "queries: ") <> annotate (colorDull Yellow) (pretty "color X?")
-    outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :quit   Ctrl+D")
-    loop progRef
+    outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :reload   :quit   Ctrl+D")
+    loop progRef fileRef
   where
     prompt = renderDoc $ annotate (bold <> color Blue) (pretty "> ")
 
-    loop progRef = do
+    loop progRef fileRef = do
       mline <- getInputLine prompt
 
       case mline of
         Nothing -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
-        Just line -> handleLine progRef (dropWhileEnd (== ' ') line)
+        Just line -> handleLine progRef fileRef (dropWhileEnd (== ' ') line)
 
-    handleLine progRef trimmed = case trimmed of
+    handleLine progRef fileRef trimmed = case trimmed of
       ":quit" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+      ":reload" -> do
+          mfile <- liftIO (readIORef fileRef)
+          case mfile of
+            Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
+            Just file -> do
+              result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
+              case result of
+                Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
+                Right contents -> case parseFile contents of
+                  Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
+                  Right items -> do
+                    let clauses = [c | TLClause c <- items]
+                        queries = [gs | TLQuery gs <- items]
+                    liftIO $ writeIORef progRef clauses
+                    outputStrLn (renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
+                    prog' <- liftIO (readIORef progRef)
+                    mapM_ (runInlineQuery prog') queries
+                    loop progRef fileRef
       _
         | take 5 trimmed == ":load" -> do
             let raw = dropWhile (== ' ') (drop 5 trimmed)
                 file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
             result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
             case result of
-              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef
+              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
               Right contents -> case parseFile contents of
-                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
                 Right items -> do
                   let clauses = [c | TLClause c <- items]
                       queries = [gs | TLQuery gs <- items]
-                  liftIO $ modifyIORef progRef (++ clauses)
+                  liftIO $ writeIORef progRef clauses
+                  liftIO $ writeIORef fileRef (Just file)
                   outputStrLn (renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
                   prog' <- liftIO (readIORef progRef)
                   mapM_ (runInlineQuery prog') queries
-                  loop progRef
+                  loop progRef fileRef
         | not (null trimmed) && last trimmed == '?' -> do
             let queryStr = init trimmed
             case parseGoals queryStr of
-              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
               Right goals -> do
                 prog <- liftIO (readIORef progRef)
                 let solns = solveAll prog goals
                 if null solns
                   then outputStrLn (renderDoc $ annotate (bold <> color Red) (pretty "false."))
                   else mapM_ (outputStrLn . renderDoc . docSolution) solns
-                loop progRef
-        | null trimmed -> loop progRef
+                loop progRef fileRef
+        | null trimmed -> loop progRef fileRef
         | otherwise -> do
             case parseProgram trimmed of
-              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
               Right clauses -> do
                 liftIO $ modifyIORef progRef (++ clauses)
                 outputStrLn (renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s)."))
-                loop progRef
+                loop progRef fileRef
 
     runInlineQuery prog goals = do
       let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))
