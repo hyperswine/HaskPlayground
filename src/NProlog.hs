@@ -81,6 +81,7 @@ import Data.Void
 import Prettyprinter
 import Prettyprinter.Render.Terminal
 import System.Console.Haskeline
+import System.Environment (getArgs)
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -703,7 +704,7 @@ prologComplete progRef input@(leftRev, _) = do
   where
     completeIdent word = do
       prog <- readIORef progRef
-      let preds = nub (progPreds prog ++ [":quit", ":load", ":reload"])
+      let preds = nub (progPreds prog ++ [":quit", ":q", ":load", ":reload", ":r"])
       return [simpleCompletion p | p <- preds, word `isPrefixOf` p]
 
 -- ─── REPL ─────────────────────────────────────────────────────────────────────
@@ -716,8 +717,11 @@ runPrologRepl = do
 
   runInputT settings $ do
     outputStrLn $ renderDoc $ annotate (bold <> color Cyan) (pretty "NewProlog") <> annotate (colorDull White) (pretty " — clauses: ") <> annotate (colorDull Yellow) (pretty "color red.") <+> annotate (colorDull White) (pretty "queries: ") <> annotate (colorDull Yellow) (pretty "color X?")
-    outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :reload   :quit   Ctrl+D")
-    loop progRef fileRef
+    outputStrLn $ renderDoc $ annotate (colorDull White) (pretty "Commands: :load <file>   :reload (:r)   :quit (:q)   Ctrl+D")
+    args <- liftIO getArgs
+    case args of
+      (file : _) -> handleLine progRef fileRef (":load " ++ file)
+      []         -> loop progRef fileRef
   where
     prompt = renderDoc $ annotate (bold <> color Blue) (pretty "> ")
 
@@ -729,8 +733,8 @@ runPrologRepl = do
         Just line -> handleLine progRef fileRef (dropWhileEnd (== ' ') line)
 
     handleLine progRef fileRef trimmed = case trimmed of
-      ":quit" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
-      ":reload" -> do
+      t | t == ":quit" || t == ":q" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+      t | t == ":reload" || t == ":r" -> do
           mfile <- liftIO (readIORef fileRef)
           case mfile of
             Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
