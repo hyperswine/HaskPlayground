@@ -26,8 +26,7 @@ take [H | T] N [H | R] <- N > 0, N1 is N - 1, take T N1 R.
 drop L 0 L.
 drop [_ | T] N R <- N > 0, N1 is N - 1, drop T N1 R.
 
-zip [] _ [].
-zip _ [] [].
+zip [] [] [].
 zip [H1 | T1] [H2 | T2] [pair H1 H2 | R] <- zip T1 T2 R.
 
 sum_list [] 0.
@@ -83,7 +82,7 @@ merge_sorted [H1 | T1] [H2 | T2] [H2 | R] <- H1 > H2,  merge_sorted [H1 | T1] T2
 
 msort [] [].
 msort [X] [X].
-msort L S <- split L L1 L2, msort L1 S1, msort L2 S2, merge_sorted S1 S2 S.
+msort L S <- length L N, N > 1, split L L1 L2, msort L1 S1, msort L2 S2, merge_sorted S1 S2 S.
 
 # ── Permutation ───────────────────────────────────────────────────────────────
 

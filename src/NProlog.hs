@@ -116,7 +116,9 @@ instance Show Term where
     where
       showArg t@(Compound _ (_ : _)) = "(" ++ show t ++ ")"
       showArg t = show t
-  show (TList xs rest) = "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
+  show t@(TList _ _) =
+    let (xs, rest) = unfoldCons t
+     in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
 
 type Parser = Parsec Void String
 
@@ -721,7 +723,7 @@ runPrologRepl = do
     args <- liftIO getArgs
     case args of
       (file : _) -> handleLine progRef fileRef (":load " ++ file)
-      []         -> loop progRef fileRef
+      [] -> loop progRef fileRef
   where
     prompt = renderDoc $ annotate (bold <> color Blue) (pretty "> ")
 
@@ -735,23 +737,23 @@ runPrologRepl = do
     handleLine progRef fileRef trimmed = case trimmed of
       t | t == ":quit" || t == ":q" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
       t | t == ":reload" || t == ":r" -> do
-          mfile <- liftIO (readIORef fileRef)
-          case mfile of
-            Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
-            Just file -> do
-              result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
-              case result of
-                Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
-                Right contents -> case parseFile contents of
-                  Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
-                  Right items -> do
-                    let clauses = [c | TLClause c <- items]
-                        queries = [gs | TLQuery gs <- items]
-                    liftIO $ writeIORef progRef clauses
-                    outputStrLn (renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
-                    prog' <- liftIO (readIORef progRef)
-                    mapM_ (runInlineQuery prog') queries
-                    loop progRef fileRef
+        mfile <- liftIO (readIORef fileRef)
+        case mfile of
+          Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
+          Just file -> do
+            result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
+            case result of
+              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
+              Right contents -> case parseFile contents of
+                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
+                Right items -> do
+                  let clauses = [c | TLClause c <- items]
+                      queries = [gs | TLQuery gs <- items]
+                  liftIO $ writeIORef progRef clauses
+                  outputStrLn (renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
+                  prog' <- liftIO (readIORef progRef)
+                  mapM_ (runInlineQuery prog') queries
+                  loop progRef fileRef
       _
         | take 5 trimmed == ":load" -> do
             let raw = dropWhile (== ' ') (drop 5 trimmed)
