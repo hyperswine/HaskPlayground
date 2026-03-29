@@ -376,3 +376,5 @@ simulateCpu3 n = P.take n $ go initCpuState3
           instr = testProgram3' !! addr
           (s', (nextAddr, ov, od, halted, _, _)) = stepCpu3 s (instr, True)
        in (nextAddr, ov, od, halted) : go s'
+
+-- stack exec clash -- --verilog src/CPU.hs

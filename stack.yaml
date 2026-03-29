@@ -1,9 +1,8 @@
 snapshot: nightly-2024-09-30
-system-ghc: true
 
 packages:
 - .
 
-extra-deps:
+extra-deps: []
 
 allow-newer: true
