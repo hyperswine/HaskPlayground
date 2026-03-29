@@ -30,6 +30,7 @@ library
       Lib
       MyHardware
       NProlog
+      Processor
       RVAsm
   other-modules:
       Paths_haskplayground
