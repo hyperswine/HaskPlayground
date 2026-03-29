@@ -35,19 +35,14 @@ type ClksPerBit3 = Div ClkFreq3 BaudRate3 -- 234
 
 type HalfBit3 = Div ClksPerBit3 2 -- 117
 
--- | 32-bit instruction word.
 type Instr32 = BitVector 32
 
--- | Instruction memory: 1024 words of 32-bit instructions. Clash will infer block RAM when indexed with a registered address.
 type InstrMem = Vec 1024 Instr32
 
--- | Register file: 4 × 32-bit registers.
 type RegFile = Vec 4 (Unsigned 32)
 
--- | PC is 10 bits wide (addresses 0..1023).
 type PC = Unsigned 10
 
--- | Register index: 0..3.
 type RegIdx = Unsigned 2
 
 data RxFSM3 = RxIdle3 | RxStart3 | RxData3 | RxStop3 deriving (Generic, NFDataX, Show, Eq)
@@ -66,7 +61,6 @@ data FifoState3 = FifoState3 {fifoBuf3 :: Vec 16 (BitVector 8), fifoWr3 :: Unsig
 
 initFifoState3 = FifoState3 (repeat 0) 0 0
 
-uartRxT3 :: UartRxState3 -> Bit -> (UartRxState3, (BitVector 8, Bool))
 uartRxT3 s@UartRxState3 {..} rxPin =
   let sync1 = rxPin
       sync2 = rxSync13
@@ -87,7 +81,6 @@ uartRxT3 s@UartRxState3 {..} rxPin =
 uartRx3 :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom (BitVector 8, Bool)
 uartRx3 = mealy uartRxT3 initRxState3
 
-uartTxT3 :: UartTxState3 -> (BitVector 8, Bool) -> (UartTxState3, (Bit, Bool))
 uartTxT3 s@UartTxState3 {..} (dat, send) =
   let clksPB = snatToNum (SNat :: SNat ClksPerBit3) :: Unsigned 9
       busy = txFSM3 /= TxIdle3
@@ -102,32 +95,25 @@ uartTxT3 s@UartTxState3 {..} (dat, send) =
 uartTx3 :: (HiddenClockResetEnable dom) => Signal dom (BitVector 8, Bool) -> Signal dom (Bit, Bool)
 uartTx3 = mealy uartTxT3 initTxState3
 
-fifoEmpty3 :: FifoState3 -> Bool
 fifoEmpty3 FifoState3 {..} = fifoWr3 == fifoRd3
 
-fifoFull3 :: FifoState3 -> Bool
 fifoFull3 FifoState3 {..} = (fifoWr3 + 1) == fifoRd3
 
-fifoPush3 :: FifoState3 -> BitVector 8 -> FifoState3
 fifoPush3 st@FifoState3 {..} b = st {fifoBuf3 = replace fifoWr3 b fifoBuf3, fifoWr3 = fifoWr3 + 1}
 
-fifoPop3 :: FifoState3 -> (FifoState3, BitVector 8)
 fifoPop3 st@FifoState3 {..} = (st {fifoRd3 = fifoRd3 + 1}, fifoBuf3 !! fifoRd3)
 
 -- | Contents of the IF→ID latch. Also carries the branch-predictor prediction made at the end of IF so that EX can compare against the actual outcome.
 data IfIdReg = IfIdReg {ifidValid :: Bool, ifidPC :: PC, ifidInstr :: Instr32, ifidPredTaken :: Bool, ifidPredTarget :: PC} deriving (Generic, NFDataX, Show)
 
-emptyIfId :: IfIdReg
 emptyIfId = IfIdReg False 0 0 False 0
 
 data IdExReg = IdExReg {idexValid :: Bool, idexPC :: PC, idexOpcode :: BitVector 4, idexRd :: RegIdx, idexRsVal :: Unsigned 32, idexImm24 :: Unsigned 32, idexPredTaken :: Bool, idexPredTarget :: PC} deriving (Generic, NFDataX, Show)
 
-emptyIdEx :: IdExReg
 emptyIdEx = IdExReg False 0 0 0 0 0 False 0
 
 data CpuState3 = CpuState3 {cpu3PC :: PC, cpu3Regs :: RegFile, cpu3Halt :: Bool, cpu3IfId :: IfIdReg, cpu3IdEx :: IdExReg, cpu3OutValid :: Bool, cpu3OutData :: BitVector 8, cpu3BrActual :: Bool, cpu3BrTarget :: PC} deriving (Generic, NFDataX, Show)
 
-initCpuState3 :: CpuState3
 initCpuState3 = CpuState3 {cpu3PC = 0, cpu3Regs = repeat 0, cpu3Halt = False, cpu3IfId = emptyIfId, cpu3IdEx = emptyIdEx, cpu3OutValid = False, cpu3OutData = 0, cpu3BrActual = False, cpu3BrTarget = 0}
 
 branchPredict :: Instr32 -> PC -> (Bool, PC)
@@ -139,6 +125,7 @@ stepCpu3 s@CpuState3 {..} (bramOut, en)
   | cpu3Halt = (s {cpu3OutValid = False, cpu3BrActual = False}, (cpu3PC, False, 0, True, False, 0))
   -- Clock-enable low: freeze all state
   | not en = (s {cpu3OutValid = False, cpu3BrActual = False}, (cpu3PC, False, 0, False, False, 0))
+  -- Main step: one clock cycle
   | otherwise =
       let idex = cpu3IdEx
           (acc_rd, _acc_pc, acc_halt, acc_ov, acc_od, brActual, brTarget, squash) =
@@ -178,40 +165,15 @@ stepCpu3 s@CpuState3 {..} (bramOut, en)
                     mispred = brTk /= exPredTk || (brTk && brTg /= exPredTg)
                     sq = mispred
 
-                    (ov, od) = case op of
-                      0x7 -> (True, slice d7 d0 (pack rsVal))
-                      _ -> (False, 0)
-
+                    (ov, od) = case op of 0x7 -> (True, slice d7 d0 (pack rsVal)); _ -> (False, 0)
                     halt' = op == 0x8
-
                     pc' = if brTk then brTg else cpu3PC
                  in (regs', pc', halt', ov, od, brTk, brTg, sq)
               else (cpu3Regs, cpu3PC, False, False, 0, False, 0, False)
 
           ifid = cpu3IfId
-          idex' =
-            if squash || not (ifidValid ifid)
-              then emptyIdEx
-              else
-                let instr = ifidInstr ifid
-                    opcodeF = slice d31 d28 instr
-                    rdF = unpack (slice d27 d26 instr) :: RegIdx
-                    rsF = unpack (slice d25 d24 instr) :: RegIdx
-                    imm24F = resize (unpack (slice d23 d0 instr) :: Unsigned 24) :: Unsigned 32
-                    rsRaw = cpu3Regs !! rsF
-                    exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6]
-                    exRd = idexRd idex
-                    rsVal = if exWritesRd && exRd == rsF then cpu3Regs !! rsF else rsRaw
-                 in IdExReg {idexValid = True, idexPC = ifidPC ifid, idexOpcode = opcodeF, idexRd = rdF, idexRsVal = rsVal, idexImm24 = imm24F, idexPredTaken = ifidPredTaken ifid, idexPredTarget = ifidPredTarget ifid}
-
-          idex'' =
-            if idexValid idex'
-              then
-                let rsF' = unpack (slice d25 d24 (ifidInstr ifid)) :: RegIdx
-                    exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6 :: BitVector 4]
-                    forwardVal = if exWritesRd && idexRd idex == rsF' then acc_rd !! idexRd idex else acc_rd !! rsF'
-                 in idex' {idexRsVal = forwardVal}
-              else idex'
+          idex' = if squash || not (ifidValid ifid) then emptyIdEx else let instr = ifidInstr ifid; opcodeF = slice d31 d28 instr; rdF = unpack (slice d27 d26 instr) :: RegIdx; rsF = unpack (slice d25 d24 instr) :: RegIdx; imm24F = resize (unpack (slice d23 d0 instr) :: Unsigned 24) :: Unsigned 32; rsRaw = cpu3Regs !! rsF; exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6]; exRd = idexRd idex; rsVal = if exWritesRd && exRd == rsF then cpu3Regs !! rsF else rsRaw in IdExReg {idexValid = True, idexPC = ifidPC ifid, idexOpcode = opcodeF, idexRd = rdF, idexRsVal = rsVal, idexImm24 = imm24F, idexPredTaken = ifidPredTaken ifid, idexPredTarget = ifidPredTarget ifid}
+          idex'' = if idexValid idex' then let rsF' = unpack (slice d25 d24 (ifidInstr ifid)) :: RegIdx; exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6 :: BitVector 4]; forwardVal = if exWritesRd && idexRd idex == rsF' then acc_rd !! idexRd idex else acc_rd !! rsF' in idex' {idexRsVal = forwardVal} else idex'
 
           nextSeqPC = cpu3PC + 1
 
@@ -222,20 +184,16 @@ stepCpu3 s@CpuState3 {..} (bramOut, en)
           s' = s {cpu3PC = nextPC, cpu3Regs = acc_rd, cpu3Halt = acc_halt, cpu3IfId = ifid', cpu3IdEx = idex'', cpu3OutValid = acc_ov, cpu3OutData = acc_od, cpu3BrActual = brActual, cpu3BrTarget = brTarget}
        in (s', (nextPC, acc_ov, acc_od, acc_halt, brActual, brTarget))
 
-data ProgFSM = PgIdle | PgLoad | PgRun | PgSendDone
-  deriving (Generic, NFDataX, Show, Eq)
+data ProgFSM = PgIdle | PgLoad | PgRun | PgSendDone deriving (Generic, NFDataX, Show, Eq)
 
 data TopState3 = TopState3 {ctrlFSM3 :: ProgFSM, progByteIdx :: Unsigned 12, progWordAcc :: BitVector 32, cpu3Rst :: Bool, led3Latch :: BitVector 8, out3Pending :: Bool, out3PendDat :: BitVector 8, runTimeout3 :: Unsigned 16} deriving (Generic, NFDataX, Show)
 
-initTopState3 :: TopState3
 initTopState3 = TopState3 {ctrlFSM3 = PgIdle, progByteIdx = 0, progWordAcc = 0, cpu3Rst = True, led3Latch = 0xFF, out3Pending = False, out3PendDat = 0, runTimeout3 = 0}
 
 data SysState3 = SysState3 {sTop3 :: TopState3, sCpu3 :: CpuState3, sFifo3 :: FifoState3, sRx3 :: UartRxState3, sTx3 :: UartTxState3} deriving (Generic, NFDataX, Show)
 
-initSysState3 :: SysState3
 initSysState3 = SysState3 initTopState3 initCpuState3 initFifoState3 initRxState3 initTxState3
 
-sysStep3 :: SysState3 -> (Bit, Instr32) -> (SysState3, ((Bit, BitVector 6), PC, Maybe (PC, Instr32)))
 sysStep3 SysState3 {..} (rxPin, bramOut) =
   let top = sTop3
       cpu0 = sCpu3
@@ -311,8 +269,7 @@ testProgram3 = testProgram3'
 
 testProgram3' = let nop = mkInstr3NoReg 0x0 0; base = repeat nop :: InstrMem in replace (0 :: Unsigned 10) (mkInstr3 0x1 0 0 5) $ replace (1 :: Unsigned 10) (mkInstr3 0x1 1 0 3) $ replace (2 :: Unsigned 10) (mkInstr3 0x2 2 0 0) $ replace (3 :: Unsigned 10) (mkInstr3 0x2 2 2 3) $ replace (4 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (5 :: Unsigned 10) (mkInstr3 0x3 3 2 2) $ replace (6 :: Unsigned 10) (mkInstr3 0x4 3 3 7) $ replace (7 :: Unsigned 10) (mkInstr3 0x5 3 3 1) $ replace (8 :: Unsigned 10) (mkInstr3 0x7 0 3 0) $ replace (9 :: Unsigned 10) (mkInstr3 0x1 0 0 0) $ replace (10 :: Unsigned 10) (mkInstr3 0xA 0 0 12) $ replace (11 :: Unsigned 10) (mkInstr3 0x8 0 0 0) $ replace (12 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (13 :: Unsigned 10) (mkInstr3 0x8 0 0 0) base
 
--- | Write testProgram3' to prog.hex for use with blockRamFile.
--- Run once from GHCi: writeProgHex
+-- | Write testProgram3' to prog.hex for use with blockRamFile. Run once from GHCi: writeProgHex
 writeProgHex :: P.IO ()
 writeProgHex = do
   let instrs = testProgram3' :: InstrMem
