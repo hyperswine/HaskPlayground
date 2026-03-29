@@ -447,11 +447,9 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   Compound "lt" [a, b] -> numCompareGoal (<) s a b gs prog c fuel
   Compound "gte" [a, b] -> numCompareGoal (>=) s a b gs prog c fuel
   Compound "lte" [a, b] -> numCompareGoal (<=) s a b gs prog c fuel
-  Compound "is" [lhs, rhs] ->
-    let val = evalArith s rhs
-     in case val of
-          Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []
-          Nothing -> []
+  Compound "is" [lhs, rhs] -> case evalArith s rhs of
+    Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []
+    Nothing -> []
   Compound "call" (pred' : args) ->
     let goal = case pred' of
           Atom f -> Compound f args
@@ -527,18 +525,15 @@ numBinOp iop fop s a b = case (evalArith s a, evalArith s b) of
 
 -- ─── CLP(FD) over Integer [0..INF] ──────────────────────────────────────────────────
 
-arithOps :: [String]
 arithOps = ["plus", "minus", "mul", "div", "mod", "^"]
 
 -- True when the term is structurally an arithmetic expression (not a bare variable or atom)
-isArithTerm :: Term -> Bool
 isArithTerm (IntLit _) = True
 isArithTerm (FloatLit _) = True
 isArithTerm (Compound f [_, _]) = f `elem` arithOps
 isArithTerm _ = False
 
 -- Free variable names within an arithmetic expression (call on a deepWalked term)
-arithFreeVars :: Term -> [String]
 arithFreeVars (Var v) | v /= "_" = [v]
 arithFreeVars (Compound f [a, b]) | f `elem` arithOps = arithFreeVars a ++ arithFreeVars b
 arithFreeVars _ = []
@@ -625,8 +620,8 @@ deepEval s t = tryEval (deepWalk s t)
     tryEval t' = case evalArith emptySubst t' of
       Just v -> v
       Nothing -> case t' of
-        Compound f as -> Compound f (map tryEval as)
-        TList xs r -> TList (map tryEval xs) (fmap tryEval r)
+        Compound f as -> Compound f $ map tryEval as
+        TList xs r -> TList (map tryEval xs) $ fmap tryEval r
         _ -> t'
 
 solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions
@@ -704,13 +699,13 @@ runPrologRepl = do
       mline <- getInputLine prompt
 
       case mline of
-        Nothing -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
-        Just line -> handleLine progRef fileRef (dropWhileEnd (== ' ') line)
+        Nothing -> outputStrLn $ renderDoc $ annotate (colorDull Cyan) (pretty "Bye!")
+        Just line -> handleLine progRef fileRef $ dropWhileEnd (== ' ') line
 
     handleLine progRef fileRef trimmed = case trimmed of
-      t | t == ":quit" || t == ":q" -> outputStrLn (renderDoc $ annotate (colorDull Cyan) (pretty "Bye!"))
+      t | t == ":quit" || t == ":q" -> outputStrLn $ renderDoc $ annotate (colorDull Cyan) (pretty "Bye!")
       t | t == ":reload" || t == ":r" -> do
-        mfile <- liftIO (readIORef fileRef)
+        mfile <- liftIO $ readIORef fileRef
         case mfile of
           Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
           Just file -> do
@@ -723,7 +718,7 @@ runPrologRepl = do
                   let clauses = [c | TLClause c <- items]
                       queries = [gs | TLQuery gs <- items]
                   liftIO $ writeIORef progRef clauses
-                  outputStrLn (renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
+                  outputStrLn $ renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
                   prog' <- liftIO (readIORef progRef)
                   mapM_ (runInlineQuery prog') queries
                   loop progRef fileRef
@@ -741,8 +736,8 @@ runPrologRepl = do
                       queries = [gs | TLQuery gs <- items]
                   liftIO $ writeIORef progRef clauses
                   liftIO $ writeIORef fileRef (Just file)
-                  outputStrLn (renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ "."))
-                  prog' <- liftIO (readIORef progRef)
+                  outputStrLn $ renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
+                  prog' <- liftIO $ readIORef progRef
                   mapM_ (runInlineQuery prog') queries
                   loop progRef fileRef
         | not (null trimmed) && last trimmed == '?' -> do
@@ -750,11 +745,9 @@ runPrologRepl = do
             case parseGoals queryStr of
               Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
               Right goals -> do
-                prog <- liftIO (readIORef progRef)
+                prog <- liftIO $ readIORef progRef
                 let solns = solveAll prog goals
-                if null solns
-                  then outputStrLn (renderDoc $ annotate (bold <> color Red) (pretty "false."))
-                  else mapM_ (outputStrLn . renderDoc . docSolution) solns
+                if null solns then outputStrLn $ renderDoc $ annotate (bold <> color Red) (pretty "false.") else mapM_ (outputStrLn . renderDoc . docSolution) solns
                 loop progRef fileRef
         | null trimmed -> loop progRef fileRef
         | otherwise -> do
@@ -762,15 +755,13 @@ runPrologRepl = do
               Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
               Right clauses -> do
                 liftIO $ modifyIORef progRef (++ clauses)
-                outputStrLn (renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s)."))
+                outputStrLn $ renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s).")
                 loop progRef fileRef
 
     runInlineQuery prog goals = do
       let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))
       outputStrLn $ renderDoc queryLabel
       let solns = solveAll prog goals
-      if null solns
-        then outputStrLn (renderDoc $ annotate (bold <> color Red) (pretty "false."))
-        else mapM_ (outputStrLn . renderDoc . docSolution) solns
+      if null solns then outputStrLn $ renderDoc $ annotate (bold <> color Red) (pretty "false.") else mapM_ (outputStrLn . renderDoc . docSolution) solns
 
 main = runPrologRepl
