@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -15,27 +16,15 @@ module Processor where
 
 import Clash.Annotations.TopEntity ()
 import Clash.Prelude hiding (take)
-import Data.Proxy (Proxy (..))
+import qualified Data.Bits as Bits
+import Numeric (showHex)
 import qualified Prelude as P
 
-createDomain vSystem{vName="Dom27", vPeriod=37037}
+createDomain vSystem {vName = "Dom27", vPeriod = 37037}
 
 {-# ANN
   topEntity3
-  ( Synthesize
-      { t_name = "top3",
-        t_inputs =
-          [ PortName "clk",
-            PortName "uart_rx_pin"
-          ],
-        t_output =
-          PortProduct
-            ""
-            [ PortName "uart_tx_pin",
-              PortName "led"
-            ]
-      }
-  )
+  (Synthesize {t_name = "top3", t_inputs = [PortName "clk", PortName "uart_rx_pin"], t_output = PortProduct "" [PortName "uart_tx_pin", PortName "led"]})
   #-}
 
 type ClkFreq3 = 27_000_000
@@ -82,33 +71,14 @@ uartRxT3 s@UartRxState3 {..} rxPin =
   let sync1 = rxPin
       sync2 = rxSync13
       sampled = rxSync23
-      clksPB = fromIntegral (natVal (Proxy :: Proxy ClksPerBit3)) :: Unsigned 9
-      half = fromIntegral (natVal (Proxy :: Proxy HalfBit3)) :: Unsigned 9
+      clksPB = snatToNum (SNat :: SNat ClksPerBit3) :: Unsigned 9
+      half = snatToNum (SNat :: SNat HalfBit3) :: Unsigned 9
 
       (fsm', cnt', bitIdx', shift', valid') = case rxFSM3 of
-        RxIdle3 ->
-          if sampled == 0
-            then (RxStart3, 0, 0, rxShift3, False)
-            else (RxIdle3, 0, 0, rxShift3, False)
-        RxStart3 ->
-          if rxCnt3 == half - 1
-            then
-              if sampled == 0
-                then (RxData3, 0, 0, rxShift3, False)
-                else (RxIdle3, 0, 0, rxShift3, False)
-            else (RxStart3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
-        RxData3 ->
-          if rxCnt3 == clksPB - 1
-            then
-              let shifted = pack sampled ++# slice d7 d1 rxShift3
-               in if rxBitIdx3 == 7
-                    then (RxStop3, 0, rxBitIdx3, shifted, False)
-                    else (RxData3, 0, rxBitIdx3 + 1, shifted, False)
-            else (RxData3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
-        RxStop3 ->
-          if rxCnt3 == clksPB - 1
-            then (RxIdle3, 0, 0, rxShift3, sampled == 1)
-            else (RxStop3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
+        RxIdle3 -> if sampled == 0 then (RxStart3, 0, 0, rxShift3, False) else (RxIdle3, 0, 0, rxShift3, False)
+        RxStart3 -> if rxCnt3 == half - 1 then if sampled == 0 then (RxData3, 0, 0, rxShift3, False) else (RxIdle3, 0, 0, rxShift3, False) else (RxStart3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
+        RxData3 -> if rxCnt3 == clksPB - 1 then let shifted = pack sampled ++# slice d7 d1 rxShift3 in if rxBitIdx3 == 7 then (RxStop3, 0, rxBitIdx3, shifted, False) else (RxData3, 0, rxBitIdx3 + 1, shifted, False) else (RxData3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
+        RxStop3 -> if rxCnt3 == clksPB - 1 then (RxIdle3, 0, 0, rxShift3, sampled == 1) else (RxStop3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
 
       dataOut = if valid' then shift' else rxData3
       s' = s {rxFSM3 = fsm', rxCnt3 = cnt', rxBitIdx3 = bitIdx', rxShift3 = shift', rxSync13 = sync1, rxSync23 = sync2, rxData3 = dataOut, rxValid3 = valid'}
@@ -119,20 +89,12 @@ uartRx3 = mealy uartRxT3 initRxState3
 
 uartTxT3 :: UartTxState3 -> (BitVector 8, Bool) -> (UartTxState3, (Bit, Bool))
 uartTxT3 s@UartTxState3 {..} (dat, send) =
-  let clksPB = fromIntegral (natVal (Proxy :: Proxy ClksPerBit3)) :: Unsigned 9
+  let clksPB = snatToNum (SNat :: SNat ClksPerBit3) :: Unsigned 9
       busy = txFSM3 /= TxIdle3
       (fsm', cnt', bitIdx', shift', pin') = case txFSM3 of
         TxIdle3 -> if send && not busy then (TxStart3, 0, 0, dat, 1) else (TxIdle3, txCnt3, txBitIdx3, txShift3, 1)
         TxStart3 -> if txCnt3 == clksPB - 1 then (TxData3, 0, 0, txShift3, 0) else (TxStart3, txCnt3 + 1, txBitIdx3, txShift3, 0)
-        TxData3 ->
-          let bit0 = lsb txShift3
-              shifted = 0 ++# slice d7 d1 txShift3
-           in if txCnt3 == clksPB - 1
-                then
-                  if txBitIdx3 == 7
-                    then (TxStop3, 0, txBitIdx3, shifted, bit0)
-                    else (TxData3, 0, txBitIdx3 + 1, shifted, bit0)
-                else (TxData3, txCnt3 + 1, txBitIdx3, txShift3, bit0)
+        TxData3 -> let bit0 = lsb txShift3; shifted = 0 ++# slice d7 d1 txShift3 in if txCnt3 == clksPB - 1 then if txBitIdx3 == 7 then (TxStop3, 0, txBitIdx3, shifted, bit0) else (TxData3, 0, txBitIdx3 + 1, shifted, bit0) else (TxData3, txCnt3 + 1, txBitIdx3, txShift3, bit0)
         TxStop3 -> if txCnt3 == clksPB - 1 then (TxIdle3, 0, txBitIdx3, txShift3, 1) else (TxStop3, txCnt3 + 1, txBitIdx3, txShift3, 1)
       s' = s {txFSM3 = fsm', txCnt3 = cnt', txBitIdx3 = bitIdx', txShift3 = shift', txPinLvl3 = pin'}
    in (s', (pin', busy))
@@ -337,13 +299,7 @@ sysStep3 SysState3 {..} (rxPin, bramOut) =
    in (sys', ((txPinLvl3 tx', led), bramRdAddr, bramWrCmd))
 
 topEntity3 :: Clock Dom27 -> Signal Dom27 Bit -> Signal Dom27 (Bit, BitVector 6)
-topEntity3 clk rxPin =
-  withClockResetEnable clk resetGen enableGen
-    $ let fullOut = mealy sysStep3 initSysState3 (bundle (rxPin, bramOut))
-          rdAddr = (\(_, a, _) -> a) <$> fullOut
-          wrCmd = (\(_, _, w) -> w) <$> fullOut
-          bramOut = blockRam (testProgram3' :: InstrMem) rdAddr wrCmd
-       in (\(x, _, _) -> x) <$> fullOut
+topEntity3 clk rxPin = withClockResetEnable clk resetGen enableGen $ let fullOut = mealy sysStep3 initSysState3 (bundle (rxPin, bramOut)); rdAddr = (\(_, a, _) -> a) <$> fullOut; wrCmd = (\(_, _, w) -> w) <$> fullOut; bramOut = blockRamFile (SNat @1024) "prog.hex" rdAddr wrCmd in (\(x, _, _) -> x) <$> fullOut
 
 mkInstr3 :: BitVector 4 -> RegIdx -> RegIdx -> BitVector 24 -> Instr32
 mkInstr3 op rd rs imm = op ++# pack rd ++# pack rs ++# imm
@@ -353,31 +309,15 @@ mkInstr3NoReg op imm = op ++# (0 :: BitVector 4) ++# imm
 
 testProgram3 = testProgram3'
 
-testProgram3' =
-  let nop = mkInstr3NoReg 0x0 0
-      base = repeat nop :: InstrMem
-   in replace (0 :: Unsigned 10) (mkInstr3 0x1 0 0 5)
-        $ replace (1 :: Unsigned 10) (mkInstr3 0x1 1 0 3)
-        $ replace (2 :: Unsigned 10) (mkInstr3 0x2 2 0 0)
-        $ replace (3 :: Unsigned 10) (mkInstr3 0x2 2 2 3)
-        $ replace (4 :: Unsigned 10) (mkInstr3 0x7 0 2 0)
-        $ replace (5 :: Unsigned 10) (mkInstr3 0x3 3 2 2)
-        $ replace (6 :: Unsigned 10) (mkInstr3 0x4 3 3 7)
-        $ replace (7 :: Unsigned 10) (mkInstr3 0x5 3 3 1)
-        $ replace (8 :: Unsigned 10) (mkInstr3 0x7 0 3 0)
-        $ replace (9 :: Unsigned 10) (mkInstr3 0x1 0 0 0)
-        $ replace (10 :: Unsigned 10) (mkInstr3 0xA 0 0 12)
-        $ replace (11 :: Unsigned 10) (mkInstr3 0x8 0 0 0)
-        $ replace (12 :: Unsigned 10) (mkInstr3 0x7 0 2 0)
-        $ replace (13 :: Unsigned 10) (mkInstr3 0x8 0 0 0) base
+testProgram3' = let nop = mkInstr3NoReg 0x0 0; base = repeat nop :: InstrMem in replace (0 :: Unsigned 10) (mkInstr3 0x1 0 0 5) $ replace (1 :: Unsigned 10) (mkInstr3 0x1 1 0 3) $ replace (2 :: Unsigned 10) (mkInstr3 0x2 2 0 0) $ replace (3 :: Unsigned 10) (mkInstr3 0x2 2 2 3) $ replace (4 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (5 :: Unsigned 10) (mkInstr3 0x3 3 2 2) $ replace (6 :: Unsigned 10) (mkInstr3 0x4 3 3 7) $ replace (7 :: Unsigned 10) (mkInstr3 0x5 3 3 1) $ replace (8 :: Unsigned 10) (mkInstr3 0x7 0 3 0) $ replace (9 :: Unsigned 10) (mkInstr3 0x1 0 0 0) $ replace (10 :: Unsigned 10) (mkInstr3 0xA 0 0 12) $ replace (11 :: Unsigned 10) (mkInstr3 0x8 0 0 0) $ replace (12 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (13 :: Unsigned 10) (mkInstr3 0x8 0 0 0) base
+
+-- | Write testProgram3' to prog.hex for use with blockRamFile.
+-- Run once from GHCi: writeProgHex
+writeProgHex :: P.IO ()
+writeProgHex = do
+  let instrs = testProgram3' :: InstrMem
+      hexLine (w :: P.Int) = P.concatMap (\i -> showHex (Bits.shiftR w (28 - i * 4) Bits..&. 0xF) "") [0 .. 7 :: P.Int]
+  P.writeFile "prog.hex" $ P.unlines $ P.map (hexLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
 
 simulateCpu3 :: Int -> [(PC, Bool, BitVector 8, Bool)]
-simulateCpu3 n = P.take n $ go initCpuState3
-  where
-    go s =
-      let addr = cpu3PC s
-          instr = testProgram3' !! addr
-          (s', (nextAddr, ov, od, halted, _, _)) = stepCpu3 s (instr, True)
-       in (nextAddr, ov, od, halted) : go s'
-
--- stack exec clash -- --verilog src/CPU.hs
+simulateCpu3 n = P.take n $ go initCpuState3 where go s = let addr = cpu3PC s; instr = testProgram3' !! addr; (s', (nextAddr, ov, od, halted, _, _)) = stepCpu3 s (instr, True) in (nextAddr, ov, od, halted) : go s'
