@@ -5,11 +5,11 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 {-# HLINT ignore "Redundant if" #-}
@@ -21,12 +21,12 @@ import Clash.Prelude hiding (take)
 import Data.Proxy (Proxy (..))
 import qualified Prelude as P
 
--- numeric underscores and datakinds through Nat 27m
+-- Numeric underscores and datakinds through Nat 27m
 type ClkFreq = 27_000_000
 
 type BaudRate = 115_200
 
--- static division, 234 clocks per bit
+-- Static division, 234 clocks per bit
 type ClksPerBit = Div ClkFreq BaudRate
 
 type HalfBit = Div ClksPerBit 2
@@ -37,12 +37,12 @@ type ROM = Vec 16 Instruction
 
 data RxFSM = RxIdle | RxStart | RxData | RxStop deriving (Generic, NFDataX, Show, Eq)
 
--- baud counter + 2-stage metastability synchroniser + one-cycle pulse when byte ready
+-- Baud counter + 2-stage metastability synchroniser + one-cycle pulse when byte ready
 data UartRxState = UartRxState {rxFSM :: RxFSM, rxCnt :: Unsigned 9, rxBitIdx :: Unsigned 3, rxShift :: BitVector 8, rxSync1 :: Bit, rxSync2 :: Bit, rxData :: BitVector 8, rxValid :: Bool} deriving (Generic, NFDataX, Show)
 
 initRxState = UartRxState RxIdle 0 0 0 1 1 0 False
 
--- very similar to Rx, cause they have to be symmetric
+-- Very similar to Rx, cause they have to be symmetric
 data TxFSM = TxIdle | TxStart | TxData | TxStop deriving (Generic, NFDataX, Show, Eq)
 
 -- NEED TO TRACK current TX line level
@@ -52,7 +52,7 @@ initTxState = UartTxState {txFSM = TxIdle, txCnt = 0, txBitIdx = 0, txShift = 0,
 
 data FifoState = FifoState {fifoBuf :: Vec 16 (BitVector 8), fifoWr :: Unsigned 4, fifoRd :: Unsigned 4} deriving (Generic, NFDataX, Show)
 
--- repeat is a neat trick to have just all xs for the entire bitvec
+-- Repeat is a neat trick to have just all xs for the entire bitvec
 initFifoState = FifoState (repeat 0) 0 0
 
 -- NFDATAX is just the exception, good for simulation
@@ -167,11 +167,11 @@ stepCpuCore s@CpuState {..} (romData, en) = (s', (pc2, outValid1, outData1, halt
 
     s' = s {cpuACC = acc1, cpuPC = pc2, cpuHalt = halt1, idValid = idValidFinal, idOpcode = idOpcode2, idImm8 = idImm82, idDest = idDest2, exValid = exValid1, exOpcode = exOpcode1, exDest = exDest1, exACC = exACC1, exPhase = exPhase1, exPartial = exPartial1, cpuOutValid = outValid1, cpuOutData = outData1}
 
--- CIRCULAR BUFFER FUNCTIONALITIES. Notice !!, + and such are all using Clash's implementations
+-- FIFO based CIRCULAR BUFFER FUNCTIONALITIES. Notice !!, + and such are all using Clash's implementations
 
 fifoEmpty FifoState {..} = fifoWr == fifoRd
 
-fifoFull FifoState {..} = (fifoWr + 1) == fifoRd
+fifoFull FifoState {..} = fifoWr + 1 == fifoRd
 
 fifoPush st@FifoState {..} b = st {fifoBuf = replace fifoWr b fifoBuf, fifoWr = fifoWr + 1}
 
@@ -187,7 +187,7 @@ initSysState = SysState initTopState initCpuState initFifoState initRxState init
 sysStep :: SysState -> Bit -> (SysState, (Bit, BitVector 6))
 sysStep SysState {..} rxPin = (sys', (txPinOut, led))
   where
-    -- just so we can refer to them locally in a intent perserving way
+    -- Just so we can refer to them locally in a intent perserving way
     top = sTop
     cpu0 = sCpu
     fifo = sFifo
@@ -233,8 +233,7 @@ sysStep SysState {..} rxPin = (sys', (txPinOut, led))
         then fifoPush fifo3 0x4B
         else fifo3
 
-    -- LED latch
-
+    -- LED latch for displaying output
     ledLatch' = if cpuOV then pack cpuOD else ledLatch top
     top3 = top2 {ledLatch = ledLatch'}
     txPinOut = txPinLvl tx'
