@@ -478,9 +478,7 @@ tryClause prog s goal restGoals counter clause fuel
   where
     (Clause hd body, counter') = freshenClause counter clause
 
--- Eagerly reduce any fully-ground arithmetic sub-expressions in a term.
--- This ensures goals like `factorial (N - 1) R` with N=5 evaluate
--- the sub-expression to `factorial 4 R` before head unification.
+-- Eagerly reduce any fully-ground arithmetic sub-expressions in a term. This ensures goals like `factorial (N - 1) R` with N=5 evaluate the sub-expression to `factorial 4 R` before head unification.
 normArithTerm :: Subst -> Term -> Term
 normArithTerm s t = case deepWalk s t of
   Compound f as
@@ -614,38 +612,13 @@ clpfdUnify prog s lhs rhs restGoals c fuel =
           Just s' -> solveGoals prog s' restGoals c fuel
           Nothing -> []
         else case (evalArith s wa, evalArith s wb) of
-          (Just tv1, Just tv2) ->
-            if tv1 == tv2 then solveGoals prog s restGoals c fuel else []
-          (Nothing, Just (IntLit n)) ->
-            solveArithConstraint prog s wa n restGoals c fuel
-          (Just (IntLit n), Nothing) ->
-            solveArithConstraint prog s wb n restGoals c fuel
-          _ ->
-            -- Deferred or float: fall back to structural unification
-            case unify s wa wb of
-              Just s' -> solveGoals prog s' restGoals c fuel
-              Nothing -> []
+          (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c fuel else []
+          (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c fuel
+          (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c fuel
+          -- Deferred or float: fall back to structural unification
+          _ -> case unify s wa wb of Just s' -> solveGoals prog s' restGoals c fuel; Nothing -> []
 
--- solveAll prog goals = map normalizeSoln rawSolutions
---   if not (isArithTerm wa) && not (isArithTerm wb)
---     then case unify s wa wb of
---       Just s' -> solveGoals prog s' restGoals c
---       Nothing -> []
---     else case (evalArith s wa, evalArith s wb) of
---       (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c else []
---       (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c
---       (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c
---       -- Deferred or float: fall back to structural unification
---       _ -> case unify s wa wb of
---         Just s' -> solveGoals prog s' restGoals c
---         Nothing -> []
---   where
---     wa = deepWalk s lhs
---     wb = deepWalk s rhs
-
--- Deep-walk all variable references AND evaluate any fully-ground arithmetic
--- subterms, so that deferred constraints like N = 4 * R (solved after R = 2)
--- display as N = 8 rather than N = mul 4 2.
+-- Deep-walk all variable references AND evaluate any fully-ground arithmetic subterms, so that deferred constraints like N = 4 * R (solved after R = 2) display as N = 8 rather than N = mul 4 2.
 deepEval :: Subst -> Term -> Term
 deepEval s t = tryEval (deepWalk s t)
   where
