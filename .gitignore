@@ -6,3 +6,4 @@ NOTES.txt
 .nprolog_history
 *.hex
 verilog/
+.vscode/

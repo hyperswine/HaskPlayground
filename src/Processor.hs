@@ -24,16 +24,16 @@ createDomain vSystem {vName = "Dom27", vPeriod = 37037}
 
 {-# ANN
   topEntity3
-  (Synthesize {t_name = "top3", t_inputs = [PortName "clk", PortName "uart_rx_pin"], t_output = PortProduct "" [PortName "uart_tx_pin", PortName "led"]})
+  (Synthesize {t_name = "top", t_inputs = [PortName "clk", PortName "uart_rx_pin"], t_output = PortProduct "" [PortName "uart_tx_pin", PortName "led"]})
   #-}
 
 type ClkFreq3 = 27_000_000
 
 type BaudRate3 = 115_200
 
-type ClksPerBit3 = Div ClkFreq3 BaudRate3 -- 234
+type ClksPerBit3 = Div ClkFreq3 BaudRate3
 
-type HalfBit3 = Div ClksPerBit3 2 -- 117
+type HalfBit3 = Div ClksPerBit3 2
 
 type Instr32 = BitVector 32
 
@@ -75,6 +75,7 @@ uartRxT3 s@UartRxState3 {..} rxPin =
         RxStop3 -> if rxCnt3 == clksPB - 1 then (RxIdle3, 0, 0, rxShift3, sampled == 1) else (RxStop3, rxCnt3 + 1, rxBitIdx3, rxShift3, False)
 
       dataOut = if valid' then shift' else rxData3
+
       s' = s {rxFSM3 = fsm', rxCnt3 = cnt', rxBitIdx3 = bitIdx', rxShift3 = shift', rxSync13 = sync1, rxSync23 = sync2, rxData3 = dataOut, rxValid3 = valid'}
    in (s', (dataOut, valid'))
 
@@ -89,6 +90,7 @@ uartTxT3 s@UartTxState3 {..} (dat, send) =
         TxStart3 -> if txCnt3 == clksPB - 1 then (TxData3, 0, 0, txShift3, 0) else (TxStart3, txCnt3 + 1, txBitIdx3, txShift3, 0)
         TxData3 -> let bit0 = lsb txShift3; shifted = 0 ++# slice d7 d1 txShift3 in if txCnt3 == clksPB - 1 then if txBitIdx3 == 7 then (TxStop3, 0, txBitIdx3, shifted, bit0) else (TxData3, 0, txBitIdx3 + 1, shifted, bit0) else (TxData3, txCnt3 + 1, txBitIdx3, txShift3, bit0)
         TxStop3 -> if txCnt3 == clksPB - 1 then (TxIdle3, 0, txBitIdx3, txShift3, 1) else (TxStop3, txCnt3 + 1, txBitIdx3, txShift3, 1)
+
       s' = s {txFSM3 = fsm', txCnt3 = cnt', txBitIdx3 = bitIdx', txShift3 = shift', txPinLvl3 = pin'}
    in (s', (pin', busy))
 
@@ -103,7 +105,6 @@ fifoPush3 st@FifoState3 {..} b = st {fifoBuf3 = replace fifoWr3 b fifoBuf3, fifo
 
 fifoPop3 st@FifoState3 {..} = (st {fifoRd3 = fifoRd3 + 1}, fifoBuf3 !! fifoRd3)
 
--- | Contents of the IF→ID latch. Also carries the branch-predictor prediction made at the end of IF so that EX can compare against the actual outcome.
 data IfIdReg = IfIdReg {ifidValid :: Bool, ifidPC :: PC, ifidInstr :: Instr32, ifidPredTaken :: Bool, ifidPredTarget :: PC} deriving (Generic, NFDataX, Show)
 
 emptyIfId = IfIdReg False 0 0 False 0
@@ -119,6 +120,7 @@ initCpuState3 = CpuState3 {cpu3PC = 0, cpu3Regs = repeat 0, cpu3Halt = False, cp
 branchPredict :: Instr32 -> PC -> (Bool, PC)
 branchPredict _instr _fetchPC = (False, 0)
 
+-- THE CPU STEPPER ONLY CONCERNS CPU, not uart or memory links
 stepCpu3 :: CpuState3 -> (Instr32, Bool) -> (CpuState3, (PC, Bool, BitVector 8, Bool, Bool, PC))
 stepCpu3 s@CpuState3 {..} (bramOut, en)
   -- Halted: freeze everything
@@ -164,7 +166,6 @@ stepCpu3 s@CpuState3 {..} (bramOut, en)
 
                     mispred = brTk /= exPredTk || (brTk && brTg /= exPredTg)
                     sq = mispred
-
                     (ov, od) = case op of 0x7 -> (True, slice d7 d0 (pack rsVal)); _ -> (False, 0)
                     halt' = op == 0x8
                     pc' = if brTk then brTg else cpu3PC
@@ -174,11 +175,8 @@ stepCpu3 s@CpuState3 {..} (bramOut, en)
           ifid = cpu3IfId
           idex' = if squash || not (ifidValid ifid) then emptyIdEx else let instr = ifidInstr ifid; opcodeF = slice d31 d28 instr; rdF = unpack (slice d27 d26 instr) :: RegIdx; rsF = unpack (slice d25 d24 instr) :: RegIdx; imm24F = resize (unpack (slice d23 d0 instr) :: Unsigned 24) :: Unsigned 32; rsRaw = cpu3Regs !! rsF; exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6]; exRd = idexRd idex; rsVal = if exWritesRd && exRd == rsF then cpu3Regs !! rsF else rsRaw in IdExReg {idexValid = True, idexPC = ifidPC ifid, idexOpcode = opcodeF, idexRd = rdF, idexRsVal = rsVal, idexImm24 = imm24F, idexPredTaken = ifidPredTaken ifid, idexPredTarget = ifidPredTarget ifid}
           idex'' = if idexValid idex' then let rsF' = unpack (slice d25 d24 (ifidInstr ifid)) :: RegIdx; exWritesRd = idexValid idex && idexOpcode idex `elem` [0x1, 0x2, 0x3, 0x4, 0x5, 0x6 :: BitVector 4]; forwardVal = if exWritesRd && idexRd idex == rsF' then acc_rd !! idexRd idex else acc_rd !! rsF' in idex' {idexRsVal = forwardVal} else idex'
-
           nextSeqPC = cpu3PC + 1
-
           (predTk, predTg) = branchPredict bramOut cpu3PC
-
           (nextPC, ifid') = if squash then (brTarget, emptyIfId) else if predTk then (predTg, IfIdReg {ifidValid = True, ifidPC = cpu3PC, ifidInstr = bramOut, ifidPredTaken = predTk, ifidPredTarget = predTg}) else (nextSeqPC, IfIdReg {ifidValid = True, ifidPC = cpu3PC, ifidInstr = bramOut, ifidPredTaken = False, ifidPredTarget = nextSeqPC})
 
           s' = s {cpu3PC = nextPC, cpu3Regs = acc_rd, cpu3Halt = acc_halt, cpu3IfId = ifid', cpu3IdEx = idex'', cpu3OutValid = acc_ov, cpu3OutData = acc_od, cpu3BrActual = brActual, cpu3BrTarget = brTarget}
@@ -202,55 +200,21 @@ sysStep3 SysState3 {..} (rxPin, bramOut) =
 
       (rx', (rxByte, rxVld)) = uartRxT3 sRx3 rxPin
       cpuEn = ctrlFSM3 top == PgRun && not (out3Pending top)
-
       (cpu1, (_nextPC, cpuOV, cpuOD, cpuHalted, _brActual, _brTarget)) = if cpu3Rst top then (initCpuState3, (0, False, 0, False, False, 0)) else stepCpu3 cpu0 (bramOut, cpuEn)
-
       txBusy = txFSM3 tx /= TxIdle3
-
       (fifo1, txDat, txSend) = if not (fifoEmpty3 fifo) && not txBusy then let (f', b) = fifoPop3 fifo in (f', b, True) else (fifo, 0, False)
-
       (tx', _) = uartTxT3 tx (txDat, txSend)
-
-      (fifo2, top1) =
-        if out3Pending top && not (fifoFull3 fifo1)
-          then (fifoPush3 fifo1 (out3PendDat top), top {out3Pending = False})
-          else (fifo1, top)
+      (fifo2, top1) = if out3Pending top && not (fifoFull3 fifo1) then (fifoPush3 fifo1 (out3PendDat top), top {out3Pending = False}) else (fifo1, top)
 
       (top2, fifo3, cpu2, bramWrCmd) = case ctrlFSM3 top1 of
-        PgIdle ->
-          let top'
-                | not rxVld = top1 {cpu3Rst = True}
-                | rxByte == 0x50 = top1 {ctrlFSM3 = PgLoad, progByteIdx = 0, progWordAcc = 0, cpu3Rst = True}
-                | rxByte == 0x52 = top1 {ctrlFSM3 = PgRun, cpu3Rst = False, runTimeout3 = 0}
-                | rxByte == 0x58 = top1 {cpu3Rst = True}
-                | otherwise = top1 {cpu3Rst = True}
-           in (top', fifo2, cpu1, Nothing)
-        PgLoad ->
-          if rxVld
-            then
-              let bytePos = progByteIdx top1 `mod` 4
-                  shiftAmt = (3 - resize bytePos) * 8 :: Unsigned 5
-                  newByte = resize (unpack rxByte :: Unsigned 8) :: Unsigned 32
-                  wordAcc' = progWordAcc top1 .|. pack (newByte `shiftL` fromIntegral shiftAmt)
-                  wordIdx = truncateB (progByteIdx top1 `div` 4) :: Unsigned 10
-                  wacc' = if bytePos == 3 then 0 else wordAcc'
-                  pgWr = if bytePos == 3 then Just (wordIdx, wordAcc') else Nothing
-                  byteIdx' = progByteIdx top1 + 1
-                  done = progByteIdx top1 == 4095
-               in if done then let f' = if not (fifoFull3 fifo2) then fifoPush3 fifo2 0x4B else fifo2 in (top1 {ctrlFSM3 = PgIdle, progByteIdx = 0, progWordAcc = 0}, f', cpu1, pgWr) else (top1 {progByteIdx = byteIdx', progWordAcc = wacc'}, fifo2, cpu1, pgWr)
-            else (top1, fifo2, cpu1, Nothing)
-        PgRun ->
-          let top1' = top1 {cpu3Rst = False}
-              (fifo2', top2') = if cpuOV then if not (fifoFull3 fifo2) then (fifoPush3 fifo2 cpuOD, top1' {runTimeout3 = 0}) else (fifo2, top1' {out3Pending = True, out3PendDat = cpuOD, runTimeout3 = 0}) else if cpuEn && not (out3Pending top1') then (fifo2, top1' {runTimeout3 = runTimeout3 top1' + 1}) else (fifo2, top1')
-              top2'' = if (cpuHalted || runTimeout3 top2' == 0xFFFF) && not (out3Pending top2') then top2' {ctrlFSM3 = PgSendDone} else top2'
-           in (top2'', fifo2', cpu1, Nothing)
+        PgIdle -> let top' | not rxVld = top1 {cpu3Rst = True} | rxByte == 0x50 = top1 {ctrlFSM3 = PgLoad, progByteIdx = 0, progWordAcc = 0, cpu3Rst = True} | rxByte == 0x52 = top1 {ctrlFSM3 = PgRun, cpu3Rst = False, runTimeout3 = 0} | rxByte == 0x58 = top1 {cpu3Rst = True} | otherwise = top1 {cpu3Rst = True} in (top', fifo2, cpu1, Nothing)
+        PgLoad -> if rxVld then let bytePos = progByteIdx top1 `mod` 4; shiftAmt = (3 - resize bytePos) * 8 :: Unsigned 5; newByte = resize (unpack rxByte :: Unsigned 8) :: Unsigned 32; wordAcc' = progWordAcc top1 .|. pack (newByte `shiftL` fromIntegral shiftAmt); wordIdx = truncateB (progByteIdx top1 `div` 4) :: Unsigned 10; wacc' = if bytePos == 3 then 0 else wordAcc'; pgWr = if bytePos == 3 then Just (wordIdx, wordAcc') else Nothing; byteIdx' = progByteIdx top1 + 1; done = progByteIdx top1 == 4095 in if done then let f' = if not (fifoFull3 fifo2) then fifoPush3 fifo2 0x4B else fifo2 in (top1 {ctrlFSM3 = PgIdle, progByteIdx = 0, progWordAcc = 0}, f', cpu1, pgWr) else (top1 {progByteIdx = byteIdx', progWordAcc = wacc'}, fifo2, cpu1, pgWr) else (top1, fifo2, cpu1, Nothing)
+        PgRun -> let top1' = top1 {cpu3Rst = False}; (fifo2', top2') = if cpuOV then if not (fifoFull3 fifo2) then (fifoPush3 fifo2 cpuOD, top1' {runTimeout3 = 0}) else (fifo2, top1' {out3Pending = True, out3PendDat = cpuOD, runTimeout3 = 0}) else if cpuEn && not (out3Pending top1') then (fifo2, top1' {runTimeout3 = runTimeout3 top1' + 1}) else (fifo2, top1'); top2'' = if (cpuHalted || runTimeout3 top2' == 0xFFFF) && not (out3Pending top2') then top2' {ctrlFSM3 = PgSendDone} else top2' in (top2'', fifo2', cpu1, Nothing)
         PgSendDone -> if not (fifoFull3 fifo2) then (top1 {ctrlFSM3 = PgIdle}, fifoPush3 fifo2 0x44, cpu1, Nothing) else (top1, fifo2, cpu1, Nothing)
 
       fifo4 = if rxVld && rxByte == 0x58 && ctrlFSM3 top == PgIdle && not (fifoFull3 fifo3) then fifoPush3 fifo3 0x4B else fifo3
-
       led3Latch' = if cpuOV then cpuOD else led3Latch top
       top3 = top2 {led3Latch = led3Latch'}
-
       led = complement (slice d5 d0 led3Latch')
       bramRdAddr = cpu3PC cpu2
       sys' = SysState3 top3 cpu2 fifo4 rx' tx'
@@ -271,10 +235,10 @@ testProgram3' = let nop = mkInstr3NoReg 0x0 0; base = repeat nop :: InstrMem in 
 
 -- | Write testProgram3' to prog.hex for use with blockRamFile. Run once from GHCi: writeProgHex
 writeProgHex :: P.IO ()
-writeProgHex = do
-  let instrs = testProgram3' :: InstrMem
-      hexLine (w :: P.Int) = P.concatMap (\i -> showHex (Bits.shiftR w (28 - i * 4) Bits..&. 0xF) "") [0 .. 7 :: P.Int]
-  P.writeFile "prog.hex" $ P.unlines $ P.map (hexLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
+writeProgHex = P.writeFile "prog.hex" $ P.unlines $ P.map (hexLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
+  where
+    instrs = testProgram3' :: InstrMem
+    hexLine (w :: P.Int) = P.concatMap (\i -> showHex (Bits.shiftR w (28 - i * 4) Bits..&. 0xF) "") [0 .. 7 :: P.Int]
 
 simulateCpu3 :: Int -> [(PC, Bool, BitVector 8, Bool)]
 simulateCpu3 n = P.take n $ go initCpuState3 where go s = let addr = cpu3PC s; instr = testProgram3' !! addr; (s', (nextAddr, ov, od, halted, _, _)) = stepCpu3 s (instr, True) in (nextAddr, ov, od, halted) : go s'
