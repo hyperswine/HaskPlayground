@@ -17,7 +17,6 @@ module Processor where
 import Clash.Annotations.TopEntity ()
 import Clash.Prelude hiding (take)
 import qualified Data.Bits as Bits
-import Numeric (showHex)
 import qualified Prelude as P
 
 createDomain vSystem {vName = "Dom27", vPeriod = 37037}
@@ -233,12 +232,13 @@ testProgram3 = testProgram3'
 
 testProgram3' = let nop = mkInstr3NoReg 0x0 0; base = repeat nop :: InstrMem in replace (0 :: Unsigned 10) (mkInstr3 0x1 0 0 5) $ replace (1 :: Unsigned 10) (mkInstr3 0x1 1 0 3) $ replace (2 :: Unsigned 10) (mkInstr3 0x2 2 0 0) $ replace (3 :: Unsigned 10) (mkInstr3 0x2 2 2 3) $ replace (4 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (5 :: Unsigned 10) (mkInstr3 0x3 3 2 2) $ replace (6 :: Unsigned 10) (mkInstr3 0x4 3 3 7) $ replace (7 :: Unsigned 10) (mkInstr3 0x5 3 3 1) $ replace (8 :: Unsigned 10) (mkInstr3 0x7 0 3 0) $ replace (9 :: Unsigned 10) (mkInstr3 0x1 0 0 0) $ replace (10 :: Unsigned 10) (mkInstr3 0xA 0 0 12) $ replace (11 :: Unsigned 10) (mkInstr3 0x8 0 0 0) $ replace (12 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (13 :: Unsigned 10) (mkInstr3 0x8 0 0 0) base
 
--- | Write testProgram3' to prog.hex for use with blockRamFile. Run once from GHCi: writeProgHex
+-- | Write testProgram3' to prog.hex in binary (base-2) format for $readmemb.
+-- Run once from GHCi: writeProgHex
 writeProgHex :: P.IO ()
-writeProgHex = P.writeFile "prog.hex" $ P.unlines $ P.map (hexLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
+writeProgHex = P.writeFile "prog.hex" $ P.unlines $ P.map (binLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
   where
     instrs = testProgram3' :: InstrMem
-    hexLine (w :: P.Int) = P.concatMap (\i -> showHex (Bits.shiftR w (28 - i * 4) Bits..&. 0xF) "") [0 .. 7 :: P.Int]
+    binLine (w :: P.Int) = P.map (\i -> if Bits.testBit w (31 - i) then '1' else '0') [0 .. 31 :: P.Int]
 
 simulateCpu3 :: Int -> [(PC, Bool, BitVector 8, Bool)]
 simulateCpu3 n = P.take n $ go initCpuState3 where go s = let addr = cpu3PC s; instr = testProgram3' !! addr; (s', (nextAddr, ov, od, halted, _, _)) = stepCpu3 s (instr, True) in (nextAddr, ov, od, halted) : go s'
