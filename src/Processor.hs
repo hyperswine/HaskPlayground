@@ -18,6 +18,8 @@ import Clash.Prelude hiding (take)
 import Data.Proxy (Proxy (..))
 import qualified Prelude as P
 
+createDomain vSystem{vName="Dom27", vPeriod=37037}
+
 {-# ANN
   topEntity3
   ( Synthesize
@@ -334,6 +336,7 @@ sysStep3 SysState3 {..} (rxPin, bramOut) =
       sys' = SysState3 top3 cpu2 fifo4 rx' tx'
    in (sys', ((txPinLvl3 tx', led), bramRdAddr, bramWrCmd))
 
+topEntity3 :: Clock Dom27 -> Signal Dom27 Bit -> Signal Dom27 (Bit, BitVector 6)
 topEntity3 clk rxPin =
   withClockResetEnable clk resetGen enableGen
     $ let fullOut = mealy sysStep3 initSysState3 (bundle (rxPin, bramOut))
