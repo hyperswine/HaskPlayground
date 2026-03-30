@@ -12,9 +12,9 @@ module top
     , output wire  uart_tx_pin
     , output wire [5:0] led
     );
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire  c$ds_app_arg;
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   reg [576:0] c$ds_app_arg_0 = {{2'd0,   12'd0,   32'b00000000000000000000000000000000,   1'b1,   8'b11111111,
   1'b0,   8'b00000000,   16'd0},   {10'd0,   {32'd0,   32'd0,   32'd0,
                                               32'd0},   1'b0,   {1'b0,   10'd0,
@@ -30,81 +30,81 @@ module top
    8'b00000000},   4'd0,   4'd0},   {2'd0,   9'd0,   3'd0,   8'b00000000,
                                      1'b1,   1'b1,   8'b00000000,   1'b0},
  {2'd0,   9'd0,   3'd0,   8'b00000000,   1'b1}};
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire  c$ds_app_arg_1;
   reg [31:0] result_0;
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire [41:0] a1;
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire [59:0] fullOut;
   wire [636:0] result_1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [22:0] \tx' ;
   wire [135:0] c$app_arg;
   wire [135:0] c$case_alt;
   wire [127:0] c$app_arg_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [135:0] fifo3;
   reg  c$case_alt_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [15:0] runTimeout1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] out3PendDat1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpu3Rst1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [31:0] progWordAcc1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [11:0] progByteIdx1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [1:0] eta1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  out3Pending1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [79:0] top2;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] \c$led3Latch'_case_alt ;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  wild4;
   reg [563:0] result_2;
   wire [563:0] c$case_alt_1;
   wire [79:0] c$app_arg_1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] out3PendDat1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] led3Latch1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpu3Rst1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [31:0] progWordAcc1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [11:0] progByteIdx1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [79:0] wild8;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [215:0] c$ds19_case_alt;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  wild9;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [215:0] c$ds19_case_alt_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [215:0] c$ds19_case_alt_1;
   wire [563:0] c$case_alt_2;
   wire [563:0] result_3;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [42:0] pgWr;
   wire [135:0] c$app_arg_2;
   wire  c$case_scrut;
   wire [31:0] c$app_arg_3;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  c$pgWr_case_scrut;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [31:0] \wordAcc' ;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire signed [63:0] ds20;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire signed [63:0] c$ds20_app_arg;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [11:0] bytePos;
   wire [79:0] c$app_arg_4;
   wire [79:0] c$case_alt_3;
@@ -112,236 +112,236 @@ module top
   wire [135:0] c$case_alt_5;
   wire [127:0] c$app_arg_5;
   reg [7:0] c$fifoPush3Out_app_arg;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] cpuOD;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [335:0] c$ds9_case_alt;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [9:0] _brTarget;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  _brActual;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpuHalted;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] cpuOD_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpuOV;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [9:0] _nextPC;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [304:0] cpu1;
   wire [335:0] c$case_alt_6;
   wire [335:0] c$case_alt_7;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  brActual;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [7:0] acc_od;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  acc_ov;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  acc_halt;
   wire [91:0] result_4;
   wire [31:0] result_5;
   wire [31:0] c$case_alt_8;
   wire [31:0] c$case_alt_9;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [1:0] \rsF' ;
   wire  c$case_alt_10;
   wire  c$case_alt_11;
   wire  c$case_alt_12;
   wire  c$case_alt_13;
   wire  c$case_alt_14;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] acc_rd;
   wire [53:0] c$case_alt_15;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] c$nextPC_case_alt;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] brTarget;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] nextSeqPC;
   wire [183:0] c$tupIn;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [159:0] c$ds10_case_alt;
   reg  result_6;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire signed [63:0] \b# ;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire signed [63:0] \a# ;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [8:0] ds20_0;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] c$ds10_case_alt_0;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] brTg;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  wild7;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [10:0] ds19;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [10:0] c$ds19_case_alt_2;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] c$ds19_app_arg;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds19_app_arg_0;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [10:0] c$ds19_case_alt_3;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] c$ds19_app_arg_1;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [9:0] c$ds19_case_alt_4;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds19_app_arg_2;
   wire [127:0] result_7;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_1;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_2;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_3;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_4;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_5;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [127:0] c$ds10_case_alt_6;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] aluResult;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] c$aluResult_case_alt;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] c$aluResult_case_alt_0;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] c$aluResult_case_alt_1;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] c$aluResult_case_alt_2;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds10_case_scrut;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds10_case_scrut_0;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds10_case_scrut_1;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds10_case_scrut_2;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire  c$ds10_case_scrut_3;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [3:0] ds12;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] ds6;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [1:0] ds4;
   wire [31:0] result_8;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [1:0] rsF;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] c$rsF_app_arg;
-  // src/Processor.hs:177:1-8
+  // src/Processor.hs:124:1-8
   wire [31:0] instr;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpuEn;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   reg  c$cpuEn_case_alt;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire signed [63:0] c$cpuEn_case_scrut;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  rxVld;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] rxByte;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [32:0] \rx' ;
   wire [41:0] result_9;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [7:0] c$dataOut_case_alt;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [7:0] \shift' ;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire  wild3;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   reg [22:0] ds8;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [22:0] c$ds8_case_alt;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [22:0] c$ds8_case_alt_0;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [22:0] c$ds8_case_alt_1;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [22:0] c$ds8_case_alt_2;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire  c$ds8_case_scrut;
   wire [22:0] result_10;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [7:0] shifted;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [22:0] c$ds8_case_alt_3;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire [8:0] c$ds8_app_arg;
-  // src/Processor.hs:83:1-8
+  // src/Processor.hs:63:1-8
   wire  c$ds8_case_scrut_0;
   wire [24:0] result_11;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire  \pin' ;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   reg [22:0] ds6_0;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [22:0] c$ds6_case_alt;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [22:0] c$ds6_case_alt_0;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [22:0] c$ds6_case_alt_1;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [22:0] c$ds6_case_alt_2;
   wire [22:0] result_12;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [7:0] shifted_0;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire  c$ds6_app_arg;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [7:0] c$ds6_app_arg_0;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire  c$ds6_case_scrut;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [8:0] c$ds6_app_arg_1;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire [7:0] dat;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire  send;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   reg  busy;
-  // src/Processor.hs:123:1-8
+  // src/Processor.hs:84:1-8
   wire signed [63:0] c$busy_case_scrut;
   wire [431:0] c$tupIn_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [79:0] wild5;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [15:0] runTimeout1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] led3Latch1_0;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire  cpu3Rst1_1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [31:0] progWordAcc1_1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [11:0] progByteIdx1_1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [1:0] eta1_0;
   wire [135:0] c$case_alt_16;
   wire [127:0] c$app_arg_6;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [135:0] fifo1;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [144:0] ds7;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   reg  c$ds7_case_alt;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire signed [63:0] c$ds7_case_scrut;
   wire [143:0] c$case_alt_17;
   wire [7:0] c$app_arg_7;
-  // src/Processor.hs:279:1-8
+  // src/Processor.hs:194:1-8
   wire [7:0] out3PendDat1_1;
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire [42:0] eta3;
-  // src/Processor.hs:342:1-10
+  // src/Processor.hs:223:1-10
   wire [41:0] ds1;
   wire [9:0] c$i_103;
   wire [9:0] c$i_104;
@@ -453,7 +453,7 @@ module top
     $readmemb("prog.hex",RAM);
   end
 
-  always @(posedge clk) begin : top3_blockRamFile
+  always @(posedge clk) begin : top_blockRamFile
     if (c$ds_app_arg_1) begin
       RAM[($unsigned({{(64-10) {1'b0}},c$i_104}))] <= ds1[31:0];
     end

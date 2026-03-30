@@ -7,3 +7,4 @@ NOTES.txt
 *.hex
 verilog/
 .vscode/
+dist-newstyle/

@@ -10,6 +10,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import NPrologTest (nPrologGroup)
+import ProcessorTest (processorGroup)
 import RVAsm
 import System.Exit (exitFailure)
 
@@ -371,4 +372,5 @@ main = do
           ("translate: empty program", prop_translate_emptyProgram)
         ]
   okNP <- checkParallel nPrologGroup
-  unless (okRV && okNP) exitFailure
+  okProc <- checkParallel processorGroup
+  unless (okRV && okNP && okProc) exitFailure

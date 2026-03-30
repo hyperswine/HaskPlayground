@@ -323,7 +323,7 @@ solve prog goals = solveGoals prog emptySubst goals 0 maxSolverFuel
 solveGoals _ s [] _ _ = [s]
 solveGoals _ _ _ _ 0 = []
 solveGoals prog s (g : gs) c fuel = case walk s g of
-  -- Built-in: unify, requires a lot of recursion, typically no goal call
+  -- Built-in: unify, requires a lot of recursion, typically no goal call. Actually calls clpfdUnify so any numeric variables get automatically CLP'd
   Compound "unify" [a, b] -> clpfdUnify prog s a b gs c fuel
   Compound "equiv" [a, b] -> if deepWalk s a == deepWalk s b then solveGoals prog s gs c fuel else []
   Compound "neq" [a, b] -> if deepWalk s a /= deepWalk s b then solveGoals prog s gs c fuel else []

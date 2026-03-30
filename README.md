@@ -4,3 +4,5 @@
 
 Put everything else into examples.
 There's a script to auto copy stuff from verilog output to examples. Use lushay code to build and flash.
+
+`stack exec --package clash-ghc -- clash src/Processor.hs --verilog`
