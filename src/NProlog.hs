@@ -6,65 +6,6 @@
 
 {-# HLINT ignore "Replace case with fromMaybe" #-}
 
-{-
-  N Prolog syntax
-  lambda prolog like, period terminator
-  Strings are "" which are just list of char codes
-  Chars with ''
-  identifiers lower case
-  variables upper case
-
-  Clauses:
-    pred Var1 Var2 <- goal1 Var1 (compoundterm1 Var2 Var2), goal2.
-    color red.
-
-  Operators:
-    Infix only for most, except negative numbers
-
-    +, -, /, *, %, ^, =, !=, ., ==
-    1 + 1 --> (plus 1 1)
-    x.y --> (access x y)
-    x = y --> (unify x y)
-    x == y --> (equiv x y)
-
-    etc.
-
-  Numbers:
-    1, 3.3, -4.4. Integers and decimals
-
-  Lists:
-    [1, 2, 3], [X | Y]
-
-  DCGs:
-    mypred A B C -> p A, d B, c C.
-
-  Comments:
-    #
-
-  Special things:
-    call/2: call(Pred, Args)
-    phrase_from_file/2
-    phrase_to_file/2
-
-  Semantics:
-    Universal modus ponens, typical prolog style semantics of unification and backtracking, DFS search of goals
-    Nothing too different
-    The + and other things use a CLP like thing by default
-
-  NOTES:
-    dont add the other things like assert/1 and cuts or anything
-    X + Y is actually meant to be more like X #+ Y across the FD of Integer from 0..INF
-
-  Inline Eval:
-    Use > for top level evaluation
-    > x?
-    queries x in place after the entire file has fully loaded and prints it into the REPL
-
-  NEW:
-    :: and [] for lists
-    phrase/2 for DCGs
--}
-
 module NProlog where
 
 import qualified Control.Exception as CE
@@ -109,16 +50,9 @@ instance Show Term where
   show (FloatLit d) = show d
   show (CharLit c) = ['\'', c, '\'']
   show (StrLit s) = show s
-  show t@(Compound "cons" _) =
-    let (xs, rest) = unfoldCons t
-     in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
-  show (Compound f as) = f ++ " " ++ unwords (map showArg as)
-    where
-      showArg t@(Compound _ (_ : _)) = "(" ++ show t ++ ")"
-      showArg t = show t
-  show t@(TList _ _) =
-    let (xs, rest) = unfoldCons t
-     in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
+  show t@(Compound "cons" _) = let (xs, rest) = unfoldCons t in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
+  show (Compound f as) = f ++ " " ++ unwords (map showArg as) where showArg t@(Compound _ (_ : _)) = "(" ++ show t ++ ")"; showArg t = show t
+  show t@(TList _ _) = let (xs, rest) = unfoldCons t in "[" ++ intercalate ", " (map show xs) ++ maybe "" (\r -> " | " ++ show r) rest ++ "]"
 
 type Parser = Parsec Void String
 
@@ -218,33 +152,7 @@ pArgTerm = choice [try pNumber, pCharLit, pStrLit, pList, between (symbol "(") (
 
 pExpr = makeExprParser pAtomicTerm operatorTable
 
-operatorTable =
-  [ [ InfixL $ binOp "^" <$ try (symbol "^")
-    ],
-    [ InfixL $ binOp "mul" <$ try (symbol "*"),
-      InfixL $ binOp "div" <$ try (symbol "/"),
-      InfixL $ binOp "mod" <$ try (symbol "%")
-    ],
-    [ InfixL $ binOp "plus" <$ try (symbol "+"),
-      InfixL $ binOp "minus" <$ try (symbol "-" <* notFollowedBy (char '>'))
-    ],
-    [ InfixR $ binOp "cons" <$ try (symbol "::")
-    ],
-    [ InfixN $ binOp "access" <$ try (char '.' *> lookAhead (letterChar <|> char '_'))
-    ],
-    [ InfixN $ binOp "gte" <$ try (symbol ">="),
-      InfixN $ binOp "lte" <$ try (symbol "<="),
-      InfixN $ binOp "gt" <$ try (symbol ">" <* notFollowedBy (char '=' <|> char '-')),
-      InfixN $ binOp "lt" <$ try (symbol "<" <* notFollowedBy (char '=' <|> char '-'))
-    ],
-    [ InfixN $ binOp "equiv" <$ try (symbol "=="),
-      InfixN $ binOp "neq" <$ try (symbol "!="),
-      InfixN $ binOp "unify" <$ try (symbol "=" <* notFollowedBy (char '=')),
-      InfixN $ binOp "is" <$ try (string "is" <* notFollowedBy alphaNumChar <* sc)
-    ]
-  ]
-  where
-    binOp name l r = Compound name [l, r]
+operatorTable = [[InfixL $ binOp "^" <$ try (symbol "^")], [InfixL $ binOp "mul" <$ try (symbol "*"), InfixL $ binOp "div" <$ try (symbol "/"), InfixL $ binOp "mod" <$ try (symbol "%")], [InfixL $ binOp "plus" <$ try (symbol "+"), InfixL $ binOp "minus" <$ try (symbol "-" <* notFollowedBy (char '>'))], [InfixR $ binOp "cons" <$ try (symbol "::")], [InfixN $ binOp "access" <$ try (char '.' *> lookAhead (letterChar <|> char '_'))], [InfixN $ binOp "gte" <$ try (symbol ">="), InfixN $ binOp "lte" <$ try (symbol "<="), InfixN $ binOp "gt" <$ try (symbol ">" <* notFollowedBy (char '=' <|> char '-')), InfixN $ binOp "lt" <$ try (symbol "<" <* notFollowedBy (char '=' <|> char '-'))], [InfixN $ binOp "equiv" <$ try (symbol "=="), InfixN $ binOp "neq" <$ try (symbol "!="), InfixN $ binOp "unify" <$ try (symbol "=" <* notFollowedBy (char '=')), InfixN $ binOp "is" <$ try (string "is" <* notFollowedBy alphaNumChar <* sc)]] where binOp name l r = Compound name [l, r]
 
 pGoal = pExpr
 
@@ -281,7 +189,8 @@ desugarDCG hd body = Clause hd' body'
       -- List terminals: [a, b, c] in body means Sa = [a, b, c | Sb]
       TList [] Nothing -> Compound "unify" [sa, sb]
       TList xs Nothing -> Compound "unify" [sa, TList xs (Just sb)]
-      TList xs (Just r) -> Compound "unify" [sa, TList xs (Just r)] -- non-standard, pass through
+      -- non-standard, pass through
+      TList xs (Just r) -> Compound "unify" [sa, TList xs (Just r)]
       -- Normal non-terminals
       Atom f -> Compound f [sa, sb]
       Compound f args -> Compound f $ args ++ [sa, sb]
@@ -290,10 +199,7 @@ desugarDCG hd body = Clause hd' body'
     s0 = sVars !! 0
     sN = sVars !! n
 
-    hd' = case hd of
-      Atom f -> Compound f [s0, sN]
-      Compound f args -> Compound f $ args ++ [s0, sN]
-      _ -> hd
+    hd' = case hd of Atom f -> Compound f [s0, sN]; Compound f args -> Compound f $ args ++ [s0, sN]; _ -> hd
     body' = zipWith3 addArgs body sVars $ drop 1 sVars
 
 pProgram = sc *> many pClause <* eof
@@ -314,6 +220,7 @@ parseProgram input = case parse pProgram "<input>" input of
   Left err -> Left $ errorBundlePretty err
   Right p -> Right p
 
+-- This hands off to pFile which hands off to pTopLevel which hands off to pClause
 parseFile input = case parse pFile "<input>" input of
   Left err -> Left $ errorBundlePretty err
   Right items -> Right items
@@ -435,7 +342,7 @@ maxSolverFuel = 100000
 
 solve prog goals = solveGoals prog emptySubst goals 0 maxSolverFuel
 
--- all goals satisfied
+-- Typically things like predicate calls and unify like A = 2, maplist(Xs, F, Res). Involves recursion with tryClause
 solveGoals _ s [] _ _ = [s]
 solveGoals _ _ _ _ 0 = []
 solveGoals prog s (g : gs) c fuel = case walk s g of
@@ -447,22 +354,10 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   Compound "lt" [a, b] -> numCompareGoal (<) s a b gs prog c fuel
   Compound "gte" [a, b] -> numCompareGoal (>=) s a b gs prog c fuel
   Compound "lte" [a, b] -> numCompareGoal (<=) s a b gs prog c fuel
-  Compound "is" [lhs, rhs] -> case evalArith s rhs of
-    Just v -> case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []
-    Nothing -> []
-  Compound "call" (pred' : args) ->
-    let goal = case pred' of
-          Atom f -> Compound f args
-          Compound f as' -> Compound f (as' ++ args)
-          _ -> Compound "call" (pred' : args)
-     in solveGoals prog s (goal : gs) c fuel
+  Compound "is" [lhs, rhs] -> case evalArith s rhs of Just v -> (case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []); Nothing -> []
+  Compound "call" (pred' : args) -> let goal = case pred' of Atom f -> Compound f args; Compound f as' -> Compound f (as' ++ args); _ -> Compound "call" (pred' : args) in solveGoals prog s (goal : gs) c fuel
   -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
-  Compound "phrase" [nt, lst] ->
-    let goal = case nt of
-          Atom f -> Compound f [lst, TList [] Nothing]
-          Compound f as -> Compound f (as ++ [lst, TList [] Nothing])
-          _ -> Compound "call" [nt, lst, TList [] Nothing]
-     in solveGoals prog s (goal : gs) c fuel
+  Compound "phrase" [nt, lst] -> let goal = case nt of Atom f -> Compound f [lst, TList [] Nothing]; Compound f as -> Compound f (as ++ [lst, TList [] Nothing]); _ -> Compound "call" [nt, lst, TList [] Nothing] in solveGoals prog s (goal : gs) c fuel
   Compound "write" [_] -> solveGoals prog s gs c fuel
   Atom "nl" -> solveGoals prog s gs c fuel
   Atom "true" -> solveGoals prog s gs c fuel
@@ -470,23 +365,15 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   -- Normal goal: try each clause
   goal -> concatMap (\clause -> tryClause prog s goal gs c clause fuel) prog
 
-tryClause prog s goal restGoals counter clause fuel
-  | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter' (fuel - 1)
-  | otherwise = []
-  where
-    (Clause hd body, counter') = freshenClause counter clause
+-- handles the normalization of terms
+tryClause prog s goal restGoals counter clause fuel | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter' (fuel - 1) where (Clause hd body, counter') = freshenClause counter clause
+tryClause prog s goal restGoals counter clause fuel = []
 
 -- Eagerly reduce any fully-ground arithmetic sub-expressions in a term. This ensures goals like `factorial (N - 1) R` with N=5 evaluate the sub-expression to `factorial 4 R` before head unification.
 normArithTerm :: Subst -> Term -> Term
 normArithTerm s t = case deepWalk s t of
-  Compound f as
-    | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] ->
-        let as' = map (normArithTerm s) as
-            t' = Compound f as'
-         in case evalArith s t' of
-              Just v -> v
-              Nothing -> t'
-  Compound f as -> Compound f (map (normArithTerm s) as)
+  Compound f as | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] -> let as' = map (normArithTerm s) as; t' = Compound f as' in case evalArith s t' of Just v -> v; Nothing -> t'
+  Compound f as -> Compound f $ map (normArithTerm s) as
   TList xs rest -> TList (map (normArithTerm s) xs) (fmap (normArithTerm s) rest)
   t' -> t'
 
@@ -494,9 +381,7 @@ toDouble (IntLit n) = fromIntegral n
 toDouble (FloatLit d) = d
 toDouble _ = 0 / 0
 
-numCompareGoal cmp s a b gs prog c fuel = case (evalArith s a, evalArith s b) of
-  (Just va, Just vb) | cmp (toDouble va) (toDouble vb) -> solveGoals prog s gs c fuel
-  _ -> []
+numCompareGoal cmp s a b gs prog c fuel = case (evalArith s a, evalArith s b) of (Just va, Just vb) | cmp (toDouble va) (toDouble vb) -> solveGoals prog s gs c fuel; _ -> []
 
 evalArith s t = case deepWalk s t of
   IntLit n -> Just $ IntLit n
@@ -505,15 +390,8 @@ evalArith s t = case deepWalk s t of
   Compound "minus" [a, b] -> numBinOp (-) (-) s a b
   Compound "mul" [a, b] -> numBinOp (*) (*) s a b
   Compound "div" [a, b] -> numBinOp div (/) s a b
-  Compound "mod" [a, b] -> case (evalArith s a, evalArith s b) of
-    (Just (IntLit x), Just (IntLit y)) | y /= 0 -> Just $ IntLit $ x `mod` y
-    _ -> Nothing
-  Compound "^" [a, b] -> case (evalArith s a, evalArith s b) of
-    (Just (IntLit x), Just (IntLit y)) | y >= 0 -> Just $ IntLit $ x ^ y
-    (Just (FloatLit x), Just (FloatLit y)) -> Just $ FloatLit $ x ** y
-    (Just (IntLit x), Just (FloatLit y)) -> Just $ FloatLit $ fromIntegral x ** y
-    (Just (FloatLit x), Just (IntLit y)) -> Just $ FloatLit $ x ** fromIntegral y
-    _ -> Nothing
+  Compound "mod" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit x), Just (IntLit y)) | y /= 0 -> Just $ IntLit $ x `mod` y; _ -> Nothing
+  Compound "^" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit x), Just (IntLit y)) | y >= 0 -> Just $ IntLit $ x ^ y; (Just (FloatLit x), Just (FloatLit y)) -> Just $ FloatLit $ x ** y; (Just (IntLit x), Just (FloatLit y)) -> Just $ FloatLit $ fromIntegral x ** y; (Just (FloatLit x), Just (IntLit y)) -> Just $ FloatLit $ x ** fromIntegral y; _ -> Nothing
   _ -> Nothing
 
 numBinOp iop fop s a b = case (evalArith s a, evalArith s b) of
@@ -544,22 +422,10 @@ invertArith s t v target = case walk s t of
   Var x | x == v -> Just target
   Var _ -> Nothing
   IntLit _ -> Nothing
-  Compound "plus" [a, b] -> case (evalArith s a, evalArith s b) of
-    (Just (IntLit va), _) -> invertArith s b v (target - va)
-    (_, Just (IntLit vb)) -> invertArith s a v (target - vb)
-    _ -> Nothing
-  Compound "minus" [a, b] -> case (evalArith s a, evalArith s b) of
-    (Just (IntLit va), _) -> invertArith s b v (va - target)
-    (_, Just (IntLit vb)) -> invertArith s a v (target + vb)
-    _ -> Nothing
-  Compound "mul" [a, b] -> case (evalArith s a, evalArith s b) of
-    (Just (IntLit va), _) | va /= 0, target `mod` va == 0 -> invertArith s b v (target `div` va)
-    (_, Just (IntLit vb)) | vb /= 0, target `mod` vb == 0 -> invertArith s a v (target `div` vb)
-    _ -> Nothing
-  Compound "div" [a, b] -> case (evalArith s a, evalArith s b) of
-    (_, Just (IntLit vb)) | vb /= 0 -> invertArith s a v (target * vb)
-    (Just (IntLit va), _) | target /= 0, va `mod` target == 0 -> invertArith s b v (va `div` target)
-    _ -> Nothing
+  Compound "plus" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit va), _) -> invertArith s b v (target - va); (_, Just (IntLit vb)) -> invertArith s a v (target - vb); _ -> Nothing
+  Compound "minus" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit va), _) -> invertArith s b v (va - target); (_, Just (IntLit vb)) -> invertArith s a v (target + vb); _ -> Nothing
+  Compound "mul" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit va), _) | va /= 0, target `mod` va == 0 -> invertArith s b v (target `div` va); (_, Just (IntLit vb)) | vb /= 0, target `mod` vb == 0 -> invertArith s a v (target `div` vb); _ -> Nothing
+  Compound "div" [a, b] -> case (evalArith s a, evalArith s b) of (_, Just (IntLit vb)) | vb /= 0 -> invertArith s a v (target * vb); (Just (IntLit va), _) | target /= 0, va `mod` target == 0 -> invertArith s b v (va `div` target); _ -> Nothing
   _ -> Nothing
 
 -- Fallback enumeration bound when the range cannot be derived analytically
@@ -578,26 +444,15 @@ enumerationRange expr target = case expr of
 -- Resolve the arithmetic constraint  expr = target  against the domain. Returns all solutions via the existing backtracking DFS.
 solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> Int -> [Subst]
 solveArithConstraint prog s expr target restGoals c fuel = case fvs of
-  [] -> case evalArith s expr' of
-    Just (IntLit n) | n == target -> solveGoals prog s restGoals c fuel
-    _ -> []
-  [v] -> case invertArith s expr' v target of
-    Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c fuel
-    _ -> []
+  [] -> case evalArith s expr' of Just (IntLit n) | n == target -> solveGoals prog s restGoals c fuel; _ -> []
+  [v] -> case invertArith s expr' v target of Just val | val >= 0 -> solveGoals prog (Map.insert v (IntLit val) s) restGoals c fuel; _ -> []
   -- Multiple unknowns: enumerate the first, recurse with one fewer unknown
   _ -> let v = head fvs; range = enumerationRange expr' target in concatMap (\i -> let s' = Map.insert v (IntLit i) s in solveArithConstraint prog s' (deepWalk s' expr') target restGoals c fuel) range
   where
     expr' = deepWalk s expr
     fvs = nub $ arithFreeVars expr'
 
--- Smart arithmetic unification: replaces plain structural unify for = goals.
--- - Both sides ground and arithmetic → evaluate and check equality
--- - One side ground integer, other has free vars → algebraic solve (single var)
---   or enumeration over [0..INF] (multiple vars)
--- - Deferred constraints (both sides non-ground) fall back to structural unify,
---   which binds the variable to the expression; the constraint is re-evaluated
---   whenever a subsequent = goal fully resolves both sides.
--- - Non-arithmetic terms fall back to structural unify unchanged.
+-- Smart arithmetic unification: replaces plain structural unify for = goals. Both sides ground and arithmetic → evaluate and check equality One side ground integer, other has free vars → algebraic solve (single var) or enumeration over [0..INF] (multiple vars) Deferred constraints (both sides non-ground) fall back to structural unify, which binds the variable to the expression; the constraint is re-evaluated whenever a subsequent = goal fully resolves both sides. Non-arithmetic terms fall back to structural unify unchanged.
 clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> Int -> [Subst]
 clpfdUnify prog s lhs rhs restGoals c fuel =
   let wa = deepWalk s lhs
@@ -619,24 +474,18 @@ deepEval s t = tryEval (deepWalk s t)
   where
     tryEval t' = case evalArith emptySubst t' of
       Just v -> v
-      Nothing -> case t' of
-        Compound f as -> Compound f $ map tryEval as
-        TList xs r -> TList (map tryEval xs) $ fmap tryEval r
-        _ -> t'
+      Nothing -> case t' of Compound f as -> Compound f $ map tryEval as; TList xs r -> TList (map tryEval xs) $ fmap tryEval r; _ -> t'
 
+-- MOSTLY concerned with solving queries of the structure G1, G2, G3 ...? against the program prog
 solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions
   where
     queryVars = nub $ concatMap termVars goals
+    -- call solve to solve the goals
     rawSolutions = solve prog goals
     normalizeSoln s = Map.filterWithKey (\k _ -> k `elem` queryVars) $ fmap (evalFully s . deepWalk s) s
     -- Recursively evaluate any ground arithmetic sub-expressions in a value.
     evalFully s t = case t of
-      Compound f as
-        | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] ->
-            let t' = Compound f (map (evalFully s) as)
-             in case evalArith s t' of
-                  Just v -> v
-                  Nothing -> t'
+      Compound f as | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] -> let t' = Compound f (map (evalFully s) as) in case evalArith s t' of Just v -> v; Nothing -> t'
       Compound f as -> Compound f (map (evalFully s) as)
       TList xs rest -> TList (map (evalFully s) xs) (fmap (evalFully s) rest)
       _ -> t
@@ -706,6 +555,7 @@ runPrologRepl = do
       t | t == ":quit" || t == ":q" -> outputStrLn $ renderDoc $ annotate (colorDull Cyan) (pretty "Bye!")
       t | t == ":reload" || t == ":r" -> do
         mfile <- liftIO $ readIORef fileRef
+
         case mfile of
           Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
           Just file -> do
@@ -715,8 +565,7 @@ runPrologRepl = do
               Right contents -> case parseFile contents of
                 Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
                 Right items -> do
-                  let clauses = [c | TLClause c <- items]
-                      queries = [gs | TLQuery gs <- items]
+                  let clauses = [c | TLClause c <- items]; queries = [gs | TLQuery gs <- items]
                   liftIO $ writeIORef progRef clauses
                   outputStrLn $ renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
                   prog' <- liftIO (readIORef progRef)
@@ -724,19 +573,24 @@ runPrologRepl = do
                   loop progRef fileRef
       _
         | take 5 trimmed == ":load" -> do
-            let raw = dropWhile (== ' ') (drop 5 trimmed)
-                file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
+            let raw = dropWhile (== ' ') (drop 5 trimmed); file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
+
             result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
+
+            -- Found result at Right contents.items, then just loop progRef fileRef
             case result of
               Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
+              -- DO THE ACTUAL PARSING HERE
               Right contents -> case parseFile contents of
                 Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
                 Right items -> do
-                  let clauses = [c | TLClause c <- items]
-                      queries = [gs | TLQuery gs <- items]
+                  -- LOAD EACH CLAUSE INTO DB
+                  let clauses = [c | TLClause c <- items]; queries = [gs | TLQuery gs <- items]
                   liftIO $ writeIORef progRef clauses
                   liftIO $ writeIORef fileRef (Just file)
                   outputStrLn $ renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
+
+                  -- READ CLAUSES and execute with runInlineQuery
                   prog' <- liftIO $ readIORef progRef
                   mapM_ (runInlineQuery prog') queries
                   loop progRef fileRef
@@ -761,6 +615,7 @@ runPrologRepl = do
     runInlineQuery prog goals = do
       let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))
       outputStrLn $ renderDoc queryLabel
+      -- Solve All is the entry point to the solutions
       let solns = solveAll prog goals
       if null solns then outputStrLn $ renderDoc $ annotate (bold <> color Red) (pretty "false.") else mapM_ (outputStrLn . renderDoc . docSolution) solns
 
