@@ -4,6 +4,10 @@ programmer.py — Host-side programmer for the Tang Nano CPU (Processor.hs).
 Usage:
     uv run python programmer.py [OPTIONS]
 
+    e.g.
+
+    python programmer.py --asm bitops.asm --port /dev/cu.usbserial-20250303171
+
 Options:
     --port   PORT   Serial port (default: auto-detect)
     --baud   BAUD   Baud rate   (default: 115200)

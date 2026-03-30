@@ -232,8 +232,7 @@ testProgram3 = testProgram3'
 
 testProgram3' = let nop = mkInstr3NoReg 0x0 0; base = repeat nop :: InstrMem in replace (0 :: Unsigned 10) (mkInstr3 0x1 0 0 5) $ replace (1 :: Unsigned 10) (mkInstr3 0x1 1 0 3) $ replace (2 :: Unsigned 10) (mkInstr3 0x2 2 0 0) $ replace (3 :: Unsigned 10) (mkInstr3 0x2 2 2 3) $ replace (4 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (5 :: Unsigned 10) (mkInstr3 0x3 3 2 2) $ replace (6 :: Unsigned 10) (mkInstr3 0x4 3 3 7) $ replace (7 :: Unsigned 10) (mkInstr3 0x5 3 3 1) $ replace (8 :: Unsigned 10) (mkInstr3 0x7 0 3 0) $ replace (9 :: Unsigned 10) (mkInstr3 0x1 0 0 0) $ replace (10 :: Unsigned 10) (mkInstr3 0xA 0 0 12) $ replace (11 :: Unsigned 10) (mkInstr3 0x8 0 0 0) $ replace (12 :: Unsigned 10) (mkInstr3 0x7 0 2 0) $ replace (13 :: Unsigned 10) (mkInstr3 0x8 0 0 0) base
 
--- | Write testProgram3' to prog.hex in binary (base-2) format for $readmemb.
--- Run once from GHCi: writeProgHex
+-- | Write testProgram3' to prog.hex in binary (base-2) format for $readmemb. Run once from GHCi: writeProgHex
 writeProgHex :: P.IO ()
 writeProgHex = P.writeFile "prog.hex" $ P.unlines $ P.map (binLine P.. (fromIntegral :: Instr32 -> P.Int)) $ toList instrs
   where
