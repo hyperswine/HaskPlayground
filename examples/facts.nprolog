@@ -9,7 +9,9 @@ select (X :: Xs) Res <- select Xs Res.
 
 parse_a -> [a].
 parse_b -> [b].
-parse_ab -> parse_a, parse_b.
+else -> [].
+else -> [X].
+parse_ab -> parse_a, parse_b, else.
 
 ab (X :: Y :: Xs) [X, Y] <- X = a, Y = b.
 

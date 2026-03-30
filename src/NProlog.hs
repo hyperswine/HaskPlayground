@@ -233,7 +233,7 @@ parseGoals input = case parse (sc *> pGoals <* eof) "<input>" input of
   Left err -> Left $ errorBundlePretty err
   Right gs -> Right gs
 
--- UNIFY
+-- ----------------- UNIFY -----------------
 
 type Subst = Map String Term
 
@@ -241,28 +241,14 @@ emptySubst :: Subst
 emptySubst = Map.empty
 
 -- REQUIRED BECAUSE MAP IS RECURSIVE for VARS
-walk s (Var v) = case Map.lookup v s of
-  Just t -> walk s t
-  Nothing -> Var v
+walk s (Var v) = case Map.lookup v s of Just t -> walk s t; Nothing -> Var v
 walk _ t = t
 
 -- COMPOUNDS AND LISTS can involve vars
-deepWalk s t = case walk s t of
-  Var v -> Var v
-  Atom a -> Atom a
-  IntLit n -> IntLit n
-  FloatLit d -> FloatLit d
-  CharLit c -> CharLit c
-  StrLit str -> StrLit str
-  Compound f as -> Compound f $ map (deepWalk s) as
-  TList xs rest -> TList (map (deepWalk s) xs) (fmap (deepWalk s) rest)
+deepWalk s t = case walk s t of Var v -> Var v; Atom a -> Atom a; IntLit n -> IntLit n; FloatLit d -> FloatLit d; CharLit c -> CharLit c; StrLit str -> StrLit str; Compound f as -> Compound f $ map (deepWalk s) as; TList xs rest -> TList (map (deepWalk s) xs) (fmap (deepWalk s) rest)
 
 -- OCCURS CHECK TO PREVENT INFINITE LOOPS ON UNIFICATION
-occurs s v t = case walk s t of
-  Var v' -> v == v'
-  Compound _ as -> any (occurs s v) as
-  TList xs rest -> any (occurs s v) xs || maybe False (occurs s v) rest
-  _ -> False
+occurs s v t = case walk s t of Var v' -> v == v'; Compound _ as -> any (occurs s v) as; TList xs rest -> any (occurs s v) xs || maybe False (occurs s v) rest; _ -> False
 
 expandList [] (Just t) = t
 expandList [] Nothing = Atom "nil"
@@ -313,15 +299,7 @@ unify' _ _ _ = Nothing
 type FreshCounter = Int
 
 -- Rename all variables in a clause to fresh ones to avoid capture.
-freshenClause counter (Clause hd body) = (Clause hd' body', counter')
-  where
-    allVars = nub $ concatMap termVars (hd : body)
-    mapping = zip allVars [counter ..]
-    rename = renameVars $ Map.fromList [(v, Var ("_G" ++ show i)) | (v, i) <- mapping]
-
-    counter' = counter + length allVars
-    hd' = rename hd
-    body' = map rename body
+freshenClause counter (Clause hd body) = (Clause hd' body', counter') where allVars = nub $ concatMap termVars (hd : body); mapping = zip allVars [counter ..]; rename = renameVars $ Map.fromList [(v, Var ("_G" ++ show i)) | (v, i) <- mapping]; counter' = counter + length allVars; hd' = rename hd; body' = map rename body
 
 -- COLLECT ALL VAR NAMES IN A TERM
 termVars (Var "_") = []
@@ -335,18 +313,17 @@ renameVars m (Compound f as) = Compound f $ map (renameVars m) as
 renameVars m (TList xs rest) = TList (map (renameVars m) xs) (fmap (renameVars m) rest)
 renameVars _ t = t
 
--- Maximum clause-attempts per search branch before giving up.
--- Prevents infinite loops caused by unbounded recursive predicates.
+-- Maximum clause-attempts per search branch before giving up. Prevents infinite loops caused by unbounded recursive predicates.
 maxSolverFuel :: Int
 maxSolverFuel = 100000
 
 solve prog goals = solveGoals prog emptySubst goals 0 maxSolverFuel
 
--- Typically things like predicate calls and unify like A = 2, maplist(Xs, F, Res). Involves recursion with tryClause
+-- Typically things like predicate calls and unify like A = 2, maplist(Xs, F, Res). Involves recursion with tryClause. Notice we walk the s g first
 solveGoals _ s [] _ _ = [s]
 solveGoals _ _ _ _ 0 = []
 solveGoals prog s (g : gs) c fuel = case walk s g of
-  -- Built-in: unify
+  -- Built-in: unify, requires a lot of recursion, typically no goal call
   Compound "unify" [a, b] -> clpfdUnify prog s a b gs c fuel
   Compound "equiv" [a, b] -> if deepWalk s a == deepWalk s b then solveGoals prog s gs c fuel else []
   Compound "neq" [a, b] -> if deepWalk s a /= deepWalk s b then solveGoals prog s gs c fuel else []
@@ -362,10 +339,10 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   Atom "nl" -> solveGoals prog s gs c fuel
   Atom "true" -> solveGoals prog s gs c fuel
   Atom "fail" -> []
-  -- Normal goal: try each clause
+  -- Normal goal: try each clause. So for this goal, try all the clauses in order until success. If success can create backtrack point
   goal -> concatMap (\clause -> tryClause prog s goal gs c clause fuel) prog
 
--- handles the normalization of terms
+-- handles the normalization of terms and unifies at the head of the goal to the database predicates
 tryClause prog s goal restGoals counter clause fuel | Just s' <- unify s (normArithTerm s goal) hd = solveGoals prog s' (body ++ restGoals) counter' (fuel - 1) where (Clause hd body, counter') = freshenClause counter clause
 tryClause prog s goal restGoals counter clause fuel = []
 
@@ -394,12 +371,7 @@ evalArith s t = case deepWalk s t of
   Compound "^" [a, b] -> case (evalArith s a, evalArith s b) of (Just (IntLit x), Just (IntLit y)) | y >= 0 -> Just $ IntLit $ x ^ y; (Just (FloatLit x), Just (FloatLit y)) -> Just $ FloatLit $ x ** y; (Just (IntLit x), Just (FloatLit y)) -> Just $ FloatLit $ fromIntegral x ** y; (Just (FloatLit x), Just (IntLit y)) -> Just $ FloatLit $ x ** fromIntegral y; _ -> Nothing
   _ -> Nothing
 
-numBinOp iop fop s a b = case (evalArith s a, evalArith s b) of
-  (Just (IntLit x), Just (IntLit y)) -> Just $ IntLit $ iop x y
-  (Just (FloatLit x), Just (FloatLit y)) -> Just $ FloatLit $ fop x y
-  (Just (IntLit x), Just (FloatLit y)) -> Just $ FloatLit $ fop (fromIntegral x) y
-  (Just (FloatLit x), Just (IntLit y)) -> Just $ FloatLit $ fop x (fromIntegral y)
-  _ -> Nothing
+numBinOp iop fop s a b = case (evalArith s a, evalArith s b) of (Just (IntLit x), Just (IntLit y)) -> Just $ IntLit $ iop x y; (Just (FloatLit x), Just (FloatLit y)) -> Just $ FloatLit $ fop x y; (Just (IntLit x), Just (FloatLit y)) -> Just $ FloatLit $ fop (fromIntegral x) y; (Just (FloatLit x), Just (IntLit y)) -> Just $ FloatLit $ fop x (fromIntegral y); _ -> Nothing
 
 -- ─── CLP(FD) over Integer [0..INF] ──────────────────────────────────────────────────
 
@@ -434,12 +406,7 @@ clpMaxDomain = 100
 
 -- Range for the first free variable when the constraint has two or more unknowns
 enumerationRange :: Term -> Integer -> [Integer]
-enumerationRange expr target = case expr of
-  Compound "plus" _ -> [0 .. target]
-  Compound "minus" _ -> [0 .. target + clpMaxDomain]
-  Compound "mul" _ | target > 0 -> [i | i <- [1 .. target], target `mod` i == 0]
-  Compound "mul" _ -> [0 .. clpMaxDomain]
-  _ -> [0 .. clpMaxDomain]
+enumerationRange expr target = case expr of Compound "plus" _ -> [0 .. target]; Compound "minus" _ -> [0 .. target + clpMaxDomain]; Compound "mul" _ | target > 0 -> [i | i <- [1 .. target], target `mod` i == 0]; Compound "mul" _ -> [0 .. clpMaxDomain]; _ -> [0 .. clpMaxDomain]
 
 -- Resolve the arithmetic constraint  expr = target  against the domain. Returns all solutions via the existing backtracking DFS.
 solveArithConstraint :: Program -> Subst -> Term -> Integer -> [Term] -> FreshCounter -> Int -> [Subst]
@@ -452,43 +419,19 @@ solveArithConstraint prog s expr target restGoals c fuel = case fvs of
     expr' = deepWalk s expr
     fvs = nub $ arithFreeVars expr'
 
--- Smart arithmetic unification: replaces plain structural unify for = goals. Both sides ground and arithmetic → evaluate and check equality One side ground integer, other has free vars → algebraic solve (single var) or enumeration over [0..INF] (multiple vars) Deferred constraints (both sides non-ground) fall back to structural unify, which binds the variable to the expression; the constraint is re-evaluated whenever a subsequent = goal fully resolves both sides. Non-arithmetic terms fall back to structural unify unchanged.
+-- Smart arithmetic unification: replaces plain structural unify for = goals. Both sides ground and arithmetic → evaluate and check equality One side ground integer, other has free vars → algebraic solve (single var) or enumeration over [0..INF] (multiple vars) Deferred constraints (both sides non-ground) fall back to structural unify, which binds the variable to the expression; the constraint is re-evaluated whenever a subsequent = goal fully resolves both sides. Non-arithmetic terms fall back to structural unify unchanged. CLP Unify last case means deferred or float: fall back to structural unification
 clpfdUnify :: Program -> Subst -> Term -> Term -> [Term] -> FreshCounter -> Int -> [Subst]
-clpfdUnify prog s lhs rhs restGoals c fuel =
-  let wa = deepWalk s lhs
-      wb = deepWalk s rhs
-   in if not (isArithTerm wa) && not (isArithTerm wb)
-        then case unify s wa wb of
-          Just s' -> solveGoals prog s' restGoals c fuel
-          Nothing -> []
-        else case (evalArith s wa, evalArith s wb) of
-          (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c fuel else []
-          (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c fuel
-          (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c fuel
-          -- Deferred or float: fall back to structural unification
-          _ -> case unify s wa wb of Just s' -> solveGoals prog s' restGoals c fuel; Nothing -> []
+clpfdUnify prog s lhs rhs restGoals c fuel = if not (isArithTerm wa) && not (isArithTerm wb) then case unify s wa wb of Just s' -> solveGoals prog s' restGoals c fuel; Nothing -> [] else case (evalArith s wa, evalArith s wb) of (Just tv1, Just tv2) -> if tv1 == tv2 then solveGoals prog s restGoals c fuel else []; (Nothing, Just (IntLit n)) -> solveArithConstraint prog s wa n restGoals c fuel; (Just (IntLit n), Nothing) -> solveArithConstraint prog s wb n restGoals c fuel; _ -> case unify s wa wb of Just s' -> solveGoals prog s' restGoals c fuel; Nothing -> []
+  where
+    wa = deepWalk s lhs
+    wb = deepWalk s rhs
 
 -- Deep-walk all variable references AND evaluate any fully-ground arithmetic subterms, so that deferred constraints like N = 4 * R (solved after R = 2) display as N = 8 rather than N = mul 4 2.
 deepEval :: Subst -> Term -> Term
-deepEval s t = tryEval (deepWalk s t)
-  where
-    tryEval t' = case evalArith emptySubst t' of
-      Just v -> v
-      Nothing -> case t' of Compound f as -> Compound f $ map tryEval as; TList xs r -> TList (map tryEval xs) $ fmap tryEval r; _ -> t'
+deepEval s t = tryEval (deepWalk s t) where tryEval t' = case evalArith emptySubst t' of Just v -> v; Nothing -> (case t' of Compound f as -> Compound f $ map tryEval as; TList xs r -> TList (map tryEval xs) $ fmap tryEval r; _ -> t')
 
--- MOSTLY concerned with solving queries of the structure G1, G2, G3 ...? against the program prog
-solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions
-  where
-    queryVars = nub $ concatMap termVars goals
-    -- call solve to solve the goals
-    rawSolutions = solve prog goals
-    normalizeSoln s = Map.filterWithKey (\k _ -> k `elem` queryVars) $ fmap (evalFully s . deepWalk s) s
-    -- Recursively evaluate any ground arithmetic sub-expressions in a value.
-    evalFully s t = case t of
-      Compound f as | f `elem` ["plus", "minus", "mul", "div", "mod", "^"] -> let t' = Compound f (map (evalFully s) as) in case evalArith s t' of Just v -> v; Nothing -> t'
-      Compound f as -> Compound f (map (evalFully s) as)
-      TList xs rest -> TList (map (evalFully s) xs) (fmap (evalFully s) rest)
-      _ -> t
+-- MOSTLY concerned with solving queries of the structure G1, G2, G3 ...? against the program prog. call solve/2 to solve the goals
+solveAll prog goals = map (\s -> Map.filterWithKey (\k _ -> k `elem` queryVars) (fmap (deepEval s) s)) rawSolutions where queryVars = nub $ concatMap termVars goals; rawSolutions = solve prog goals
 
 showSolution s | Map.null s = "true."
 showSolution s = intercalate ", " [v ++ " = " ++ show t | (v, t) <- Map.toList s]
@@ -498,10 +441,9 @@ runProlog programSrc querySrc = do
   goals <- parseGoals querySrc
 
   let solns = solveAll prog goals
-
   if null solns then return ["false."] else return $ map showSolution solns
 
--- ─── Pretty Printing ─────────────────────────────────────────────────────────
+-- ─── REPL and Completion and PP ───────────────────────────────────────────────────────────────
 
 renderDoc = unpack . renderStrict . layoutPretty defaultLayoutOptions
 
@@ -509,24 +451,19 @@ docErr msg = annotate (bold <> color Red) (pretty "Error: ") <> annotate (color 
 
 docInfo = annotate (colorDull Cyan) . pretty
 
-docSolution s
-  | Map.null s = annotate (bold <> color Green) (pretty "true.")
-  | otherwise = hsep $ punctuate comma [annotate (color Yellow) (pretty v) <+> annotate (colorDull White) (pretty "=") <+> annotate (color Cyan) (pretty (show t)) | (v, t) <- Map.toList s]
-
--- ─── Completion ───────────────────────────────────────────────────────────────
+docSolution s | Map.null s = annotate (bold <> color Green) (pretty "true.")
+docSolution s = hsep $ punctuate comma [annotate (color Yellow) (pretty v) <+> annotate (colorDull White) (pretty "=") <+> annotate (color Cyan) (pretty (show t)) | (v, t) <- Map.toList s]
 
 progPreds prog = nub [name | c <- prog, let name = case clauseHead c of Atom f -> f; Compound f _ -> f; _ -> "", not $ null name]
 
-prologComplete progRef input@(leftRev, _) = do
-  let left = reverse leftRev
-  if ":load " `isPrefixOf` left then completeFilename input else completeWord Nothing " \t,(.?" completeIdent input
+prologComplete progRef input@(leftRev, _) = if ":load " `isPrefixOf` left then completeFilename input else completeWord Nothing " \t,(.?" completeIdent input
   where
+    -- !! PLACED THIS HERE INSTEAD OF THE do - let for left
+    left = reverse leftRev
     completeIdent word = do
       prog <- readIORef progRef
       let preds = nub (progPreds prog ++ [":quit", ":q", ":load", ":reload", ":r"])
       return [simpleCompletion p | p <- preds, word `isPrefixOf` p]
-
--- ─── REPL ─────────────────────────────────────────────────────────────────────
 
 runPrologRepl = do
   progRef <- newIORef ([] :: Program)
