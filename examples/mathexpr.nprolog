@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────
+#  mathexpr.nprolog — let-binding math expression evaluator
+#
+#  Syntax:
+#    run [Stmt, ..., ReturnExpr] R
+#
+#  Each Stmt (except the last) is a binding of the form
+#    name = Expr
+#  Bindings are evaluated left-to-right; each Expr is resolved in
+#  the environment built so far.  The final element is the return
+#  expression, evaluated in the full environment.
+#
+#  Supported operators:  +  -  *  /  %  ^
+#
+#  How it works
+#  ────────────
+#  NProlog's own parser already turns  a = 1  into  unify(a, 1)
+#  and  c * 2 + b  into  plus(mul(c, 2), b)  when they appear as
+#  list elements — so the host parser handles expression parsing for
+#  free.  We only need three things:
+#
+#    1. env_lookup  — association list keyed by atom names
+#    2. subst       — replace bound atom-names with their values
+#    3. process     — walk the statement list, build the env, eval
+# ─────────────────────────────────────────────────────────────────
+
+# ── Environment (association list of kv/2 pairs) ─────────────────
+
+env_lookup K [kv K V | _] V.
+env_lookup K [_ | Rest] V <- env_lookup K Rest V.
+
+# ── Substitution ─────────────────────────────────────────────────
+# subst Expr Env Result
+#
+# Recursively walks Expr, replacing every atom identifier that
+# exists as a key in Env with its value.  Numeric literals and
+# identifiers not in Env are returned unchanged (the fallback
+# clause handles both — env_lookup fails on numbers, so they
+# fall through to identity).
+
+subst (A + B) Env (Sa + Sb) <- subst A Env Sa, subst B Env Sb.
+subst (A - B) Env (Sa - Sb) <- subst A Env Sa, subst B Env Sb.
+subst (A * B) Env (Sa * Sb) <- subst A Env Sa, subst B Env Sb.
+subst (A / B) Env (Sa / Sb) <- subst A Env Sa, subst B Env Sb.
+subst (A % B) Env (Sa % Sb) <- subst A Env Sa, subst B Env Sb.
+subst (A ^ B) Env (Sa ^ Sb) <- subst A Env Sa, subst B Env Sb.
+subst X Env V              <- env_lookup X Env V.
+subst X _ X.
+
+# ── Statement list processor ─────────────────────────────────────
+# process Stmts Env Result
+#
+# Binding clause must come first so that  X = E  heads (parsed
+# as unify/2) are matched before the single-expression base case.
+
+process [(X = E) | Rest] Env R <-
+  subst E Env SubE,
+  V is SubE,
+  process Rest [kv X V | Env] R.
+
+process [Expr] Env R <-
+  subst Expr Env Sub,
+  R is Sub.
+
+# ── Public entry point ───────────────────────────────────────────
+
+run Stmts R <- process Stmts [] R.
+
+# ── Inline tests ─────────────────────────────────────────────────
+
+# Single binding then return
+#   a = 1,  return a + 2  →  3
+> run [a = 1, a + 2] R?
+
+# Two bindings, predecessor uses earlier binding
+#   a = 10,  b = a - 3  (b=7),  return b * 2  →  14
+> run [a = 10, b = a - 3, b * 2] R?
+
+# Three bindings including exponentiation
+#   x = 2,  y = x^3  (y=8),  z = y - x  (z=6),
+#   return z + x * y  →  6 + 2*8 = 22
+> run [x = 2, y = x ^ 3, z = y - x, z + x * y] R?
+
+# No bindings — bare arithmetic with precedence
+#   3 + 4 * 2  →  11
+> run [3 + 4 * 2] R?
+
+# Chained bindings with integer division
+#   a = 3,  b = a * a  (b=9),  c = b - 1  (c=8),  return c / 2  →  4
+> run [a = 3, b = a * a, c = b - 1, c / 2] R?
+
+# Modulo and quadratic-style
+#   n = 17,  q = n / 5  (q=3),  r = n % 5  (r=2),  return q * q + r  →  11
+> run [n = 17, q = n / 5, r = n % 5, q * q + r] R?
