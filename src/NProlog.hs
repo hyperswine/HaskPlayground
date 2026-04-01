@@ -335,6 +335,10 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   Compound "call" (pred' : args) -> let goal = case pred' of Atom f -> Compound f args; Compound f as' -> Compound f (as' ++ args); _ -> Compound "call" (pred' : args) in solveGoals prog s (goal : gs) c fuel
   -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
   Compound "phrase" [nt, lst] -> let goal = case nt of Atom f -> Compound f [lst, TList [] Nothing]; Compound f as -> Compound f (as ++ [lst, TList [] Nothing]); _ -> Compound "call" [nt, lst, TList [] Nothing] in solveGoals prog s (goal : gs) c fuel
+  -- not/1: negation as failure — requires Haskell to inspect the solution list, can't be done purely in NProlog without cut
+  Compound "not" [g] -> if null (solveGoals prog s [g] c fuel) then solveGoals prog s gs c fuel else []
+  -- once/1: commit to the first solution of g, then continue
+  Compound "once" [g] -> case solveGoals prog s [g] c fuel of (s' : _) -> solveGoals prog s' gs c fuel; [] -> []
   Compound "write" [_] -> solveGoals prog s gs c fuel
   Atom "nl" -> solveGoals prog s gs c fuel
   Atom "true" -> solveGoals prog s gs c fuel
@@ -496,41 +500,27 @@ runPrologRepl = do
         case mfile of
           Nothing -> outputStrLn (renderDoc $ docErr "No file loaded yet. Use :load <file> first.") >> loop progRef fileRef
           Just file -> do
-            result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
-            case result of
-              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
-              Right contents -> case parseFile contents of
-                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
-                Right items -> do
-                  let clauses = [c | TLClause c <- items]; queries = [gs | TLQuery gs <- items]
-                  liftIO $ writeIORef progRef clauses
-                  outputStrLn $ renderDoc $ docInfo ("Reloaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
-                  prog' <- liftIO (readIORef progRef)
-                  mapM_ (runInlineQuery prog') queries
-                  loop progRef fileRef
+            res <- parseAndLoad progRef file
+            case res of
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
+              Right (n, queries) -> do
+                outputStrLn $ renderDoc $ docInfo ("Reloaded " ++ show n ++ " clause(s) from " ++ show file ++ ".")
+                prog' <- liftIO (readIORef progRef)
+                mapM_ (runInlineQuery prog') queries
+                loop progRef fileRef
       _
         | take 5 trimmed == ":load" -> do
-            let raw = dropWhile (== ' ') (drop 5 trimmed); file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
-
-            result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
-
-            -- Found result at Right contents.items, then just loop progRef fileRef
-            case result of
-              Left ex -> outputStrLn (renderDoc $ docErr (show ex)) >> loop progRef fileRef
-              -- DO THE ACTUAL PARSING HERE
-              Right contents -> case parseFile contents of
-                Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
-                Right items -> do
-                  -- LOAD EACH CLAUSE INTO DB
-                  let clauses = [c | TLClause c <- items]; queries = [gs | TLQuery gs <- items]
-                  liftIO $ writeIORef progRef clauses
-                  liftIO $ writeIORef fileRef (Just file)
-                  outputStrLn $ renderDoc $ docInfo ("Loaded " ++ show (length clauses) ++ " clause(s) from " ++ show file ++ ".")
-
-                  -- READ CLAUSES and execute with runInlineQuery
-                  prog' <- liftIO $ readIORef progRef
-                  mapM_ (runInlineQuery prog') queries
-                  loop progRef fileRef
+            let raw = dropWhile (== ' ') (drop 5 trimmed)
+                file = if length raw >= 2 && head raw == '"' && last raw == '"' then init (tail raw) else raw
+            res <- parseAndLoad progRef file
+            case res of
+              Left err -> outputStrLn (renderDoc $ docErr err) >> loop progRef fileRef
+              Right (n, queries) -> do
+                liftIO $ writeIORef fileRef (Just file)
+                outputStrLn $ renderDoc $ docInfo ("Loaded " ++ show n ++ " clause(s) from " ++ show file ++ ".")
+                prog' <- liftIO $ readIORef progRef
+                mapM_ (runInlineQuery prog') queries
+                loop progRef fileRef
         | not (null trimmed) && last trimmed == '?' -> do
             let queryStr = init trimmed
             case parseGoals queryStr of
@@ -548,6 +538,18 @@ runPrologRepl = do
                 liftIO $ modifyIORef progRef (++ clauses)
                 outputStrLn $ renderDoc $ docInfo ("Added " ++ show (length clauses) ++ " clause(s).")
                 loop progRef fileRef
+
+    parseAndLoad progRef file = do
+      result <- liftIO (CE.try (readFile file) :: IO (Either CE.SomeException String))
+      case result of
+        Left ex -> return $ Left (show ex)
+        Right contents -> case parseFile contents of
+          Left err -> return $ Left err
+          Right items -> do
+            let clauses = [c | TLClause c <- items]
+                queries = [gs | TLQuery gs <- items]
+            liftIO $ writeIORef progRef clauses
+            return $ Right (length clauses, queries)
 
     runInlineQuery prog goals = do
       let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))

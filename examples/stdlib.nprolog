@@ -104,6 +104,30 @@ safe_queens [Q | Qs] <- no_attack Q Qs 1, safe_queens Qs.
 
 queens N Qs <- numlist 1 N Ns, permutation Ns Qs, safe_queens Qs.
 
+# ── Higher-order predicates ──────────────────────────────────────────────────
+# not/1 and once/1 are engine built-ins (they need to inspect the solution list
+# and cannot be expressed in NProlog without cut support).
+#
+#   not Goal   — succeeds iff Goal has no solution (negation as failure)
+#   once Goal  — succeeds at most once, committing to the first solution of Goal
+
+# maplist/2: call F on every element; succeeds iff all calls succeed.
+maplist _ [].
+maplist F [X | Xs] <- call F X, maplist F Xs.
+
+# maplist/3: transform every element via F/2, collecting results.
+maplist _ [] [].
+maplist F [X | Xs] [Y | Ys] <- call F X Y, maplist F Xs Ys.
+
+# include/3: keep only elements satisfying F/1.
+include _ [] [].
+include F [X | Xs] [X | Ys] <- call F X, include F Xs Ys.
+include F [X | Xs] Ys        <- not (call F X), include F Xs Ys.
+
+# foldl/5: foldl F List V0 V — fold left with F/3 (Elem, AccIn, AccOut).
+foldl _ [] V V.
+foldl F [X | Xs] V0 V <- call F X V0 V1, foldl F Xs V1 V.
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 # Lists
@@ -137,3 +161,14 @@ queens N Qs <- numlist 1 N Ns, permutation Ns Qs, safe_queens Qs.
 
 # N-Queens (2 solutions for 4x4)
 > queens 4 Qs?
+
+# Higher-order (maplist uses abs1 from stdlib; foldl and include use inline helpers)
+positive N <- N > 0.
+add3 X A B <- B is A + X.
+
+> maplist abs1 [-1, -2, -3] R?
+> maplist positive [1, 2, 3]?
+> include positive [1, -2, 3, -4, 5] R?
+> foldl add3 [1, 2, 3, 4, 5] 0 S?
+> not (member 99 [1, 2, 3])?
+> once (member X [a, b, c])?
