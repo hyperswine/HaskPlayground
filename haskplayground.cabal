@@ -32,6 +32,7 @@ library
       NProlog
       Processor
       RVAsm
+      RVLang
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
