@@ -87,10 +87,7 @@ translateStandalone line comment = case parts of
 translateAssignment dest rhs comment = case parts of
   [] -> dest <> " = " <> rhs <> comment
   -- Simple assignment
-  [src] ->
-    if isImmediate src
-      then "    li " <> dest <> ", " <> src <> comment
-      else if isRegister src then "    mv " <> dest <> ", " <> src <> comment else "    la " <> dest <> ", " <> src <> comment
+  [src] -> if isImmediate src then "    li " <> dest <> ", " <> src <> comment else if isRegister src then "    mv " <> dest <> ", " <> src <> comment else "    la " <> dest <> ", " <> src <> comment
   -- Load operations
   ("load" : rest) -> translateLoad dest rest comment
   -- Store to memory address
@@ -147,12 +144,7 @@ translateOperation dest op args comment = case (op, args) of
   ("negate-word", [src]) -> "    subw " <> dest <> ", zero, " <> src <> comment
   ("sign-extend-word", [src]) -> "    sext.w " <> dest <> ", " <> src <> comment
   -- Binary operations
-  (_, [src1, src2]) ->
-    if isImmediate src2
-      then
-        translateImmediateOp dest op src1 src2 comment
-      else
-        translateRegisterOp dest op src1 src2 comment
+  (_, [src1, src2]) -> if isImmediate src2 then translateImmediateOp dest op src1 src2 comment else translateRegisterOp dest op src1 src2 comment
   _ -> "    " <> dest <> " = " <> op <> " " <> T.unwords args <> comment
 
 translateImmediateOp dest op src1 imm comment =
@@ -213,7 +205,7 @@ translateRegisterOp dest op src1 src2 comment =
         Just instr -> "    " <> instr <> " " <> dest <> ", " <> src1 <> ", " <> src2 <> comment
         Nothing -> "    " <> dest <> " = " <> op <> " " <> src1 <> " " <> src2 <> comment
 
-translate code = T.unlines $ map translateLine (T.lines code)
+translate code = T.unlines $ map translateLine $ T.lines code
 
 main = do
   args <- getArgs
