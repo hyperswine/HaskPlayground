@@ -332,9 +332,9 @@ solveGoals prog s (g : gs) c fuel = case walk s g of
   Compound "gte" [a, b] -> numCompareGoal (>=) s a b gs prog c fuel
   Compound "lte" [a, b] -> numCompareGoal (<=) s a b gs prog c fuel
   Compound "is" [lhs, rhs] -> case evalArith s rhs of Just v -> (case unify s lhs v of Just s' -> solveGoals prog s' gs c fuel; Nothing -> []); Nothing -> []
-  Compound "call" (pred' : args) -> let goal = case pred' of Atom f -> Compound f args; Compound f as' -> Compound f (as' ++ args); _ -> Compound "call" (pred' : args) in solveGoals prog s (goal : gs) c fuel
+  Compound "call" (pred' : args) -> let pred'' = walk s pred'; goal = case pred'' of Atom f -> Compound f args; Compound f as' -> Compound f (as' ++ args); _ -> Compound "call" (pred'' : args) in solveGoals prog s (goal : gs) c fuel
   -- phrase/2: phrase NT List  — runs DCG non-terminal NT against List, expecting empty remainder
-  Compound "phrase" [nt, lst] -> let goal = case nt of Atom f -> Compound f [lst, TList [] Nothing]; Compound f as -> Compound f (as ++ [lst, TList [] Nothing]); _ -> Compound "call" [nt, lst, TList [] Nothing] in solveGoals prog s (goal : gs) c fuel
+  Compound "phrase" [nt, lst] -> let nt' = walk s nt; goal = case nt' of Atom f -> Compound f [lst, TList [] Nothing]; Compound f as -> Compound f (as ++ [lst, TList [] Nothing]); _ -> Compound "call" [nt', lst, TList [] Nothing] in solveGoals prog s (goal : gs) c fuel
   -- not/1: negation as failure — requires Haskell to inspect the solution list, can't be done purely in NProlog without cut
   Compound "not" [g] -> if null (solveGoals prog s [g] c fuel) then solveGoals prog s gs c fuel else []
   -- once/1: commit to the first solution of g, then continue
