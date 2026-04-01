@@ -1,5 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# HLINT ignore "Use if" #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Use newtype instead of data" #-}
 {-# HLINT ignore "Move brackets to avoid $" #-}
@@ -10,8 +13,11 @@
 {-# HLINT ignore "Use isDigit" #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
-{-# HLINT ignore "Use if" #-}
-{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-
+  NEW FEATURES NEED(ED):
+    - simple conditions. no nested exprs. basically select/3 with true = 0 and function calls in bodies
+    - pluggable FFI
+-}
 
 module RVLang where
 
@@ -101,7 +107,7 @@ pNumber = do
   val <- (try $ lexeme L.float) <|> (i2d <$> lexeme L.decimal)
   let lbl = constLabel val
 
-  return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] (M.singleton lbl (".double " <> T.pack (show val)))
+  return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] $ M.singleton lbl $ ".double " <> T.pack (show val)
 
 -- PARSING A FUNCTION call such as sin(x)
 pFunc = do
@@ -241,4 +247,4 @@ runCodeGen input =
 
 --- >>> either id T.unpack $ runCodeGen "1 + 2 * 4 + 6 / 2"
 
---- >>> either id T.unpack $ runCodeGen "1 + 2 * 4 + 6 / 2"
+--- >>> either id T.unpack $ runCodeGen "fn f x = x * 2, x = 2, y = 4444, x * y"
