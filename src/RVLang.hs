@@ -12,6 +12,7 @@
 {-# HLINT ignore "Use isAsciiUpper" #-}
 {-# HLINT ignore "Use isDigit" #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+{-# HLINT ignore "Use :" #-}
 
 module RVLang where
 
@@ -140,22 +141,18 @@ pIfExpr = do
   symbol "else"
   elseAttr <- pExpr
   n <- freshLabel
-  let ns        = T.pack (show n)
+  let ns = T.pack (show n)
       elseLabel = ".Lcond_else_" <> ns
-      endLabel  = ".Lcond_end_"  <> ns
+      endLabel = ".Lcond_end_" <> ns
       zeroLabel = ".Llit_0_0"
-      zeroData  = M.singleton zeroLabel ".double 0.0"
+      zeroData = M.singleton zeroLabel ".double 0.0"
       -- evaluate cond; feq with 0; if equal (cond==0) jump to else
-      condCode  = aInstrs condAttr
-                    ++ [ "  la t0, " <> zeroLabel
-                       , "  fld ft1, 0(t0)"
-                       , "  feq.d t0, fa0, ft1"
-                       , "  bnez t0, " <> elseLabel ]
-      thenCode  = aInstrs thenAttr ++ ["  j " <> endLabel]
-      elseCode  = [elseLabel <> ":"] ++ aInstrs elseAttr
-      endCode   = [endLabel <> ":"]
+      condCode = aInstrs condAttr ++ ["  la t0, " <> zeroLabel, "  fld ft1, 0(t0)", "  feq.d t0, fa0, ft1", "  bnez t0, " <> elseLabel]
+      thenCode = aInstrs thenAttr ++ ["  j " <> endLabel]
+      elseCode = [elseLabel <> ":"] ++ aInstrs elseAttr
+      endCode = [endLabel <> ":"]
       allInstrs = condCode ++ thenCode ++ elseCode ++ endCode
-      allData   = M.unions [zeroData, aData condAttr, aData thenAttr, aData elseAttr]
+      allData = M.unions [zeroData, aData condAttr, aData thenAttr, aData elseAttr]
   return $ Attr allInstrs allData
 
 -- fix <fname> : self-recursive fixpoint.
@@ -168,7 +165,7 @@ pFix = do
   env <- ask
   case M.lookup fname (envFunDefs env) of
     Nothing -> customFailure $ UndefinedVar fname
-    Just _  -> return $ Attr ["  la a1, fn_" <> fname, "  call fn_" <> fname] M.empty
+    Just _ -> return $ Attr ["  la a1, fn_" <> fname, "  call fn_" <> fname] M.empty
 
 -- User-defined function call with juxtaposed arguments.
 -- Collects exactly `arity` float argument terms.
@@ -176,7 +173,7 @@ pUserFuncCall = try $ do
   fname <- lexeme $ T.pack <$> some letterChar
   env <- ask
   case M.lookup fname (envFunDefs env) of
-    Nothing    -> fail "not a user defined fn"
+    Nothing -> fail "not a user defined fn"
     Just arity -> do
       args <- mapM (\_ -> pTerm) [1 .. arity]
       return $ emitMultiCall fname args
@@ -193,35 +190,35 @@ emitMultiCall fname args =
       popAll = concatMap popInto (reverse [0 .. n - 1])
       callInstr = ["  call fn_" <> fname]
       allData = M.unions (map aData args)
-  in Attr (pushAll ++ popAll ++ callInstr) allData
+   in Attr (pushAll ++ popAll ++ callInstr) allData
 
 dispatchFunc :: Text -> Attr -> Parser Attr
-dispatchFunc "sin"  arg = return $ applyLibm "sin" arg
-dispatchFunc "cos"  arg = return $ applyLibm "cos" arg
-dispatchFunc "tan"  arg = return $ applyLibm "tan" arg
-dispatchFunc "log"  arg = return $ applyLibm "log" arg
-dispatchFunc "abs"  arg = return $ applyNative "fabs.d fa0, fa0" arg
+dispatchFunc "sin" arg = return $ applyLibm "sin" arg
+dispatchFunc "cos" arg = return $ applyLibm "cos" arg
+dispatchFunc "tan" arg = return $ applyLibm "tan" arg
+dispatchFunc "log" arg = return $ applyLibm "log" arg
+dispatchFunc "abs" arg = return $ applyNative "fabs.d fa0, fa0" arg
 dispatchFunc "sqrt" arg = return $ applyNative "fsqrt.d fa0, fa0" arg
-dispatchFunc other  arg = do
+dispatchFunc other arg = do
   env <- ask
   case M.lookup other (envFunDefs env) of
-    Just _  -> return $ emitMultiCall other [arg]
+    Just _ -> return $ emitMultiCall other [arg]
     Nothing -> case M.lookup other (envVars env) of
       Just VarFnParam -> return $ applyNative "jalr ra, s1, 0" arg
-      _               -> customFailure $ UndefinedVar other
+      _ -> customFailure $ UndefinedVar other
 
 -- VARIABLE usage
 pVariable = do
   varName <- lexeme $ T.pack <$> some letterChar
   env <- ask
   case M.lookup varName (envVars env) of
-    Just (VarData lbl)     -> return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] M.empty
+    Just (VarData lbl) -> return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] M.empty
     -- Float param 0 is already in fa0 (no-op); param n moves from fa<n> to fa0
     Just (VarFloatParam 0) -> return $ Attr [] M.empty
     Just (VarFloatParam n) -> return $ Attr ["  fmv.d fa0, fa" <> T.pack (show n)] M.empty
     -- VarFnParam: address is in s1; call it with current fa0 as argument
-    Just VarFnParam        -> return $ Attr ["  jalr ra, s1, 0"] M.empty
-    Nothing                -> customFailure (UndefinedVar varName)
+    Just VarFnParam -> return $ Attr ["  jalr ra, s1, 0"] M.empty
+    Nothing -> customFailure (UndefinedVar varName)
 
 pBinding :: Parser (Text, Text, Text)
 pBinding = do
@@ -242,45 +239,36 @@ pParams = do
     name <- lexeme $ T.pack <$> some letterChar
     return (name, isFn)
   let assign _ [] = []
-      assign floatIdx ((name, True) : rest)  = (name, VarFnParam)          : assign floatIdx rest
+      assign floatIdx ((name, True) : rest) = (name, VarFnParam) : assign floatIdx rest
       assign floatIdx ((name, False) : rest) = (name, VarFloatParam floatIdx) : assign (floatIdx + 1) rest
-      tagged    = assign 0 rawParams
-      floatAr   = length (filter (\(_, vs) -> case vs of VarFloatParam _ -> True; _ -> False) tagged)
+      tagged = assign 0 rawParams
+      floatAr = length (filter (\(_, vs) -> case vs of VarFloatParam _ -> True; _ -> False) tagged)
   return (tagged, floatAr)
 
 -- Parse and compile a function definition (single pass), returning (name, arity, codeBlock, dataMap)
 pFnDef :: Parser (Text, Int, [Text], M.Map Text Text)
 pFnDef = do
   symbol "fn"
-  fname  <- lexeme $ T.pack <$> some letterChar
+  fname <- lexeme $ T.pack <$> some letterChar
   (params, arity) <- pParams
   symbol "="
 
   env <- ask
   let paramMap = M.fromList params
-      fnEnv    = env {envVars = M.union paramMap (envVars env)}
+      fnEnv = env {envVars = M.union paramMap (envVars env)}
   bodyAttr <- local (const fnEnv) pExpr
 
   symbol ","
 
   let usesFnPtr = any (\(_, vs) -> vs == VarFnParam) params
-      hasCall   = any (T.isInfixOf "call") (aInstrs bodyAttr)
-                  || any (T.isInfixOf "jalr") (aInstrs bodyAttr)
+      hasCall = any (T.isInfixOf "call") (aInstrs bodyAttr) || any (T.isInfixOf "jalr") (aInstrs bodyAttr)
       needsFrame = hasCall || usesFnPtr
       -- 16-byte frame: slot 8(sp) = ra (saved when hasCall), slot 0(sp) = s1 (saved when usesFnPtr)
-      prologue  = if needsFrame
-                    then ["  addi sp, sp, -16"]
-                         ++ (if hasCall    then ["  sd ra, 8(sp)"] else [])
-                         ++ (if usesFnPtr  then ["  sd s1, 0(sp)"] else [])
-                    else []
+      prologue = if needsFrame then ["  addi sp, sp, -16"] ++ (if hasCall then ["  sd ra, 8(sp)"] else []) ++ (if usesFnPtr then ["  sd s1, 0(sp)"] else []) else []
       -- Save a1 into s1 right after prologue
       fnPtrInit = if usesFnPtr then ["  mv s1, a1"] else []
-      epilogue  = if needsFrame
-                    then (if usesFnPtr  then ["  ld s1, 0(sp)"] else [])
-                         ++ (if hasCall then ["  ld ra, 8(sp)"] else [])
-                         ++ ["  addi sp, sp, 16"]
-                    else []
-      block     = ("fn_" <> fname <> ":") : prologue ++ fnPtrInit ++ aInstrs bodyAttr ++ epilogue ++ ["  ret"]
+      epilogue = if needsFrame then (if usesFnPtr then ["  ld s1, 0(sp)"] else []) ++ (if hasCall then ["  ld ra, 8(sp)"] else []) ++ ["  addi sp, sp, 16"] else []
+      block = ("fn_" <> fname <> ":") : prologue ++ fnPtrInit ++ aInstrs bodyAttr ++ epilogue ++ ["  ret"]
 
   return (fname, arity, block, aData bodyAttr)
 
@@ -303,37 +291,46 @@ pProgram = do
   bindings <- many (try pBinding)
 
   -- Build environment with all functions and variables known
-  let fnMap    = M.fromList [(fname, ar) | (fname, ar, _, _) <- fnResults]
-      withFns  = baseEnv {envFunDefs = fnMap}
+  let fnMap = M.fromList [(fname, ar) | (fname, ar, _, _) <- fnResults]
+      withFns = baseEnv {envFunDefs = fnMap}
       withVars = foldl (\e (name, lbl, _) -> e {envVars = M.insert name (VarData lbl) (envVars e)}) withFns bindings
 
   mainAttr <- local (const withVars) pExpr
 
   -- Assemble .data and .text sections
-  let builtins  = M.fromList [ (".Lconst_pi", ".double 3.141592653589793")
-                              , (".Lconst_e",  ".double 2.718281828459045")
-                              , (".Lfmt",      ".asciz \"Result: %.10g\\n\"")
-                              , (".Llit_0_0",  ".double 0.0") ]
+  let builtins =
+        M.fromList
+          [ (".Lconst_pi", ".double 3.141592653589793"),
+            (".Lconst_e", ".double 2.718281828459045"),
+            (".Lfmt", ".asciz \"Result: %.10g\\n\""),
+            (".Llit_0_0", ".double 0.0")
+          ]
       varEntries = M.fromList [(lbl, entry) | (_, lbl, entry) <- bindings]
-      fnData     = [dataMap | (_, _, _, dataMap) <- fnResults]
-      allData    = foldl M.union (M.union builtins varEntries) (aData mainAttr : fnData)
-      dataLines  = [lbl <> ": " <> def | (lbl, def) <- M.toAscList allData]
-      fnCode     = concatMap (\(_, _, block, _) -> block) fnResults
-      mainBlock  = ["main:", "  addi sp, sp, -16", "  sd ra, 8(sp)"]
-                   ++ aInstrs mainAttr
-                   ++ ["  fmv.x.d a1, fa0", "  la a0, .Lfmt", "  call printf", "  ld ra, 8(sp)", "  addi sp, sp, 16", "  li a0, 0", "  ret"]
-      assembly   = T.unlines $ [".data"] ++ dataLines ++ ["", ".text", ".global main", ""]
-                               ++ fnCode ++ (if null fnCode then [] else [""])
-                               ++ mainBlock
+      fnData = [dataMap | (_, _, _, dataMap) <- fnResults]
+      allData = foldl M.union (M.union builtins varEntries) (aData mainAttr : fnData)
+      dataLines = [lbl <> ": " <> def | (lbl, def) <- M.toAscList allData]
+      fnCode = concatMap (\(_, _, block, _) -> block) fnResults
+      mainBlock =
+        ["main:", "  addi sp, sp, -16", "  sd ra, 8(sp)"]
+          ++ aInstrs mainAttr
+          ++ ["  fmv.x.d a1, fa0", "  la a0, .Lfmt", "  call printf", "  ld ra, 8(sp)", "  addi sp, sp, 16", "  li a0, 0", "  ret"]
+      assembly =
+        T.unlines $
+          [".data"]
+            ++ dataLines
+            ++ ["", ".text", ".global main", ""]
+            ++ fnCode
+            ++ (if null fnCode then [] else [""])
+            ++ mainBlock
 
   return assembly
 
 runCodeGen input =
-  let baseEnv  = Env {envVars = M.fromList [("pi", VarData ".Lconst_pi"), ("e", VarData ".Lconst_e")], envFunDefs = M.empty}
-      parser   = runReaderT (pProgram <* eof) baseEnv
+  let baseEnv = Env {envVars = M.fromList [("pi", VarData ".Lconst_pi"), ("e", VarData ".Lconst_e")], envFunDefs = M.empty}
+      parser = runReaderT (pProgram <* eof) baseEnv
       stParser = runStateT parser 0
    in case parse stParser "" input of
-        Left bundle  -> Left $ errorBundlePretty bundle
+        Left bundle -> Left $ errorBundlePretty bundle
         Right (asm, _) -> Right asm
 
 --- >>> either id T.unpack $ runCodeGen "1 + 2 * 4 + 6 / 2"
