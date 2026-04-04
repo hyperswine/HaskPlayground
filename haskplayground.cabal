@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      FPActorProgram
       FPActors
       FPRActor
       Gameloop
@@ -121,6 +122,8 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      FParser
+      FPInterpreter
       NPrologTest
       ProcessorTest
       RVLangTest
