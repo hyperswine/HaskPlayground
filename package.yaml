@@ -45,6 +45,9 @@ dependencies:
 - prettyprinter
 - prettyprinter-ansi-terminal
 - temporary
+- brick
+- vty
+- vty-crossplatform
 
 ghc-options:
 - -Wall
