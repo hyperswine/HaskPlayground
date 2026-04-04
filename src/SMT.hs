@@ -194,7 +194,7 @@ data DamageType = Physical | Magical
   deriving (Eq,Show)
 
 moveInfo :: Move -> (String, DamageType, Int)
-moveInfo SwordAttack = ("Sword Atk", Physical, 35)
+moveInfo SwordAttack = ("Sword Atk", Physical, 8)
 moveInfo FireAttack  = ("Fire Atk",  Magical,  45)
 moveInfo PoisonCloud = ("Poison",    Magical,  30)
 moveInfo DarkSlash   = ("Dark Slash",Physical, 40)
@@ -267,7 +267,7 @@ data WorldDemon = WorldDemon
   } deriving (Eq,Show)
 
 -- Battle menu focus
-data BattleMenu = MenuFight | MenuSummon | MenuBag | MenuRun | MenuRecruit
+data BattleMenu = MenuFight | MenuSummon | MenuRecruit | MenuBag | MenuRun
   deriving (Eq,Show,Enum,Bounded)
 
 -- Which move is highlighted in fight submenu
@@ -275,6 +275,7 @@ data BattlePhase
   = PlayerMenu                    -- main 4-option menu
   | PlayerFight Int               -- move selection, index
   | PlayerSummon Int              -- summon slot selection
+  | AllyTurn String               -- ally's action message
   | EnemyTurn String              -- showing enemy action message
   | BattleOver Bool               -- True=won, False=fled
   deriving (Eq,Show)
@@ -386,7 +387,7 @@ initialState = GameState
 
 -- Viewport: tiles visible around player
 vTilesW, vTilesH :: Int
-vTilesW = 13; vTilesH = 11
+vTilesW = 27; vTilesH = 22
 
 viewW, viewH :: Int
 viewW = vTilesW * sw; viewH = vTilesH * sh
@@ -538,16 +539,23 @@ renderBattle gs bs =
           hpBar = replicate hpPct '█' ++ replicate (16-hpPct) '░'
           nameL  = V.string (bold cyn) $ combName p
           statsL = V.string dim $ "HP " ++ hpBar ++ " " ++ show (combHP p) ++ "/" ++ show (combMaxHP p)
-          allyInfo = case bAlly bs of
-            Nothing -> [V.string dim "(no summon)"]
+          playerSprImg = V.vertCat $ map renderSprRow (largeSpr playerSpr)
+          allySec = case bAlly bs of
+            Nothing -> V.horizCat [ playerSprImg, V.string V.defAttr "  ", V.string dim "(no summon)" ]
             Just a  ->
               let apct = combHP a * 16 `div` combMaxHP a
                   abar = replicate apct '█' ++ replicate (16-apct) '░'
-              in [ V.string (bold yel) $ combName a
-                 , V.string dim $ "HP " ++ abar ++ " " ++ show (combHP a) ++ "/" ++ show (combMaxHP a)
-                 ]
-          sprImg = V.vertCat $ map renderSprRow (largeSpr playerSpr)
-      in V.vertCat $ [nameL, statsL, V.string V.defAttr ""] ++ allyInfo ++ [V.string V.defAttr "", sprImg]
+                  aStatus = if combHP a <= 0 then " (fallen)" else ""
+                  allySprImg = V.vertCat $ map renderSprRow
+                                 (largeSpr (demonSprite (fromMaybe SwordDemon (combKind a))))
+                  allyStats  = V.vertCat
+                    [ V.string (bold yel) $ combName a ++ aStatus
+                    , V.string dim $ "HP " ++ abar ++ " " ++ show (combHP a) ++ "/" ++ show (combMaxHP a)
+                    ]
+              in V.horizCat [ playerSprImg, V.string V.defAttr "  "
+                            , allySprImg,   V.string V.defAttr "  "
+                            , allyStats ]
+      in V.vertCat [ nameL, statsL, V.string V.defAttr "", allySec ]
 
     renderSprRow row = V.horizCat $ map (\(SCell ch (r,g,b)) ->
       V.char (V.withForeColor V.defAttr (V.rgbColor r g b)) ch) row
@@ -562,12 +570,16 @@ renderBattle gs bs =
       in V.vertCat $ map (\l -> V.string dim $ " " ++ take 35 l) padded
 
     actionPanel = case bPhase bs of
-      PlayerMenu      -> mainMenuImg
-      PlayerFight idx -> fightMenuImg idx
+      PlayerMenu       -> mainMenuImg
+      PlayerFight idx  -> fightMenuImg idx
       PlayerSummon idx -> summonMenuImg idx
-      EnemyTurn msg   -> V.vertCat
+      AllyTurn msg     -> V.vertCat
+        [ V.string (bold yel) $ " " ++ msg
+        , V.string dim " ..."
+        ]
+      EnemyTurn msg    -> V.vertCat
         [ V.string (fg 200 120 80) $ " " ++ msg
-        , V.string dim " (press any key)"
+        , V.string dim " ..."
         ]
       BattleOver True  -> V.string grn " ★ Victory! (any key)"
       BattleOver False -> V.string dim " ★ Fled! (any key)"
@@ -597,7 +609,7 @@ renderBattle gs bs =
                dtStr = case dt of Physical -> "PHY"; Magical -> "MAG"
            in V.string a $ (if i==idx then " ▸ " else "   ") ++ nm ++ " [" ++ dtStr ++ " " ++ show pw ++ "]"
          ) [0..] moves
-         ++ [V.string dim "   (ESC back)"]
+         ++ [V.string dim "   (< back)"]
 
     summonMenuImg idx =
       let party = playerParty (player gs)
@@ -610,7 +622,7 @@ renderBattle gs bs =
                  a = if i==idx then bold (fg 255 230 80) else fg 170 170 170
              in V.string a $ (if i==idx then " ▸ " else "   ") ++ dName t
            ) [0..] party
-         ++ [V.string dim "   (ESC back)"]
+         ++ [V.string dim "   (< back)"]
 
 -- ===========================================================================
 -- DEMON WANDERING
@@ -732,6 +744,10 @@ handleBattleKey key gs bs = case bPhase bs of
               else addMsg "You fled the battle." gs1
     in gs2
 
+  AllyTurn _ ->
+    let bs1 = allyAction bs
+    in gs { screen = Fighting bs1 }
+
   EnemyTurn _ ->
     let bs1 = enemyAction bs
         bs2 = checkBattleEnd bs1
@@ -751,7 +767,7 @@ handleBattleKey key gs bs = case bPhase bs of
     V.KDown  -> gs { screen = Fighting bs { bPhase = PlayerFight (min (length (combMoves (bPlayer bs))-1) (idx+1)) } }
     V.KChar 'w' -> gs { screen = Fighting bs { bPhase = PlayerFight (max 0 (idx-1)) } }
     V.KChar 's' -> gs { screen = Fighting bs { bPhase = PlayerFight (min (length (combMoves (bPlayer bs))-1) (idx+1)) } }
-    V.KEsc   -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
+    V.KLeft  -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
     V.KEnter -> executePlayerMove gs bs idx
     V.KChar ' ' -> executePlayerMove gs bs idx
     _        -> gs
@@ -761,7 +777,7 @@ handleBattleKey key gs bs = case bPhase bs of
     V.KDown  -> gs { screen = Fighting bs { bPhase = PlayerSummon (min (length (playerParty (player gs))-1) (idx+1)) } }
     V.KChar 'w' -> gs { screen = Fighting bs { bPhase = PlayerSummon (max 0 (idx-1)) } }
     V.KChar 's' -> gs { screen = Fighting bs { bPhase = PlayerSummon (min (length (playerParty (player gs))-1) (idx+1)) } }
-    V.KEsc   -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
+    V.KLeft  -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
     V.KEnter -> executeSummon gs bs idx
     V.KChar ' ' -> executeSummon gs bs idx
     _        -> gs
@@ -801,6 +817,27 @@ tryRecruit gs bs =
        in addMsg msg $
           gs { player = pl', screen = Fighting (blogMsg msg bs') }
 
+allyOrEnemyPhase :: BattleState -> BattlePhase
+allyOrEnemyPhase bs = case bAlly bs of
+  Just a | combHP a > 0 -> AllyTurn (combName a ++ "'s turn!")
+  _                      -> EnemyTurn (combName (bEnemy bs) ++ "'s turn!")
+
+allyAction :: BattleState -> BattleState
+allyAction bs = case bAlly bs of
+  Nothing                -> bs { bPhase = EnemyTurn (combName (bEnemy bs) ++ "'s turn!") }
+  Just a | combHP a <= 0 -> bs { bPhase = EnemyTurn (combName (bEnemy bs) ++ "'s turn!") }
+  Just a  ->
+    let mvs = combMoves a
+        mv  = mvs !! (length (bLog bs) `mod` length mvs)
+        (nm,_,_) = moveInfo mv
+        dmg = calcDamage a (bEnemy bs) mv
+        msg = combName a ++ " uses " ++ nm ++ "! " ++ show dmg ++ " dmg"
+        bs1 = dealToEnemy dmg $ blogMsg msg bs
+        bs2 = checkBattleEnd bs1
+    in case bPhase bs2 of
+         BattleOver _ -> bs2
+         _            -> bs2 { bPhase = EnemyTurn (combName (bEnemy bs2) ++ "'s turn!") }
+
 executePlayerMove :: GameState -> BattleState -> Int -> GameState
 executePlayerMove gs bs idx =
   let mv      = combMoves (bPlayer bs) !! idx
@@ -810,8 +847,8 @@ executePlayerMove gs bs idx =
       bs1     = dealToEnemy dmg $ blogMsg msg bs
       bs2     = checkBattleEnd bs1
       bs3     = case bPhase bs2 of
-                  PlayerMenu -> bs2 { bPhase = EnemyTurn (combName (bEnemy bs2) ++ "'s turn!") }
-                  other      -> bs2
+                  BattleOver _ -> bs2
+                  _            -> bs2 { bPhase = allyOrEnemyPhase bs2 }
   in gs { screen = Fighting bs3 }
 
 executeSummon :: GameState -> BattleState -> Int -> GameState
@@ -870,8 +907,16 @@ tryAttack gs =
 handleEvent :: BrickEvent Name AppEvent -> EventM Name GameState ()
 handleEvent (AppEvent Tick) =
   modify $ \gs -> gs { animTick = animTick gs + 1 }
-handleEvent (AppEvent DemonTick) =
-  modify stepDemons
+handleEvent (AppEvent DemonTick) = modify $ \gs ->
+  case screen gs of
+    Fighting bs -> case bPhase bs of
+      AllyTurn _  -> gs { screen = Fighting (allyAction bs) }
+      EnemyTurn _ ->
+        let bs1 = enemyAction bs
+            bs2 = checkBattleEnd bs1
+        in gs { screen = Fighting bs2 }
+      _           -> stepDemons gs
+    _ -> stepDemons gs
 handleEvent (VtyEvent (V.EvKey V.KEsc _)) = halt
 handleEvent (VtyEvent (V.EvKey key _)) = do
   gs <- get
