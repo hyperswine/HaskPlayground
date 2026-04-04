@@ -25,11 +25,11 @@ source-repository head
 
 library
   exposed-modules:
-      FPActorProgram
-      FPActors
+      ExActor2
+      ExActors
+      ExProgramActor
       FParser
       FPInterpreter
-      FPRActor
       FPRunner
       Gameloop
       Lib

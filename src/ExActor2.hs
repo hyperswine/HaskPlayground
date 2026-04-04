@@ -6,7 +6,7 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# HLINT ignore "Use record patterns" #-}
 
-module FPRActor where
+module ExActor2 where
 
 import Control.Concurrent
 import Control.Concurrent.STM

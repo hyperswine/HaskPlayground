@@ -4,7 +4,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
-module FPActors where
+module ExActors where
 
 import Control.Concurrent (forkIO, newEmptyMVar, newMVar, putMVar, takeMVar, threadDelay, withMVar)
 import Control.Concurrent.STM

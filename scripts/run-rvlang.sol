@@ -21,7 +21,7 @@ tmp_bin = "/tmp/rvlang_out".
 src_file = getenv "RVLANG_FILE" |> unwrap_or "".
 src_expr = getenv "RVLANG_EXPR" |> unwrap_or "".
 
-source = if != src_file "" then read src_file else if != src_expr "" then src_expr else   "".
+source = if != src_file "" then read src_file else if != src_expr "" then src_expr else "".
 
 if == source "" then echo "Error: set RVLANG_FILE=<path> or RVLANG_EXPR='<expression>'" |> exit 1.
 
@@ -52,7 +52,8 @@ write tmp_hs runner.
 echo "Generating assembly ...".
 codegen = sh "stack exec -- runghc {tmp_hs}".
 
-if failed codegen then echo "Codegen error:" |> echo codegen|stderr |> exit 1.
+res = if failed codegen then echo "Codegen error:" else "".
+# res' = if res then echo codegen|stderr |> exit 1.
 
 asm = codegen|stdout.
 write tmp_asm asm.

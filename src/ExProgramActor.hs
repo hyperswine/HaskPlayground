@@ -3,7 +3,7 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module FPActorProgram where
+module ExProgramActor where
 
 import Control.Monad (forM_, when, unless)
 import Control.Monad.Except
