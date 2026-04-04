@@ -31,34 +31,28 @@ examples =
   ]
 
 runOnSpike :: IO ()
-runOnSpike = withSystemTempDirectory "rvlang-spike" $ \dir -> do
-  mapM_ (runOne dir) examples
+runOnSpike = withSystemTempDirectory "rvlang-spike" $ \dir -> mapM_ (runOne dir) examples
 
 runOne :: FilePath -> (String, String) -> IO ()
 runOne dir (label, src) = do
   putStrLn $ "=== " <> label <> " ==="
   putStrLn $ "  src : " <> src
-  case runCodeGen (T.pack src) of
+  case runCodeGen $ T.pack src of
     Left err -> putStrLn $ "  CODEGEN ERROR:\n" <> err
     Right asm -> do
       let asmFile = dir </> label <> ".s"
           binFile = dir </> label
+
       TIO.writeFile asmFile asm
+
       -- Compile: -static links newlib printf; -lm for sin/cos/pow/sqrt
-      (cc_ec, cc_out, cc_err) <-
-        readProcessWithExitCode
-          cc
-          [asmFile, "-o", binFile, "-static", "-lm", "-O0"]
-          ""
+      (cc_ec, cc_out, cc_err) <- readProcessWithExitCode cc [asmFile, "-o", binFile, "-static", "-lm", "-O0"] ""
+
       case cc_ec of
         ExitFailure _ -> putStrLn $ "  COMPILE ERROR:\n" <> cc_err <> cc_out
+        -- Run under spike + pk
         ExitSuccess -> do
-          -- Run under spike + pk
-          (sp_ec, sp_out, sp_err) <-
-            readProcessWithExitCode
-              "spike"
-              [pk, binFile]
-              ""
+          (sp_ec, sp_out, sp_err) <- readProcessWithExitCode "spike" [pk, binFile] ""
           case sp_ec of
             ExitSuccess -> putStrLn $ "  output: " <> sp_out
             ExitFailure c -> putStrLn $ "  SPIKE EXIT " <> show c <> ":\n" <> sp_err <> sp_out
