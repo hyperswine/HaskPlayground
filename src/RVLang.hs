@@ -15,8 +15,15 @@
 
 {-
   NEW FEATURES NEED(ED):
-    - simple conditions. no nested exprs. basically select/3 with true = 0 and function calls in bodies
-    - pluggable FFI
+    - simple conditions. no nested exprs. basically select/3 with true = 0 and function calls in bodies. no other stuff
+    - pluggable FFI based on open, close, read, write, seek
+    - have integers as well as doubles especially for the FFI stuff
+
+    Use StateT as well for counter to emit branch labels for one-pass
+    Use Integers alongside floats. Default to ints unless using floats like 0.0. If anything uses floats like 1.90 + 1 then use float for both
+    Multi arg tuple functions using juxtaposition syntax. Requires full application to call
+
+    Maintain single function call, single operator expression, single var style, no complex style
 -}
 
 module RVLang where
