@@ -1,8 +1,9 @@
 module Main where
 
-import qualified RVAsm
-import qualified NProlog
-import qualified Gameloop
+import qualified Civ4x
 import qualified FPRunner
+import qualified Gameloop
+import qualified NProlog
+import qualified RVAsm
 
-main = FPRunner.main
+main = Civ4x.main
