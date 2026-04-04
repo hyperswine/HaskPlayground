@@ -71,8 +71,9 @@ mulA = binaryOp "fmul.d fa0, ft0, fa0"
 
 divA = binaryOp "fdiv.d fa0, ft0, fa0"
 
--- WHEN SEE A POW OP, CREATE SYNTHESIZED ATTRIBUTE based on left and right operands x ^ n. x in fa1, n in fa0
-powA (Attr cl dl) (Attr cr dr) = Attr (cl ++ pushFa0 ++ cr ++ ["  fmv.d fa1, fa0"] ++ ["  fld fa0, 0(sp)"] ++ ["  call pow"]) (M.union dl dr)
+-- WHEN SEE A POW OP, CREATE SYNTHESIZED ATTRIBUTE based on left and right operands x ^ n. x in fa0, n in fa1
+-- pushFa0 saves x; cr evaluates n into fa0; fmv moves n to fa1; then pop x into fa0; call pow.
+powA (Attr cl dl) (Attr cr dr) = Attr (cl ++ pushFa0 ++ cr ++ ["  fmv.d fa1, fa0", "  fld fa0, 0(sp)", "  addi sp, sp, 8", "  call pow"]) (M.union dl dr)
 
 modA (Attr cl dl) (Attr cr dr) = Attr (cl ++ pushFa0 ++ cr ++ ["  fcvt.l.d a1, fa0, rtz"] ++ ["  fld fa0, 0(sp)", "  addi sp, sp, 8"] ++ ["  fcvt.l.d a0, fa0, rtz"] ++ ["  rem a0, a0, a1"] ++ ["  fcvt.d.l fa0, a0"]) (M.union dl dr)
 
@@ -205,7 +206,9 @@ dispatchFunc other  arg = do
   env <- ask
   case M.lookup other (envFunDefs env) of
     Just _  -> return $ emitMultiCall other [arg]
-    Nothing -> customFailure $ UndefinedVar other
+    Nothing -> case M.lookup other (envVars env) of
+      Just VarFnParam -> return $ applyNative "jalr ra, s1, 0" arg
+      _               -> customFailure $ UndefinedVar other
 
 -- VARIABLE usage
 pVariable = do
