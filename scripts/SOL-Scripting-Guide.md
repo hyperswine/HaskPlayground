@@ -371,26 +371,3 @@ echo (type "hi").    # string
 ```
 
 ---
-
-## A Longer Example
-
-```sol
-#!/usr/bin/env sol
-
-# Build and push a Docker service
-build_and_push service registry tag =
-  echo "Building {service}...".
-  build = sh "docker build -t {service}:{tag} .".
-  if failed build then
-    echo build|stderr
-    exit 1.
-  push = sh "docker push {registry}/{service}:{tag}".
-  push |> unwrap_or_exit "Push failed".
-
-registry = getenv "REGISTRY" |> unwrap_or "registry.example.com".
-tag = getenv "TAG" |> unwrap_or "latest".
-services = ["api", "worker", "frontend"].
-
-each (s = build_and_push s registry tag) services.
-echo "All services deployed!".
-```
