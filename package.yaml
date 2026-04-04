@@ -44,6 +44,7 @@ dependencies:
 - haskeline
 - prettyprinter
 - prettyprinter-ansi-terminal
+- temporary
 
 ghc-options:
 - -Wall
