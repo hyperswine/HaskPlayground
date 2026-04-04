@@ -13,10 +13,16 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import System.IO.Unsafe (unsafePerformIO)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- VALUES
+-- =============================================================================
+-- STAGE 1 ── AST TYPES
+-- The language's three core data types: runtime values, syntax tree nodes,
+-- and patterns used in destructuring / receive clauses.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- § Values
 -- Every value carries a constructor tag so type/1 is always available.
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
 
 data Value
   = VInt Int
@@ -52,9 +58,9 @@ instance Show Value where
 commas :: (Show a) => [a] -> String
 commas = foldr (\x acc -> show x ++ if null acc then "" else ", " ++ acc) ""
 
--- ─────────────────────────────────────────────────────────────────────────────
--- EXPRESSIONS  (the AST)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Expressions  (the AST)
+-- -----------------------------------------------------------------------------
 
 data Expr
   = Lit Value
@@ -81,6 +87,10 @@ data Expr
   | LookupIso TypeName TypeName -- iso A B  → Just (fwd, bkwd) | Nothing
   deriving (Show)
 
+-- -----------------------------------------------------------------------------
+-- § Patterns  (used in Receive clauses and future pattern-match expressions)
+-- -----------------------------------------------------------------------------
+
 data Pattern
   = PVar String -- binds anything
   | PTagged String [Pattern] -- constructor match
@@ -88,9 +98,11 @@ data Pattern
   | PWild -- _
   deriving (Show)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ENVIRONMENT
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 2 ── ENVIRONMENT
+-- A flat name → Value map threaded through evaluation.
+-- Lookup fails loudly on unbound names; extend by insertion.
+-- =============================================================================
 
 type Env = Map String Value
 
@@ -100,9 +112,18 @@ envLookup k e = fromMaybe (error $ "Unbound: " ++ k) (Map.lookup k e)
 envExtend :: String -> Value -> Env -> Env
 envExtend = Map.insert
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ACTOR IDENTITY
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 3 ── RUNTIME INFRASTRUCTURE
+-- Pure data structures and their operations for the four shared resources
+-- (heap, mailbox, iso map, registry) and the per-actor state record that
+-- bundles them together.  No IO or ActorM yet — just plain types.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- § Actor identity
+-- Each actor is addressed by (ProcessId, ActorId); within a process,
+-- ActorId (a String) is the stable handle used for sends.
+-- -----------------------------------------------------------------------------
 
 type ProcessId = Int
 
@@ -110,10 +131,10 @@ type ActorId = String
 
 type ActorAddr = (ProcessId, ActorId)
 
--- ─────────────────────────────────────────────────────────────────────────────
--- RC ALLOCATOR
--- Each actor has its own heap: a map from HeapRef to (Value, refcount)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Heap  (per-actor reference-counted allocator)
+-- Maps HeapRef → (Value, refcount).  Dealloc decrements; drops at 0.
+-- -----------------------------------------------------------------------------
 
 type HeapRef = Int
 
@@ -148,9 +169,9 @@ heapGet ref h =
     Nothing -> error $ "heapGet: invalid ref " ++ show ref
     Just (v, _) -> v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- MAILBOX  (bounded, crashes on overflow)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Mailbox  (bounded, crashes on overflow)
+-- -----------------------------------------------------------------------------
 
 mailboxCapacity :: Int
 mailboxCapacity = 64
@@ -180,10 +201,10 @@ mailboxPop mb = do
   modifyTVar' (mbSize mb) (subtract 1)
   return v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ISO MAP  (process-global type isomorphism registry)
--- Maps (TypeName, TypeName) -> (fwd :: a->b, bkwd :: b->a)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Iso map  (process-global type isomorphism registry)
+-- Maps (TypeName, TypeName) → (fwd :: a→b, bkwd :: b→a)
+-- -----------------------------------------------------------------------------
 
 type TypeName = String
 
@@ -201,21 +222,9 @@ isoRegister im a b fwd bkwd =
 isoLookup :: IsoMap -> TypeName -> TypeName -> IO (Maybe (Value, Value))
 isoLookup im a b = Map.lookup (a, b) <$> readTVarIO im
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ACTOR STATE  (mutable, owned by one thread)
--- ─────────────────────────────────────────────────────────────────────────────
-
-data ActorState = ActorState
-  { actorAddr :: ActorAddr,
-    actorHeap :: IORef Heap,
-    actorMailbox :: Mailbox,
-    actorRegistry :: Registry, -- shared across all actors in process
-    actorIsoMap :: IsoMap -- shared across all actors in process
-  }
-
--- ─────────────────────────────────────────────────────────────────────────────
--- REGISTRY  (process-global, maps ActorId to Mailbox)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Registry  (process-global actor directory: ActorId → Mailbox)
+-- -----------------------------------------------------------------------------
 
 type Registry = TVar (Map ActorId Mailbox)
 
@@ -229,9 +238,23 @@ registryRegister reg aid mb =
 registryLookup :: Registry -> ActorId -> IO (Maybe Mailbox)
 registryLookup reg aid = Map.lookup aid <$> readTVarIO reg
 
--- ─────────────────────────────────────────────────────────────────────────────
--- ACTORM MONAD  (IO with actor state threaded)
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Actor state  (mutable, owned by one thread)
+-- Bundles an actor's private heap with the shared registry and iso map.
+-- -----------------------------------------------------------------------------
+
+data ActorState = ActorState
+  { actorAddr :: ActorAddr,
+    actorHeap :: IORef Heap,
+    actorMailbox :: Mailbox,
+    actorRegistry :: Registry, -- shared across all actors in process
+    actorIsoMap :: IsoMap -- shared across all actors in process
+  }
+
+-- =============================================================================
+-- STAGE 4 ── EFFECT LAYER  (ActorM monad)
+-- IO threaded with an implicit ActorState.  All eval-time effects run here.
+-- =============================================================================
 
 newtype ActorM a = ActorM {runActorM :: ActorState -> IO a}
 
@@ -256,9 +279,15 @@ actorFail :: String -> ActorM a
 actorFail msg = ActorM $ \st ->
   error $ "[Actor " ++ show (actorAddr st) ++ "] " ++ msg
 
--- ─────────────────────────────────────────────────────────────────────────────
--- HEAP OPERATIONS IN ACTORM
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 5 ── EFFECTFUL OPERATIONS
+-- ActorM actions for heap mutation, inter-actor messaging, and spawning.
+-- These are thin wrappers over the pure Stage 3 functions that thread IO.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- § Heap operations
+-- -----------------------------------------------------------------------------
 
 allocValue :: Value -> ActorM Value
 allocValue v = ActorM $ \st -> do
@@ -278,9 +307,9 @@ getRef (VTagged "Ref" [VInt ref]) = ActorM $ \st -> do
   return (heapGet ref heap)
 getRef v = actorFail $ "getRef: not a Ref: " ++ show v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- SEND / RECEIVE / SPAWN
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Messaging  (send / receive / spawn)
+-- -----------------------------------------------------------------------------
 
 actorSend :: ActorId -> Value -> ActorM ()
 actorSend targetId msg = ActorM $ \st -> do
@@ -330,9 +359,16 @@ freshActorId reg base = do
         then return candidate
         else freshActorId reg base -- retry on collision
 
--- ─────────────────────────────────────────────────────────────────────────────
--- type/1  and  function/1
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 6 ── EVALUATION
+-- eval walks the AST and reduces every node to a Value inside ActorM.
+-- Helper functions (value reflection, pattern matching) live here first so
+-- the main eval body reads as a straight top-to-bottom reduction table.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- § Value reflection  (type/1 and function/1)
+-- -----------------------------------------------------------------------------
 
 typeOf :: Value -> Value
 typeOf (VInt _) = VType "Int"
@@ -351,9 +387,9 @@ fnNameOf (VFn n _ _ _) = VStr n
 fnNameOf (VPrim n _) = VStr n
 fnNameOf v = error $ "function/1: not a function: " ++ show v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- PATTERN MATCHING
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § Pattern matching
+-- -----------------------------------------------------------------------------
 
 matchPattern :: Pattern -> Value -> Maybe Env
 matchPattern PWild _ = Just Map.empty
@@ -379,9 +415,9 @@ matchClauses ((p, e) : rest) v =
     Just binds -> Just (binds, e)
     Nothing -> matchClauses rest v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- EVALUATOR
--- ─────────────────────────────────────────────────────────────────────────────
+-- -----------------------------------------------------------------------------
+-- § eval  (the main reduction table)
+-- -----------------------------------------------------------------------------
 
 eval :: Env -> Expr -> ActorM Value
 eval env = \case
@@ -475,9 +511,11 @@ applyFn (VFn _ closedEnv params body) args
 applyFn (VPrim _ f) args = f args
 applyFn v _ = actorFail $ "apply: not a function: " ++ show v
 
--- ─────────────────────────────────────────────────────────────────────────────
--- BOOTSTRAP  — create the main actor and run a program
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 7 ── BOOTSTRAP
+-- Wire up a fresh process (registry, iso map, main mailbox, heap) and run
+-- a program expression in the context of a "main" actor.
+-- =============================================================================
 
 runProgram :: Env -> Expr -> IO Value
 runProgram baseEnv prog = do
@@ -490,9 +528,11 @@ runProgram baseEnv prog = do
   registryRegister reg "main" mb
   runActorM (eval baseEnv prog) state
 
--- ─────────────────────────────────────────────────────────────────────────────
--- PRIMITIVES  (small std-like set)
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- STAGE 8 ── BUILT-IN PRIMITIVES
+-- primEnv is the starting environment handed to every program.  Each entry
+-- is a VPrim wrapping a plain Haskell function lifted into ActorM.
+-- =============================================================================
 
 primEnv :: Env
 primEnv =
@@ -570,9 +610,9 @@ primWithIso [VTagged "Nothing" [], _] =
 primWithIso _ =
   actorFail "withIso: bad arguments"
 
--- ─────────────────────────────────────────────────────────────────────────────
--- EXAMPLE PROGRAMS
--- ─────────────────────────────────────────────────────────────────────────────
+-- =============================================================================
+-- EXAMPLES  (inline test programs; main entry point is in Main.hs)
+-- =============================================================================
 
 -- ── Example 1: type/1 reflection ────────────────────────────────────────────
 -- let x = Num 5
