@@ -4,5 +4,6 @@ import qualified RVAsm
 import qualified FPActors
 import qualified NProlog
 import qualified Gameloop
+import qualified FPRunner
 
-main = NProlog.main
+main = FPRunner.main

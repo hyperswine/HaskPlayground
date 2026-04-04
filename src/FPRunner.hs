@@ -4,6 +4,8 @@ module FPRunner where
 
 import Control.Concurrent (threadDelay)
 import Data.List (intercalate)
+import System.Environment (getArgs)
+import System.Exit (exitFailure)
 import FPInterpreter
 import FParser
 
@@ -332,11 +334,11 @@ runSrc name src =
       return ()
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- MAIN
+-- TEST MAIN (original self-contained demo)
 -- ─────────────────────────────────────────────────────────────────────────────
 
-main :: IO ()
-main = do
+testMain :: IO ()
+testMain = do
   -- Original AST-level examples
   putStrLn "── Example 1: type/1 reflection ──"
   _ <- runProgram primEnv example1
@@ -363,3 +365,23 @@ main = do
 
   -- Parse real source and run it
   runParseAndRun
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- MAIN  (reads a .fplang file and runs it)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+main :: IO ()
+main = do
+  args <- getArgs
+  case args of
+    [path] -> do
+      src <- readFile path
+      case parseFile path src of
+        Left err -> putStrLn ("Parse error:\n" ++ err) >> exitFailure
+        Right ast -> do
+          _ <- runProgram primEnv ast
+          return ()
+    _ -> do
+      putStrLn "Usage: fplang <file.fplang>"
+      putStrLn "Running built-in tests instead..."
+      testMain

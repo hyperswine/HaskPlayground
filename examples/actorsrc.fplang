@@ -1,0 +1,12 @@
+-- Spawn an echo actor and talk to it
+
+let echo = spawn "echo" fn() =>
+  receive {
+    Msg(txt, replyTo) => send replyTo Tag Reply(txt)
+  }
+
+send "echo" Tag Msg("hello", "main")
+
+receive {
+  Reply(txt) => println(strConcat("echo replied: ", txt))
+}
