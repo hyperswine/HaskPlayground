@@ -1,18 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module FParser
-  ( parseExpr
-  , parseProgram
-  , parseFile
-  ) where
+module FParser (parseExpr, parseProgram, parseFile) where
 
-import           Control.Monad              (void)
-import           Data.Void                  (Void)
-import           Text.Megaparsec
-import           Text.Megaparsec.Char
-import qualified Text.Megaparsec.Char.Lexer as L
-
+import Control.Monad (void)
+import Data.Void (Void)
 import FPInterpreter (Expr (..), Pattern (..), Value (..))
+import Text.Megaparsec (MonadParsec (eof, notFollowedBy, try), Parsec, choice, empty, errorBundlePretty, many, manyTill, option, optional, runParser, sepBy, sepBy1, sepEndBy1, (<|>))
+import Text.Megaparsec.Char
+import qualified Text.Megaparsec.Char.Lexer as L
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- PARSER TYPE
@@ -59,12 +54,26 @@ kwN s = kw s *> scn
 
 keywords :: [String]
 keywords =
-  [ "let", "in", "if", "then", "else"
-  , "fn", "fix"
-  , "iso", "send", "receive", "spawn", "self"
-  , "type", "function"
-  , "alloc", "dealloc", "getref"
-  , "true", "false", "Tag"
+  [ "let",
+    "in",
+    "if",
+    "then",
+    "else",
+    "fn",
+    "fix",
+    "iso",
+    "send",
+    "receive",
+    "spawn",
+    "self",
+    "type",
+    "function",
+    "alloc",
+    "dealloc",
+    "getref",
+    "true",
+    "false",
+    "Tag"
   ]
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +85,7 @@ identChar = alphaNumChar <|> char '_' <|> char '\''
 
 lowerIdent :: Parser String
 lowerIdent = lexeme . try $ do
-  c  <- lowerChar
+  c <- lowerChar
   cs <- many identChar
   let name = c : cs
   if name `elem` keywords
@@ -108,7 +117,8 @@ parseListLit = do
   vs <- sepBy atomicVal (sym ",")
   sym "]"
   return (VList vs)
-  where atomicVal = parseInt <|> parseStr <|> parseBool <|> parseUnit
+  where
+    atomicVal = parseInt <|> parseStr <|> parseBool <|> parseUnit
 
 parseLit :: Parser Expr
 parseLit = Lit <$> choice [parseListLit, parseUnit, parseBool, parseStr, parseInt]
@@ -118,18 +128,19 @@ parseLit = Lit <$> choice [parseListLit, parseUnit, parseBool, parseStr, parseIn
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parsePattern :: Parser Pattern
-parsePattern = choice
-  [ PWild         <$  lexeme (try (string "_" <* notFollowedBy identChar))
-  , PLit (VBool True)  <$ kw "true"
-  , PLit (VBool False) <$ kw "false"
-  , PLit VUnit         <$ lexeme (try (string "()"))
-  , PLit . VInt        <$> lexeme (L.signed sc L.decimal)
-  , tagPat
-  , PVar               <$> lowerIdent
-  ]
+parsePattern =
+  choice
+    [ PWild <$ lexeme (try (string "_" <* notFollowedBy identChar)),
+      PLit (VBool True) <$ kw "true",
+      PLit (VBool False) <$ kw "false",
+      PLit VUnit <$ lexeme (try (string "()")),
+      PLit . VInt <$> lexeme (L.signed sc L.decimal),
+      tagPat,
+      PVar <$> lowerIdent
+    ]
   where
     tagPat = do
-      t    <- upperIdent
+      t <- upperIdent
       args <- option [] (sym "(" *> sepBy1 parsePattern (sym ",") <* sym ")")
       return (PTagged t args)
 
@@ -138,17 +149,18 @@ parsePattern = choice
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseExpr :: Parser Expr
-parseExpr = choice
-  [ parseLet
-  , try parseIsoDecl
-  , parseIf
-  , parseFix
-  , parseLam
-  , parseSend
-  , parseReceive
-  , parseSpawn
-  , parseAtom
-  ]
+parseExpr =
+  choice
+    [ parseLet,
+      try parseIsoDecl,
+      parseIf,
+      parseFix,
+      parseLam,
+      parseSend,
+      parseReceive,
+      parseSpawn,
+      parseAtom
+    ]
 
 -- let x = rhs              open — body filled in by chainLets
 -- let x = rhs in body      closed
@@ -157,10 +169,10 @@ parseLet = do
   kw "let"
   name <- lowerIdent
   symN "="
-  val  <- parseExpr
+  val <- parseExpr
   body <- optional (kw "in" *> scn *> parseExpr)
   return $ case body of
-    Just b  -> Let name val b
+    Just b -> Let name val b
     Nothing -> Let name val (Seq [])
 
 -- if cond then t else f
@@ -188,7 +200,7 @@ parseLam = do
 parseFix :: Parser Expr
 parseFix = do
   kw "fix"
-  name   <- lowerIdent
+  name <- lowerIdent
   params <- sym "(" *> sepBy lowerIdent (sym ",") <* sym ")"
   symN "=>"
   body <- parseExpr
@@ -199,7 +211,7 @@ parseSend :: Parser Expr
 parseSend = do
   kw "send"
   target <- parseAtom
-  msg    <- parseExpr
+  msg <- parseExpr
   return (Send (Lit VUnit) target msg)
 
 -- receive { Pat => expr, ... }   or   { Pat => expr \n Pat => expr }
@@ -224,7 +236,7 @@ parseSpawn :: Parser Expr
 parseSpawn = do
   kw "spawn"
   hint <- lexeme (char '"' *> manyTill L.charLiteral (char '"'))
-  fn   <- parseExpr
+  fn <- parseExpr
   args <- option [] (sym "(" *> sepBy parseExpr (sym ",") <* sym ")")
   return (Spawn hint fn args)
 
@@ -233,9 +245,9 @@ parseIsoDecl :: Parser Expr
 parseIsoDecl = do
   kw "iso"
   notFollowedBy (char '?')
-  a    <- upperIdent
-  b    <- upperIdent
-  fwd  <- parseExpr
+  a <- upperIdent
+  b <- upperIdent
+  fwd <- parseExpr
   scn
   bkwd <- parseExpr
   return (IsoDecl a b fwd bkwd)
@@ -245,20 +257,21 @@ parseIsoDecl = do
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseAtom :: Parser Expr
-parseAtom = choice
-  [ parseLit
-  , parseBlock
-  , Self    <$ kw "self"
-  , TypeOf  <$> (kw "type"     *> sym "(" *> parseExpr <* sym ")")
-  , FnOf    <$> (kw "function" *> sym "(" *> parseExpr <* sym ")")
-  , Alloc   <$> (kw "alloc"    *> sym "(" *> parseExpr <* sym ")")
-  , Dealloc <$> (kw "dealloc"  *> sym "(" *> parseExpr <* sym ")")
-  , GetRef  <$> (kw "getref"   *> sym "(" *> parseExpr <* sym ")")
-  , parseLookupIso
-  , parseTagExpr
-  , parseVarOrApp
-  , parseParens
-  ]
+parseAtom =
+  choice
+    [ parseLit,
+      parseBlock,
+      Self <$ kw "self",
+      TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"),
+      FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"),
+      Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"),
+      Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"),
+      GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"),
+      parseLookupIso,
+      parseTagExpr,
+      parseVarOrApp,
+      parseParens
+    ]
 
 -- { stmt \n stmt \n stmt }  or  { stmt; stmt; stmt }
 parseBlock :: Parser Expr
@@ -269,7 +282,7 @@ parseBlock = do
   scn *> sym "}"
   return $ case exprs of
     [e] -> e
-    es  -> Seq es
+    es -> Seq es
   where
     sep = sc *> (void (char ';') <|> void (char '\n')) *> scn
 
@@ -285,7 +298,7 @@ parseLookupIso = do
 parseTagExpr :: Parser Expr
 parseTagExpr = do
   kw "Tag"
-  tag  <- upperIdent
+  tag <- upperIdent
   args <- option [] (sym "(" *> sepBy1 parseExpr (sym ",") <* sym ")")
   return (Tag tag args)
 
@@ -310,13 +323,13 @@ parseParens = sym "(" *> parseExpr <* sym ")"
 -- ─────────────────────────────────────────────────────────────────────────────
 
 chainLets :: [Expr] -> Expr
-chainLets []                        = Seq []
-chainLets [e]                       = e
+chainLets [] = Seq []
+chainLets [e] = e
 chainLets (Let x v (Seq []) : rest) = Let x v (chainLets rest)
-chainLets (e : rest)                = Seq (e : flattenSeq (chainLets rest))
+chainLets (e : rest) = Seq (e : flattenSeq (chainLets rest))
   where
     flattenSeq (Seq es) = es
-    flattenSeq e'       = [e']
+    flattenSeq e' = [e']
 
 parseProgram :: Parser Expr
 parseProgram = do
@@ -332,5 +345,5 @@ parseProgram = do
 parseFile :: String -> String -> Either String Expr
 parseFile fname src =
   case runParser parseProgram fname src of
-    Left  err -> Left (errorBundlePretty err)
+    Left err -> Left (errorBundlePretty err)
     Right ast -> Right ast

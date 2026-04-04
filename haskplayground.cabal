@@ -27,7 +27,10 @@ library
   exposed-modules:
       FPActorProgram
       FPActors
+      FParser
+      FPInterpreter
       FPRActor
+      FPRunner
       Gameloop
       Lib
       MyHardware
@@ -122,8 +125,6 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      FParser
-      FPInterpreter
       NPrologTest
       ProcessorTest
       RVLangTest
