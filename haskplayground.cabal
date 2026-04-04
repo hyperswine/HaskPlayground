@@ -39,6 +39,7 @@ library
       Processor
       RVAsm
       RVLang
+      SMT
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
