@@ -50,6 +50,7 @@ library
     , array
     , async
     , base >=4.7 && <5
+    , binary
     , brick
     , bytestring
     , clash-prelude
@@ -95,6 +96,7 @@ executable haskplayground-exe
     , array
     , async
     , base >=4.7 && <5
+    , binary
     , brick
     , bytestring
     , clash-prelude
@@ -146,6 +148,7 @@ test-suite haskplayground-test
     , array
     , async
     , base >=4.7 && <5
+    , binary
     , brick
     , bytestring
     , clash-prelude
