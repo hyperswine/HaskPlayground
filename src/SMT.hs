@@ -9,7 +9,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Array (Array, listArray, (!))
 import Data.List (find)
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (fromMaybe, fromJust, listToMaybe)
 import Data.Bits (xor, shiftR)
 import Control.Monad (forever, void)
 import Control.Concurrent (forkIO, threadDelay)
@@ -208,9 +208,9 @@ data DamageType = Physical | Magical deriving (Eq,Show)
 
 moveInfo :: Move -> (String, DamageType, Int)
 moveInfo SwordAttack = ("Sword Atk", Physical, 8)
-moveInfo FireAttack  = ("Fire Atk",  Magical,  45)
-moveInfo PoisonCloud = ("Poison",    Magical,  30)
-moveInfo DarkSlash   = ("Dark Slash",Physical, 40)
+moveInfo FireAttack  = ("Fire Atk",  Magical,  10)
+moveInfo PoisonCloud = ("Poison",    Magical,  10)
+moveInfo DarkSlash   = ("Dark Slash",Physical,  8)
 
 data DemonTemplate = DemonTemplate
   { dKind :: DemonKind, dName :: String, dMaxHP :: Int
@@ -219,9 +219,9 @@ data DemonTemplate = DemonTemplate
 
 demonTemplates :: Map DemonKind DemonTemplate
 demonTemplates = Map.fromList
-  [ (SwordDemon,  DemonTemplate SwordDemon  "Kelpie"  80 45 25 30 15 [SwordAttack, FireAttack])
-  , (PlagueDemon, DemonTemplate PlagueDemon "Boggart" 70 25 40 20 30 [PoisonCloud, FireAttack])
-  , (ShadowDemon, DemonTemplate ShadowDemon "Umbra"   65 35 45 20 35 [DarkSlash,   FireAttack]) ]
+  [ (SwordDemon,  DemonTemplate SwordDemon  "Kelpie"  80 35 20 30 15 [SwordAttack, FireAttack])
+  , (PlagueDemon, DemonTemplate PlagueDemon "Boggart" 70 25 30 20 30 [PoisonCloud, FireAttack])
+  , (ShadowDemon, DemonTemplate ShadowDemon "Umbra"   65 30 35 20 35 [DarkSlash,   FireAttack]) ]
 
 data Combatant = Combatant
   { combName :: String, combHP :: Int, combMaxHP :: Int
@@ -243,17 +243,23 @@ data BattleMenu = MenuFight | MenuSummon | MenuRecruit | MenuBag | MenuRun
   deriving (Eq,Show,Enum,Bounded)
 
 data BattlePhase
-  = PlayerMenu | PlayerFight Int | PlayerSummon Int
-  | AllyTurn String | EnemyTurn String | BattleOver Bool
+  = PlayerMenu Int          -- acting slot: 0=Hayato, 1-3=bAllies index (1-based)
+  | PlayerFight Int Int     -- acting slot, move index
+  | PlayerSummon Int        -- party demon index (only from Hayato's turn)
+  | EnemyTurn Int String    -- enemy slot (0=bEnemy, 1+=bEnemyAllies), message
+  | BattleOver Bool
   deriving (Eq,Show)
 
 data BattleState = BattleState
-  { bPlayer :: Combatant, bAlly :: Maybe Combatant
-  , bEnemy :: Combatant, bEnemyId :: Int
-  , bPhase :: BattlePhase, bMenuSel :: BattleMenu
-  , bLog :: [String]
-  , hitFlash :: Int   -- ticks of white flash on enemy sprite
-  , allyFlash :: Int  -- ticks of blue flash on player/ally sprite
+  { bPlayer      :: Combatant
+  , bAllies      :: [Combatant]      -- player-side summoned demons (up to 3, slots 1-3)
+  , bEnemy       :: Combatant
+  , bEnemyAllies :: [Combatant]      -- enemy-side demons (up to 3, slots 1-3)
+  , bEnemyId     :: Int
+  , bPhase       :: BattlePhase, bMenuSel :: BattleMenu
+  , bLog         :: [String]
+  , hitFlash     :: Int
+  , allyFlash    :: Int
   }
 
 data Screen = Exploring | Fighting BattleState
@@ -349,7 +355,7 @@ dimA = rgb 120 120 130
 boxedPanel :: (Int,Int,Int) -> Int -> String -> [V.Image] -> V.Image
 boxedPanel (br,bg,bb) innerW label rows =
   let borderA = rgb br bg bb
-      labelA  = boldA (rgb (min 255 br+50) (min 255 bg+50) (min 255 bb+50))
+      labelA  = boldA (rgb (min 255 (br+50)) (min 255 (bg+50)) (min 255 (bb+50)))
       padL    = (innerW - length label) `div` 2
       padR    = innerW - padL - length label
       top     = V.string borderA "╔"
@@ -441,7 +447,7 @@ renderExploreSidebar gs =
       pl   = player gs
       -- animated title: hue shifts across chars
       titleImg = V.horizCat $ zipWith (\i ch ->
-        let (r,g,b) = hueRGB 200 (tick + i*18)
+        let (r,g,b) = pulseRGB (60,70,140) (110,90,200) 12 (tick + i*8)
         in V.char (boldA (rgb r g b)) ch) [0..] ("  DAEMON HUNT  " :: String)
       sep  = V.string dimA (replicate 26 '─')
       sp   = V.string V.defAttr " "
@@ -450,7 +456,7 @@ renderExploreSidebar gs =
       partyLines = if null (playerParty pl)
         then [V.string dimA "  (no demons)"]
         else zipWith (\i k ->
-          let (r,g,b) = hueRGB 180 (tick + i*50)
+          let (r,g,b) = pulseRGB (90,75,160) (130,110,210) 10 (tick + i*25)
           in V.string (rgb r g b) $ "  " ++ show i ++ ". " ++ dName (demonTemplates Map.! k)
           ) [1..] (playerParty pl)
       ctrlHdr = V.string (boldA (rgb 180 160 220)) " Controls"
@@ -486,20 +492,20 @@ renderBattle gs bs =
     -- ── Title bar ──────────────────────────────────────────────────────
     titleBar =
       let titleImg = V.horizCat $ zipWith (\i ch ->
-            let (r,g,b) = hueRGB 230 (tick*3 + i*22)
+            let (r,g,b) = pulseRGB (55,65,130) (100,80,190) 10 (tick*2 + i*10)
             in V.char (boldA (rgb r g b)) ch) [0..] (" ◈  DAEMON HUNT  ◈ " :: String)
           (tr,tg,tb) = case bPhase bs of
-            EnemyTurn _    -> pulseRGB (220,80,60)  (255,130,100) 15 tick
-            AllyTurn _     -> pulseRGB (80,180,220) (120,230,255) 15 tick
-            BattleOver True  -> hueRGB 255 (tick*5)
+            EnemyTurn _ _    -> pulseRGB (220,80,60)  (255,130,100) 15 tick
+            PlayerMenu i | i > 0 -> pulseRGB (80,180,220) (120,230,255) 15 tick
+            BattleOver True  -> pulseRGB (60,160,130) (100,210,170) 8 tick
             BattleOver False -> (150,150,160)
             _              -> pulseRGB (180,170,220) (230,220,255) 8 tick
           phaseStr = case bPhase bs of
-            PlayerMenu     -> "  YOUR TURN  "
-            PlayerFight _  -> "  CHOOSE MOVE  "
-            PlayerSummon _ -> "  SUMMON  "
-            AllyTurn _     -> "  ALLY TURN  "
-            EnemyTurn _    -> "  ENEMY TURN  "
+            PlayerMenu 0     -> "  YOUR TURN  "
+            PlayerMenu i     -> "  SLOT " ++ show i ++ " TURN  "
+            PlayerFight _ _  -> "  CHOOSE MOVE  "
+            PlayerSummon _   -> "  SUMMON  "
+            EnemyTurn _ _    -> "  ENEMY TURN  "
             BattleOver True  -> "  VICTORY!  "
             BattleOver False -> "  RETREATED  "
           phaseImg = V.string (boldA (rgb tr tg tb)) phaseStr
@@ -515,7 +521,7 @@ renderBattle gs bs =
           spr   = largeSpr (demonSpriteFramed kind frame)
           -- border pulses angry red during flash
           (bcr,bcg,bcb) = if flash > 0
-            then flashTint (flash*55) (150,30,30)
+            then flashTint (min 255 (flash*55)) (150,30,30)
             else (100,35,45)
           -- name hue-cycles
           nameImg = V.horizCat $ zipWith (\i ch ->
@@ -533,25 +539,28 @@ renderBattle gs bs =
       in boxedPanel (bcr,bcg,bcb) panelW " ENEMY " rows
 
     playerPanel =
-      let p      = bPlayer bs
-          -- player sprite flashes blue when hit
-          pFlash = min 255 (aflash * 64)
-          pSprImg = spriteImage pFlash (largeSpr playerSpr)
+      let p        = bPlayer bs
+          pFlash   = min 255 (aflash * 64)
+          pSprImg  = spriteImage pFlash (largeSpr playerSpr)
           pNameImg = V.string (boldA (rgb 100 190 240)) (combName p)
-          allyRows = case bAlly bs of
-            Nothing ->
-              [ V.string dimA " (no demon summoned)" ]
-            Just a ->
-              let aKind   = fromMaybe SwordDemon (combKind a)
-                  aFrame  = (tick + 1) `mod` 2
-                  aSprImg = spriteImage (min 255 (aflash * 64))
-                              (largeSpr (demonSpriteFramed aKind aFrame))
-                  aStatus = if combHP a <= 0 then " [fallen]" else ""
-                  (ar,ag,ab) = hueRGB 200 (tick*2 + 90)
-                  aNameImg = V.string (boldA (rgb ar ag ab)) (combName a ++ aStatus)
-              in [aNameImg, hpBarImg tick (combHP a) (combMaxHP a), aSprImg]
+          actSlot  = case bPhase bs of { PlayerMenu i -> i; PlayerFight i _ -> i; _ -> -1 }
+          mkAllyRows i a =
+            let aKind    = fromMaybe SwordDemon (combKind a)
+                aFrame   = (tick + i) `mod` 2
+                aSprImg  = spriteImage (min 255 (aflash * 64))
+                             (largeSpr (demonSpriteFramed aKind aFrame))
+                aStatus  = if combHP a <= 0 then " [fallen]" else ""
+                isActive = actSlot == i
+                (ar,ag,ab) = if isActive
+                             then pulseRGB (120,220,255) (180,255,255) 15 tick
+                             else hueRGB 200 (tick*2 + i*90)
+                aNameImg = V.string (boldA (rgb ar ag ab)) (combName a ++ aStatus)
+            in [aNameImg, hpBarImg tick (combHP a) (combMaxHP a), aSprImg]
+          allyRows = if null (bAllies bs)
+            then [V.string dimA " (no demons summoned)"]
+            else concatMap (\(i,a) -> mkAllyRows i a) (zip [1..] (bAllies bs))
           (bcr,bcg,bcb) = if aflash > 0
-            then flashTint (aflash*55) (30,50,150)
+            then flashTint (min 255 (aflash*55)) (30,50,150)
             else (40,60,120)
           rows = [pNameImg, hpBarImg tick (combHP p) (combMaxHP p), pSprImg] ++ allyRows
       in boxedPanel (bcr,bcg,bcb) panelW " PARTY " rows
@@ -581,24 +590,32 @@ renderBattle gs bs =
       in V.string (boldA (rgb r g b)) lbl
 
     menuPanel = case bPhase bs of
-      PlayerMenu ->
-        let sel   = bMenuSel bs
-            items = [ (MenuFight,   "FIGHT",   "Attack the enemy")
-                    , (MenuSummon,  "SUMMON",  "Call a party demon")
-                    , (MenuRecruit, "RECRUIT", "Recruit at low HP")
-                    , (MenuBag,     "BAG",     "Use an item")
-                    , (MenuRun,     "RUN",     "Flee the battle") ]
-            rows  = map (\(m,lbl,hint) ->
-              let isSel = m == sel
-              in cursor isSel
-                 V.<|> selLabel isSel lbl
-                 V.<|> V.string dimA ("  " ++ hint)
+      PlayerMenu slot ->
+        let sel      = bMenuSel bs
+            actor    = maybe "???" combName (playerSlotCombatant bs slot)
+            isHayato = slot == 0
+            items    = if isHayato
+                        then [ (MenuFight,   "FIGHT",   "Attack the enemy")
+                             , (MenuSummon,  "SUMMON",  "Call a party demon")
+                             , (MenuRecruit, "RECRUIT", "Recruit at low HP")
+                             , (MenuBag,     "BAG",     "Use an item")
+                             , (MenuRun,     "RUN",     "Flee the battle") ]
+                        else [ (MenuFight,   "FIGHT",   "Attack the enemy")
+                             , (MenuBag,     "BAG",     "Use an item")
+                             , (MenuRun,     "PASS",    "Skip this demon's turn") ]
+            rows     = V.string dimA (" " ++ actor ++ "'s action:") :
+              map (\(m,lbl,hint) ->
+                let isSel = m == sel
+                in cursor isSel
+                   V.<|> selLabel isSel lbl
+                   V.<|> V.string dimA ("  " ++ hint)
               ) items
         in boxedPanel (80,65,115) panelW " ACTION " rows
 
-      PlayerFight idx ->
-        let moves = combMoves (bPlayer bs)
-            rows  = V.string dimA " Choose attack:" :
+      PlayerFight slot idx ->
+        let attacker = fromJust (playerSlotCombatant bs slot)
+            moves    = combMoves attacker
+            rows     = V.string dimA " Choose attack:" :
               zipWith (\i mv ->
                 let (nm,dt,pw) = moveInfo mv
                     isSel = i == idx
@@ -623,20 +640,14 @@ renderBattle gs bs =
               ++ [V.string dimA "   <- back"]
         in boxedPanel (80,65,115) panelW " SUMMON " rows
 
-      AllyTurn msg ->
-        let (r,g,b) = pulseRGB (80,200,240) (140,250,255) 12 tick
-        in boxedPanel (40,80,125) panelW " ALLY TURN "
-             [V.string (boldA (rgb r g b)) (" " ++ msg)
-             ,V.string dimA " (press any key)"]
-
-      EnemyTurn msg ->
+      EnemyTurn _ msg ->
         let (r,g,b) = pulseRGB (230,80,60) (255,140,100) 12 tick
         in boxedPanel (125,35,35) panelW " ENEMY TURN "
              [V.string (boldA (rgb r g b)) (" " ++ msg)
              ,V.string dimA " (press any key)"]
 
       BattleOver True ->
-        let (r,g,b) = hueRGB 255 (tick*4)
+        let (r,g,b) = pulseRGB (60,160,130) (100,210,170) 8 tick
         in boxedPanel (50,120,55) panelW " RESULT "
              [V.string (boldA (rgb r g b)) "  VICTORY!"
              ,V.string dimA "  Press any key"]
@@ -689,14 +700,15 @@ dealToEnemy :: Int -> BattleState -> BattleState
 dealToEnemy dmg bs =
   bs { bEnemy = (bEnemy bs) { combHP = max 0 (combHP (bEnemy bs) - dmg) }, hitFlash = 5 }
 
-dealToPlayer :: Int -> BattleState -> BattleState
-dealToPlayer dmg bs =
+-- Deal damage to a player-side slot (0=Hayato, 1-3=bAllies)
+dealToPlayerSlot :: Int -> Int -> BattleState -> BattleState
+dealToPlayerSlot 0 dmg bs =
   bs { bPlayer = (bPlayer bs) { combHP = max 0 (combHP (bPlayer bs) - dmg) }, allyFlash = 5 }
-
-dealToAlly :: Int -> BattleState -> BattleState
-dealToAlly dmg bs = case bAlly bs of
-  Nothing -> bs
-  Just a  -> bs { bAlly = Just a { combHP = max 0 (combHP a - dmg) }, allyFlash = 5 }
+dealToPlayerSlot i dmg bs =
+  let j      = i - 1
+      allies = bAllies bs
+      a'     = (allies !! j) { combHP = max 0 (combHP (allies !! j) - dmg) }
+  in bs { bAllies = take j allies ++ [a'] ++ drop (j+1) allies, allyFlash = 5 }
 
 blogMsg :: String -> BattleState -> BattleState
 blogMsg msg bs = bs { bLog = msg : bLog bs }
@@ -707,35 +719,58 @@ checkBattleEnd bs
   | combHP (bPlayer bs) <= 0 = bs { bPhase = BattleOver False }
   | otherwise = bs
 
-allyOrEnemyPhase :: BattleState -> BattlePhase
-allyOrEnemyPhase bs = case bAlly bs of
-  Just a | combHP a > 0 -> AllyTurn (combName a ++ "'s turn!")
-  _                      -> EnemyTurn (combName (bEnemy bs) ++ "'s turn!")
+-- Slot lookup helpers
+playerSlotCombatant :: BattleState -> Int -> Maybe Combatant
+playerSlotCombatant bs 0 = Just (bPlayer bs)
+playerSlotCombatant bs i
+  | i >= 1 && i-1 < length (bAllies bs) = Just (bAllies bs !! (i-1))
+  | otherwise = Nothing
 
-allyAction :: BattleState -> BattleState
-allyAction bs = case bAlly bs of
-  Nothing                -> bs { bPhase = EnemyTurn (combName (bEnemy bs) ++ "'s turn!") }
-  Just a | combHP a <= 0 -> bs { bPhase = EnemyTurn (combName (bEnemy bs) ++ "'s turn!") }
-  Just a ->
-    let mv      = combMoves a !! (length (bLog bs) `mod` length (combMoves a))
-        (nm,_,_)= moveInfo mv
-        dmg     = calcDamage a (bEnemy bs) mv
-        bs1     = dealToEnemy dmg $ blogMsg (combName a ++ " uses " ++ nm ++ "! " ++ show dmg ++ " dmg") bs
-        bs2     = checkBattleEnd bs1
+enemySlotCombatant :: BattleState -> Int -> Maybe Combatant
+enemySlotCombatant bs 0 = Just (bEnemy bs)
+enemySlotCombatant bs i
+  | i >= 1 && i-1 < length (bEnemyAllies bs) = Just (bEnemyAllies bs !! (i-1))
+  | otherwise = Nothing
+
+-- Advance to next alive player slot, else start enemy turn
+nextPlayerSlot :: BattleState -> Int -> BattlePhase
+nextPlayerSlot bs slot =
+  let maxSlot = length (bAllies bs)
+      nextI   = find (\i -> maybe False (\c -> combHP c > 0)
+                              (playerSlotCombatant bs i)) [(slot+1)..maxSlot]
+  in case nextI of
+       Just i  -> PlayerMenu i
+       Nothing -> EnemyTurn 0 (combName (bEnemy bs) ++ "'s turn!")
+
+-- Advance to next alive enemy slot, else back to player turn
+nextEnemySlot :: BattleState -> Int -> BattlePhase
+nextEnemySlot bs slot =
+  let maxSlot = length (bEnemyAllies bs)
+      nextI   = find (\i -> maybe False (\c -> combHP c > 0)
+                              (enemySlotCombatant bs i)) [(slot+1)..maxSlot]
+  in case nextI of
+       Just i  -> EnemyTurn i (combName (fromJust (enemySlotCombatant bs i)) ++ "'s turn!")
+       Nothing -> PlayerMenu 0
+
+-- Auto-AI action for an enemy slot
+enemyAction :: Int -> BattleState -> BattleState
+enemyAction slot bs = case enemySlotCombatant bs slot of
+  Nothing               -> bs { bPhase = nextEnemySlot bs slot }
+  Just e | combHP e <= 0 -> bs { bPhase = nextEnemySlot bs slot }
+  Just e ->
+    let mv         = combMoves e !! (length (bLog bs) `mod` length (combMoves e))
+        (nm,_,_)   = moveInfo mv
+        allSlots   = 0 : [1..length (bAllies bs)]
+        aliveSlots = filter (\i -> maybe False (\c -> combHP c > 0)
+                                     (playerSlotCombatant bs i)) allSlots
+        tgtSlot    = head aliveSlots
+        tgt        = fromJust (playerSlotCombatant bs tgtSlot)
+        dmg        = calcDamage e tgt mv
+        bs1        = blogMsg (combName e ++ " uses " ++ nm ++ "! " ++ show dmg ++ " dmg") bs
+        bs2        = checkBattleEnd (dealToPlayerSlot tgtSlot dmg bs1)
     in case bPhase bs2 of
          BattleOver _ -> bs2
-         _            -> bs2 { bPhase = EnemyTurn (combName (bEnemy bs2) ++ "'s turn!") }
-
-enemyAction :: BattleState -> BattleState
-enemyAction bs =
-  let e  = bEnemy bs
-      mv = combMoves e !! (length (bLog bs) `mod` length (combMoves e))
-      (nm,_,_) = moveInfo mv
-      tgt = case bAlly bs of { Just a | combHP a > 0 -> a; _ -> bPlayer bs }
-      dmg = calcDamage e tgt mv
-      bs1 = blogMsg (combName e ++ " uses " ++ nm ++ "! " ++ show dmg ++ " dmg") bs
-      bs2 = if combName tgt == combName (bPlayer bs) then dealToPlayer dmg bs1 else dealToAlly dmg bs1
-  in bs2 { bPhase = PlayerMenu }
+         _            -> bs2 { bPhase = nextEnemySlot bs2 slot }
 
 cycleNext :: (Eq a, Enum a, Bounded a) => a -> a
 cycleNext x = if x == maxBound then minBound else succ x
@@ -743,15 +778,23 @@ cycleNext x = if x == maxBound then minBound else succ x
 cyclePrev :: (Eq a, Enum a, Bounded a) => a -> a
 cyclePrev x = if x == minBound then maxBound else pred x
 
-handleMenuSelect :: GameState -> BattleState -> GameState
-handleMenuSelect gs bs = case bMenuSel bs of
-  MenuFight   -> gs { screen = Fighting bs { bPhase = PlayerFight 0 } }
-  MenuSummon  -> if null (playerParty (player gs))
-    then gs { screen = Fighting (blogMsg "No demons in party!" bs) }
-    else gs { screen = Fighting bs { bPhase = PlayerSummon 0 } }
-  MenuRecruit -> tryRecruit gs bs
+handleMenuSelect :: GameState -> BattleState -> Int -> GameState
+handleMenuSelect gs bs slot = case bMenuSel bs of
+  MenuFight   -> gs { screen = Fighting bs { bPhase = PlayerFight slot 0 } }
+  MenuSummon
+    | slot /= 0 -> gs
+    | null (playerParty (player gs))
+                -> gs { screen = Fighting (blogMsg "No demons in party!" bs) }
+    | length (bAllies bs) >= 3
+                -> gs { screen = Fighting (blogMsg "Demon slots full! (max 3)" bs) }
+    | otherwise -> gs { screen = Fighting bs { bPhase = PlayerSummon 0 } }
+  MenuRecruit
+    | slot /= 0 -> gs
+    | otherwise -> tryRecruit gs bs
   MenuBag     -> gs { screen = Fighting (blogMsg "Bag is empty." bs) }
-  MenuRun     -> gs { screen = Fighting bs { bPhase = BattleOver False } }
+  MenuRun
+    | slot == 0 -> gs { screen = Fighting bs { bPhase = BattleOver False } }
+    | otherwise -> gs { screen = Fighting bs { bPhase = nextPlayerSlot bs slot } }
 
 tryRecruit :: GameState -> BattleState -> GameState
 tryRecruit gs bs =
@@ -770,23 +813,26 @@ tryRecruit gs bs =
             { player = (player gs) { playerParty = party' }
             , screen = Fighting (blogMsg msg bs) { bPhase = BattleOver True } }
 
-executePlayerMove :: GameState -> BattleState -> Int -> GameState
-executePlayerMove gs bs idx =
-  let mv      = combMoves (bPlayer bs) !! idx
-      (nm,_,_)= moveInfo mv
-      dmg     = calcDamage (bPlayer bs) (bEnemy bs) mv
-      bs1     = dealToEnemy dmg $ blogMsg ("Hayato uses " ++ nm ++ "! " ++ show dmg ++ " dmg") bs
-      bs2     = checkBattleEnd bs1
-      bs3     = case bPhase bs2 of { BattleOver _ -> bs2; _ -> bs2 { bPhase = allyOrEnemyPhase bs2 } }
+executePlayerMove :: GameState -> BattleState -> Int -> Int -> GameState
+executePlayerMove gs bs slot idx =
+  let attacker = fromJust (playerSlotCombatant bs slot)
+      mv       = combMoves attacker !! idx
+      (nm,_,_) = moveInfo mv
+      dmg      = calcDamage attacker (bEnemy bs) mv
+      bs1      = dealToEnemy dmg $ blogMsg (combName attacker ++ " uses " ++ nm ++ "! " ++ show dmg ++ " dmg") bs
+      bs2      = checkBattleEnd bs1
+      bs3      = case bPhase bs2 of { BattleOver _ -> bs2; _ -> bs2 { bPhase = nextPlayerSlot bs2 slot } }
   in gs { screen = Fighting bs3 }
 
 executeSummon :: GameState -> BattleState -> Int -> GameState
 executeSummon gs bs idx =
-  let kind = playerParty (player gs) !! idx
-      tmpl = demonTemplates Map.! kind
-      msg  = dName tmpl ++ " summoned!"
-      bs'  = (blogMsg msg bs) { bAlly = Just (fromTemplate tmpl)
-                               , bPhase = EnemyTurn (combName (bEnemy bs) ++ " reacts!") }
+  let kind     = playerParty (player gs) !! idx
+      tmpl     = demonTemplates Map.! kind
+      newDemon = fromTemplate tmpl
+      msg      = dName tmpl ++ " summoned!"
+      allies'  = bAllies bs ++ [newDemon]
+      bs'      = (blogMsg msg bs) { bAllies = allies'
+                                  , bPhase  = nextPlayerSlot (bs { bAllies = allies' }) 0 }
   in gs { screen = Fighting bs' }
 
 handleBattleKey :: V.Key -> GameState -> BattleState -> GameState
@@ -797,34 +843,36 @@ handleBattleKey key gs bs = case bPhase bs of
                     gs1 { demons = Map.delete (bEnemyId bs) (demons gs1) }
               else addMsg "You fled the battle." gs1
 
-  AllyTurn _  -> gs { screen = Fighting (allyAction bs) }
-  EnemyTurn _ -> gs { screen = Fighting (checkBattleEnd (enemyAction bs)) }
+  EnemyTurn slot _ -> gs { screen = Fighting (enemyAction slot bs) }
 
-  PlayerMenu -> case key of
+  PlayerMenu slot -> case key of
     V.KChar 'w' -> gs { screen = Fighting bs { bMenuSel = cyclePrev (bMenuSel bs) } }
     V.KChar 's' -> gs { screen = Fighting bs { bMenuSel = cycleNext (bMenuSel bs) } }
     V.KUp       -> gs { screen = Fighting bs { bMenuSel = cyclePrev (bMenuSel bs) } }
     V.KDown     -> gs { screen = Fighting bs { bMenuSel = cycleNext (bMenuSel bs) } }
-    V.KEnter    -> handleMenuSelect gs bs
-    V.KChar ' ' -> handleMenuSelect gs bs
+    V.KEnter    -> handleMenuSelect gs bs slot
+    V.KChar ' ' -> handleMenuSelect gs bs slot
     _           -> gs
 
-  PlayerFight idx -> case key of
-    V.KUp       -> gs { screen = Fighting bs { bPhase = PlayerFight (max 0 (idx-1)) } }
-    V.KDown     -> gs { screen = Fighting bs { bPhase = PlayerFight (min (length (combMoves (bPlayer bs))-1) (idx+1)) } }
-    V.KChar 'w' -> gs { screen = Fighting bs { bPhase = PlayerFight (max 0 (idx-1)) } }
-    V.KChar 's' -> gs { screen = Fighting bs { bPhase = PlayerFight (min (length (combMoves (bPlayer bs))-1) (idx+1)) } }
-    V.KLeft     -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
-    V.KEnter    -> executePlayerMove gs bs idx
-    V.KChar ' ' -> executePlayerMove gs bs idx
-    _           -> gs
+  PlayerFight slot idx ->
+    let attacker = fromJust (playerSlotCombatant bs slot)
+        maxIdx   = length (combMoves attacker) - 1
+    in case key of
+      V.KUp       -> gs { screen = Fighting bs { bPhase = PlayerFight slot (max 0 (idx-1)) } }
+      V.KDown     -> gs { screen = Fighting bs { bPhase = PlayerFight slot (min maxIdx (idx+1)) } }
+      V.KChar 'w' -> gs { screen = Fighting bs { bPhase = PlayerFight slot (max 0 (idx-1)) } }
+      V.KChar 's' -> gs { screen = Fighting bs { bPhase = PlayerFight slot (min maxIdx (idx+1)) } }
+      V.KLeft     -> gs { screen = Fighting bs { bPhase = PlayerMenu slot } }
+      V.KEnter    -> executePlayerMove gs bs slot idx
+      V.KChar ' ' -> executePlayerMove gs bs slot idx
+      _           -> gs
 
   PlayerSummon idx -> case key of
     V.KUp       -> gs { screen = Fighting bs { bPhase = PlayerSummon (max 0 (idx-1)) } }
     V.KDown     -> gs { screen = Fighting bs { bPhase = PlayerSummon (min (length (playerParty (player gs))-1) (idx+1)) } }
     V.KChar 'w' -> gs { screen = Fighting bs { bPhase = PlayerSummon (max 0 (idx-1)) } }
     V.KChar 's' -> gs { screen = Fighting bs { bPhase = PlayerSummon (min (length (playerParty (player gs))-1) (idx+1)) } }
-    V.KLeft     -> gs { screen = Fighting bs { bPhase = PlayerMenu } }
+    V.KLeft     -> gs { screen = Fighting bs { bPhase = PlayerMenu 0 } }
     V.KEnter    -> executeSummon gs bs idx
     V.KChar ' ' -> executeSummon gs bs idx
     _           -> gs
@@ -853,8 +901,8 @@ tryAttack gs =
          let tmpl = demonTemplates Map.! wdKind wd
              bs   = BattleState
                { bPlayer = playerCombatant { combHP = playerHP pl, combMaxHP = playerMaxHP pl }
-               , bAlly = Nothing, bEnemy = fromTemplate tmpl, bEnemyId = wdId wd
-               , bPhase = PlayerMenu, bMenuSel = MenuFight
+               , bAllies = [], bEnemy = fromTemplate tmpl, bEnemyAllies = [], bEnemyId = wdId wd
+               , bPhase = PlayerMenu 0, bMenuSel = MenuFight
                , bLog = ["Encountered " ++ dName tmpl ++ "!"]
                , hitFlash = 0, allyFlash = 0 }
          in gs { screen = Fighting bs }
@@ -878,9 +926,8 @@ handleEvent (AppEvent Tick)     = modify tickGame
 handleEvent (AppEvent DemonTick) = modify $ \gs ->
   case screen gs of
     Fighting bs -> case bPhase bs of
-      AllyTurn _  -> gs { screen = Fighting (allyAction bs) }
-      EnemyTurn _ -> gs { screen = Fighting (checkBattleEnd (enemyAction bs)) }
-      _           -> stepDemons gs
+      EnemyTurn slot _ -> gs { screen = Fighting (enemyAction slot bs) }
+      _                -> stepDemons gs
     _ -> stepDemons gs
 handleEvent (VtyEvent (V.EvKey V.KEsc _)) = halt
 handleEvent (VtyEvent (V.EvKey key _)) = do
