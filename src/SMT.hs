@@ -169,6 +169,16 @@ caveWallS = [[sc '█' d, sc '█' s, sc '█' d, sc '█' s, sc '█' d], [sc '
   where
     d = (55, 50, 65); s = (75, 70, 85)
 
+-- Healer NPC sprite
+healerSpr :: Sprite
+healerSpr =
+  [ [sc ' ' k, sc 'o' sk, sc ' ' k, sc '+' h, sc ' ' k],
+    [sc '(' rb, sc ':' rb, sc ')' rb, sc ' ' k, sc ' ' k],
+    [sc '/' rb, sc ' ' k, sc '\\' rb, sc ' ' k, sc ' ' k]
+  ]
+  where
+    sk = (235, 210, 180); h = (80, 220, 120); rb = (80, 140, 210); k = (0, 0, 0)
+
 -- Portal sprite (animated, used as overlay)
 portalSpr :: Int -> Sprite
 portalSpr tick =
@@ -373,6 +383,7 @@ instance Binary Portal
 data MapData = MapData
   { mdTerrain :: Array Pos Terrain,
     mdPortals :: [Portal],
+    mdHealers :: [Pos], -- positions of healer NPCs on this map
     mdSpawnKinds :: [DemonKind], -- kinds that can spawn on this map
     mdSpawnCap :: Int,
     mdAmbient :: (Int, Int, Int) -- colour tint for sidebar/UI accent
@@ -421,7 +432,8 @@ data Player = Player
     playerParty :: [DemonKind],
     playerLevel :: Int,
     playerXP :: Int,
-    partyStats :: Map DemonKind DemonStats -- persistent per-demon stats
+    partyStats :: Map DemonKind DemonStats, -- persistent per-demon stats
+    playerPotions :: Int
   }
   deriving (Eq, Show, Generic)
 
@@ -542,6 +554,7 @@ buildMaps =
         MapData
           { mdTerrain = buildSwampMap,
             mdPortals = [Portal (20, 15) CavernMap (5, 5)],
+            mdHealers = [(8, 5)],
             mdSpawnKinds = [SwordDemon, PlagueDemon, ShadowDemon],
             mdSpawnCap = 6,
             mdAmbient = (60, 100, 70)
@@ -551,6 +564,7 @@ buildMaps =
         MapData
           { mdTerrain = buildCavernMap,
             mdPortals = [Portal (5, 5) SwampMap (20, 15)],
+            mdHealers = [(8, 8)],
             mdSpawnKinds = [InfernoDemon, VoidDemon, ShadowDemon],
             mdSpawnCap = 5,
             mdAmbient = (90, 50, 130)
@@ -568,7 +582,7 @@ initialDemons =
       ]
 
 initialPlayer :: Player
-initialPlayer = Player (5, 5) (1, 0) 120 120 [] 1 0 Map.empty
+initialPlayer = Player (5, 5) (1, 0) 120 120 [] 1 0 Map.empty 3
 
 initialState :: Map MapId MapData -> GameState
 initialState ms =
@@ -579,7 +593,8 @@ initialState ms =
       demons = initialDemons,
       screen = Exploring,
       animTick = 0,
-      msgLog = ["You enter the fetid swamp...", "SPACE: attack · Ω: portal"],
+      msgLog = ["You enter the fetid swamp...", "SPACE: attack/portal/heal · +: healer NPC"],
+
       nextDmnId = 5,
       spawnTimer = 0
     }
@@ -814,6 +829,7 @@ getTileSprite gs tick wx wy
           md = maps gs Map.! currentMap gs
           terrain = mdTerrain md ! pos
           mPortal = find (\p -> portalPos p == pos) (mdPortals md)
+          isHealer = pos `elem` mdHealers md
           mDemon = listToMaybe [d | d <- Map.elems (demons gs), wdPos d == pos]
           isPlayer = playerPos pl == pos
           base = terrainSpr tick terrain
@@ -822,9 +838,12 @@ getTileSprite gs tick wx wy
             then overlayEntity playerSpr base
             else case mPortal of
               Just _ -> overlayEntity (portalSpr tick) base
-              Nothing -> case mDemon of
-                Just wd -> overlayEntity (demonSpriteFramed (wdKind wd) (frame wd)) base
-                Nothing -> base
+              Nothing ->
+                if isHealer
+                  then overlayEntity healerSpr base
+                  else case mDemon of
+                    Just wd -> overlayEntity (demonSpriteFramed (wdKind wd) (frame wd)) base
+                    Nothing -> base
 
 renderExploreSidebar :: GameState -> V.Image
 renderExploreSidebar gs =
@@ -861,16 +880,18 @@ renderExploreSidebar gs =
               )
               [1 ..]
               (playerParty pl)
+      potionImg = V.string (rgb 100 210 130) " +" V.<|> V.string (rgb 155 155 165) " Potions: " V.<|> V.string (boldA (rgb 100 220 140)) (show (playerPotions pl))
       ctrlHdr = V.string (boldA (rgb 180 160 220)) " Controls"
       ctrls =
         [ V.string (rgb 155 155 165) "  WASD   move",
-          V.string (rgb 155 155 165) "  SPACE  attack ahead",
+          V.string (rgb 155 155 165) "  SPACE  attack/portal/heal",
+          V.string (rgb 155 155 165) "  +      healer NPC",
           V.string (rgb 155 155 165) "  ESC    quit"
         ]
       logHdr = V.string (boldA (rgb 180 160 220)) " Log"
       logLines = zipWith (\i l -> let br = max 80 (160 - i * 20) in V.string (rgb br br (min 255 (br + 20))) ("  " ++ take 24 l)) [0 ..] (take 5 (msgLog gs))
    in V.vertCat $
-        [titleImg, sep, mapImg, hpImg, xpImg, sp, sep, partyHdr]
+        [titleImg, sep, mapImg, hpImg, xpImg, potionImg, sp, sep, partyHdr]
           ++ partyLines
           ++ [sp, sep, ctrlHdr]
           ++ ctrls
@@ -884,14 +905,24 @@ renderExploreSidebar gs =
 panelW :: Int
 panelW = 36
 
+-- Width for each compact RPG-style combat card
+combCardW :: Int
+combCardW = 20
+
 renderBattle :: GameState -> BattleState -> [Widget Name]
-renderBattle gs bs = [raw $ V.vertCat [titleBar, mainArea, bottomArea]]
+renderBattle gs bs = [raw $ V.vertCat [titleBar, rowSep "ENEMIES", enemiesRow, rowSep "YOUR PARTY", partyRow, bottomArea]]
   where
     tick = animTick gs
     flash = hitFlash bs
     aflash = allyFlash bs
     md = maps gs Map.! currentMap gs
     (ar, ag, ab) = mdAmbient md
+    totalW = panelW * 2 + 1
+
+    rowSep lbl =
+      let s = "═[ " ++ lbl ++ " ]"
+          padLen = max 0 (totalW - length s)
+       in V.string dimA (s ++ replicate padLen '═')
 
     titleBar =
       let titleImg =
@@ -919,56 +950,61 @@ renderBattle gs bs = [raw $ V.vertCat [titleBar, mainArea, bottomArea]]
             BattleOver False -> "  RETREATED  "
        in titleImg V.<|> V.string (boldA (rgb tr tg tb)) phaseStr
 
-    mainArea = V.horizCat [enemyPanel, V.string dimA " ", playerPanel]
+    -- Enemies laid out horizontally at the top
+    enemiesRow =
+      let enemies = bEnemy bs : bEnemyAllies bs
+       in V.horizCat (zipWith mkEnemyCard [0 ..] enemies)
 
-    enemyPanel =
-      let e = bEnemy bs
-          kind = fromMaybe SwordDemon (combKind e)
+    mkEnemyCard idx e =
+      let kind = fromMaybe SwordDemon (combKind e)
           frame = tick `mod` 2
           spr = largeSpr (demonSpriteFramed kind frame)
-          (bcr, bcg, bcb) = if flash > 0 then flashTint (min 255 (flash * 55)) (150, 30, 30) else (100, 35, 45)
+          (bcr, bcg, bcb) =
+            if flash > 0 && idx == 0
+              then flashTint (min 255 (flash * 55)) (150, 30, 30)
+              else (100, 35, 45)
           nameImg =
             V.horizCat $
               zipWith
-                ( \i ch ->
-                    let (r, g, b) = hueRGB 240 (tick * 2 + i * 30) in V.char (boldA (rgb r g b)) ch
-                )
+                (\i ch -> let (r, g, b) = hueRGB 240 (tick * 2 + idx * 30 + i * 15) in V.char (boldA (rgb r g b)) ch)
                 [0 ..]
-                (combName e)
-          lvlImg = V.string dimA $ " Lv" ++ show (combLevel e) ++ " [" ++ show (combXP e) ++ "xp]"
-          rows =
-            [ nameImg V.<|> lvlImg,
-              hpBarImg tick (combHP e) (combMaxHP e),
-              V.string dimA $ "PHY:" ++ show (combPhyAtk e) ++ " MAG:" ++ show (combMagAtk e) ++ " DEF:" ++ show (combPhyDef e),
-              V.string V.defAttr " ",
-              spriteImage (min 255 (flash * 64)) spr
-            ]
-       in boxedPanel (bcr, bcg, bcb) panelW " ENEMY " rows
+                (take (combCardW - 7) (combName e))
+          lvlImg = V.string dimA $ " Lv" ++ show (combLevel e)
+          sprPad = replicate ((combCardW - 10) `div` 2) ' '
+          sprImg = V.string V.defAttr sprPad V.<|> spriteImage (min 255 (flash * 64)) spr
+          rows = [nameImg V.<|> lvlImg, hpBarImg tick (combHP e) (combMaxHP e), V.string V.defAttr " ", sprImg]
+       in boxedPanel (bcr, bcg, bcb) combCardW " ENEMY " rows
 
-    playerPanel =
-      let p = bPlayer bs
-          pFlash = min 255 (aflash * 64)
-          pSprImg = spriteImage pFlash (largeSpr playerSpr)
-          pNameImg = V.string (boldA (rgb 100 190 240)) (combName p)
-          pXPImg = V.string dimA $ " Lv" ++ show (playerLevel (player gs))
-          actSlot = case bPhase bs of PlayerMenu i -> i; PlayerFight i _ -> i; _ -> -1
-          mkAllyRows i a =
-            let aKind = fromMaybe SwordDemon (combKind a)
-                aFrame = (tick + i) `mod` 2
-                aSprImg = spriteImage (min 255 (aflash * 64)) (largeSpr (demonSpriteFramed aKind aFrame))
-                aStatus = if combHP a <= 0 then " [fallen]" else ""
-                isActive = actSlot == i
-                (ar2, ag2, ab2) = if isActive then pulseRGB (120, 220, 255) (180, 255, 255) 15 tick else hueRGB 200 (tick * 2 + i * 90)
-                aNameImg = V.string (boldA (rgb ar2 ag2 ab2)) (combName a ++ aStatus)
-                aLvlImg = V.string dimA $ " Lv" ++ show (combLevel a)
-             in [aNameImg V.<|> aLvlImg, hpBarImg tick (combHP a) (combMaxHP a), aSprImg]
-          allyRows =
-            if null (bAllies bs)
-              then [V.string dimA " (no demons summoned)"]
-              else concatMap (\(i, a) -> mkAllyRows i a) (zip [1 ..] (bAllies bs))
-          (bcr, bcg, bcb) = if aflash > 0 then flashTint (min 255 (aflash * 55)) (30, 50, 150) else (40, 60, 120)
-          rows = [pNameImg V.<|> pXPImg, hpBarImg tick (combHP p) (combMaxHP p), pSprImg] ++ allyRows
-       in boxedPanel (bcr, bcg, bcb) panelW " PARTY " rows
+    -- Player party laid out horizontally at the bottom
+    partyRow =
+      let actSlot = case bPhase bs of
+            PlayerMenu i -> i
+            PlayerFight i _ -> i
+            _ -> -1
+          party = bPlayer bs : bAllies bs
+       in V.horizCat (zipWith (mkPartyCard actSlot) [0 ..] party)
+
+    mkPartyCard actSlot slotIdx c =
+      let isActive = actSlot == slotIdx
+          isPlayerSlot = slotIdx == 0
+          kind = fromMaybe SwordDemon (combKind c)
+          spr = largeSpr (if isPlayerSlot then playerSpr else demonSpriteFramed kind (tick `mod` 2))
+          (bcr, bcg, bcb)
+            | aflash > 0 = flashTint (min 255 (aflash * 55)) (30, 50, 150)
+            | isActive = (60, 90, 160)
+            | otherwise = (40, 60, 120)
+          (nr, ng, nb)
+            | isActive = pulseRGB (120, 220, 255) (180, 255, 255) 15 tick
+            | isPlayerSlot = (100, 190, 240)
+            | otherwise = hueRGB 200 (tick * 2 + slotIdx * 90)
+          statusStr = if combHP c <= 0 then " [X]" else ""
+          nameStr = take (combCardW - 7) (combName c) ++ statusStr
+          nameImg = V.string (boldA (rgb nr ng nb)) nameStr
+          lvlImg = V.string dimA $ " Lv" ++ show (combLevel c)
+          sprPad = replicate ((combCardW - 10) `div` 2) ' '
+          sprImg = V.string V.defAttr sprPad V.<|> spriteImage (min 255 (aflash * 64)) spr
+          rows = [nameImg V.<|> lvlImg, hpBarImg tick (combHP c) (combMaxHP c), V.string V.defAttr " ", sprImg]
+       in boxedPanel (bcr, bcg, bcb) combCardW " " rows
 
     bottomArea = V.horizCat [logPanel, V.string dimA " ", menuPanel]
 
@@ -990,16 +1026,17 @@ renderBattle gs bs = [raw $ V.vertCat [titleBar, mainArea, bottomArea]]
         let sel = bMenuSel bs
             isHayato = slot == 0
             actor = maybe "???" combName (playerSlotCombatant bs slot)
+            potions = playerPotions (player gs)
             items =
               if isHayato
                 then
                   [ (MenuFight, "FIGHT", "Attack the enemy"),
                     (MenuSummon, "SUMMON", "Call a party demon"),
                     (MenuRecruit, "RECRUIT", "Recruit at low HP"),
-                    (MenuBag, "BAG", "Use an item"),
+                    (MenuBag, "BAG", "Potion (" ++ show potions ++ " left)"),
                     (MenuRun, "RUN", "Flee")
                   ]
-                else [(MenuFight, "FIGHT", "Attack"), (MenuBag, "BAG", "Item"), (MenuRun, "PASS", "Skip turn")]
+                else [(MenuFight, "FIGHT", "Attack"), (MenuBag, "BAG", "Potion (" ++ show potions ++ ")"), (MenuRun, "PASS", "Skip turn")]
             rows =
               V.string dimA (" " ++ actor ++ "'s action:")
                 : map (\(m, lbl, hint) -> cursor (m == sel) V.<|> selLabel (m == sel) lbl V.<|> V.string dimA ("  " ++ hint)) items
@@ -1061,7 +1098,7 @@ renderBattle gs bs = [raw $ V.vertCat [titleBar, mainArea, bottomArea]]
           [V.string dimA "  You retreated safely.", V.string dimA "  Press any key"]
 
 -- ===========================================================================
--- DEMON WANDERINGF
+-- DEMON WANDERING
 -- ===========================================================================
 
 addMsg :: String -> GameState -> GameState
@@ -1096,46 +1133,7 @@ stepDemons gs =
    in gs {demons = moved}
 
 -- ===========================================================================
--- PORTAL / MAP TRANSITION
--- ===========================================================================
 
-checkPortal :: GameState -> GameState
-checkPortal gs =
-  let pl = player gs
-      pos = playerPos pl
-      md = maps gs Map.! currentMap gs
-      mPortal = find (\p -> portalPos p == pos) (mdPortals md)
-   in case mPortal of
-        Nothing -> gs
-        Just portal ->
-          let destMd = maps gs Map.! portalDest portal
-              -- find passable spawn on destination
-              destPos = portalDestPos portal
-              newDemons =
-                Map.fromList $
-                  zip [0 ..] $
-                    take
-                      (mdSpawnCap destMd)
-                      [ WorldDemon i k p p (1, 0) 0
-                        | (i, (k, p)) <-
-                            zip
-                              [0 ..]
-                              ( zip
-                                  (cycle (mdSpawnKinds destMd))
-                                  [(10, 10), (25, 15), (15, 22), (30, 8), (20, 20), (8, 18)]
-                              )
-                      ]
-              mapName = case portalDest portal of SwampMap -> "the Fetid Swamp"; CavernMap -> "the Deep Cavern"
-           in addMsg ("Entered " ++ mapName ++ "!") $
-                gs
-                  { currentMap = portalDest portal,
-                    player = pl {playerPos = destPos},
-                    demons = newDemons,
-                    nextDmnId = length newDemons,
-                    spawnTimer = 0
-                  }
-
--- ===========================================================================
 -- BATTLE LOGIC
 -- ===========================================================================
 
@@ -1159,6 +1157,14 @@ dealToPlayerSlot i dmg bs =
 
 blogMsg :: String -> BattleState -> BattleState
 blogMsg msg bs = bs {bLog = msg : bLog bs}
+
+-- Update a combatant in a given slot (0 = player, 1+ = allies)
+updateCombatantInSlot :: Int -> Combatant -> BattleState -> BattleState
+updateCombatantInSlot 0 c bs = bs {bPlayer = c}
+updateCombatantInSlot i c bs =
+  let j = i - 1
+      allies = bAllies bs
+   in bs {bAllies = take j allies ++ [c] ++ drop (j + 1) allies}
 
 checkBattleEnd :: BattleState -> BattleState
 checkBattleEnd bs
@@ -1216,7 +1222,20 @@ handleMenuSelect gs bs slot = case bMenuSel bs of
     | length (bAllies bs) >= 3 -> gs {screen = Fighting (blogMsg "Demon slots full! (max 3)" bs)}
     | otherwise -> gs {screen = Fighting bs {bPhase = PlayerSummon 0}}
   MenuRecruit | slot /= 0 -> gs | otherwise -> tryRecruit gs bs
-  MenuBag -> gs {screen = Fighting (blogMsg "Bag is empty." bs)}
+  MenuBag ->
+    let pl = player gs
+        potions = playerPotions pl
+     in if potions <= 0
+          then gs {screen = Fighting (blogMsg "No potions left!" bs)}
+          else
+            let healAmt = 50
+                actor = fromJust (playerSlotCombatant bs slot)
+                healed = min healAmt (combMaxHP actor - combHP actor)
+                actor' = actor {combHP = combHP actor + healed}
+                bs1 = blogMsg (combName actor ++ " used a Potion! +" ++ show healed ++ " HP") (updateCombatantInSlot slot actor' bs)
+                bs2 = bs1 {bPhase = nextPlayerSlot bs1 slot}
+                pl' = pl {playerPotions = potions - 1}
+             in gs {player = pl', screen = Fighting bs2}
   MenuRun
     | slot == 0 -> gs {screen = Fighting bs {bPhase = BattleOver False}}
     | otherwise -> gs {screen = Fighting bs {bPhase = nextPlayerSlot bs slot}}
@@ -1329,39 +1348,89 @@ tryMove (dx, dy) gs =
       inB (x, y) = x >= 0 && y >= 0 && x < mapW && y < mapH
    in if not (inB np) || not (isPassable (mdTerrain md ! np))
         then gs {player = pl {playerFacing = (dx, dy)}}
-        else checkPortal gs {player = pl {playerPos = np, playerFacing = (dx, dy)}}
+        else gs {player = pl {playerPos = np, playerFacing = (dx, dy)}}
 
-tryAttack :: GameState -> GameState
-tryAttack gs =
+-- Attack a demon, enter a portal, or receive healing from a healer NPC,
+-- whichever is in the tile the player is currently facing.
+trySpaceAction :: GameState -> GameState
+trySpaceAction gs =
   let pl = player gs
       (px, py) = playerPos pl
       (fx, fy) = playerFacing pl
       fp = (px + fx, py + fy)
-      mD = find (\d -> wdPos d == fp) (Map.elems (demons gs))
-   in case mD of
-        Nothing -> addMsg "Nothing there to attack." gs
-        Just wd ->
-          let tmpl = demonTemplates Map.! wdKind wd
-              bs =
-                BattleState
-                  { bPlayer =
-                      playerCombatant
-                        { combHP = playerHP pl,
-                          combMaxHP = playerMaxHP pl,
-                          combLevel = playerLevel pl,
-                          combXP = playerXP pl
-                        },
-                    bAllies = [],
-                    bEnemy = fromTemplate tmpl,
-                    bEnemyAllies = [],
-                    bEnemyId = wdId wd,
-                    bPhase = PlayerMenu 0,
-                    bMenuSel = MenuFight,
-                    bLog = ["Encountered " ++ dName tmpl ++ "!"],
-                    hitFlash = 0,
-                    allyFlash = 0
-                  }
-           in gs {screen = Fighting bs}
+      md = maps gs Map.! currentMap gs
+      mDemon = find (\d -> wdPos d == fp) (Map.elems (demons gs))
+      mPortal = find (\p -> portalPos p == fp) (mdPortals md)
+      isHealer = fp `elem` mdHealers md
+   in case mDemon of
+        Just wd -> startBattle gs pl wd
+        Nothing -> case mPortal of
+          Just portal -> doPortalTransition gs portal
+          Nothing ->
+            if isHealer
+              then tryHealFromNPC gs
+              else addMsg "Nothing here to interact with." gs
+
+startBattle :: GameState -> Player -> WorldDemon -> GameState
+startBattle gs pl wd =
+  let tmpl = demonTemplates Map.! wdKind wd
+      bs =
+        BattleState
+          { bPlayer =
+              playerCombatant
+                { combHP = playerHP pl,
+                  combMaxHP = playerMaxHP pl,
+                  combLevel = playerLevel pl,
+                  combXP = playerXP pl
+                },
+            bAllies = [],
+            bEnemy = fromTemplate tmpl,
+            bEnemyAllies = [],
+            bEnemyId = wdId wd,
+            bPhase = PlayerMenu 0,
+            bMenuSel = MenuFight,
+            bLog = ["Encountered " ++ dName tmpl ++ "!"],
+            hitFlash = 0,
+            allyFlash = 0
+          }
+   in gs {screen = Fighting bs}
+
+doPortalTransition :: GameState -> Portal -> GameState
+doPortalTransition gs portal =
+  let destMd = maps gs Map.! portalDest portal
+      destPos = portalDestPos portal
+      newDemons =
+        Map.fromList $
+          zip [0 ..] $
+            take
+              (mdSpawnCap destMd)
+              [ WorldDemon i k p p (1, 0) 0
+                | (i, (k, p)) <-
+                    zip
+                      [0 ..]
+                      ( zip
+                          (cycle (mdSpawnKinds destMd))
+                          [(10, 10), (25, 15), (15, 22), (30, 8), (20, 20), (8, 18)]
+                      )
+              ]
+      mapName = case portalDest portal of SwampMap -> "the Fetid Swamp"; CavernMap -> "the Deep Cavern"
+   in addMsg ("Entered " ++ mapName ++ "!") $
+        gs
+          { currentMap = portalDest portal,
+            player = (player gs) {playerPos = destPos},
+            demons = newDemons,
+            nextDmnId = length newDemons,
+            spawnTimer = 0
+          }
+
+tryHealFromNPC :: GameState -> GameState
+tryHealFromNPC gs =
+  let pl = player gs
+      fullHP = playerMaxHP pl
+      healed = fullHP - playerHP pl
+      -- Also heal each party demon's persistent stats (reflected in partyStats; combat HP is separate)
+      msg = if healed > 0 then "The healer restores your HP to full! (+" ++ show healed ++ ")" else "You are already at full HP."
+   in addMsg msg gs {player = pl {playerHP = fullHP}}
 
 -- ===========================================================================
 -- EVENT HANDLING
@@ -1402,7 +1471,7 @@ handleExploreKey key gs = case key of
   V.KChar 's' -> Brick.put (tryMove (0, 1) gs)
   V.KChar 'a' -> Brick.put (tryMove (-1, 0) gs)
   V.KChar 'd' -> Brick.put (tryMove (1, 0) gs)
-  V.KChar ' ' -> Brick.put (tryAttack gs)
+  V.KChar ' ' -> Brick.put (trySpaceAction gs)
   _ -> pure ()
 
 -- ===========================================================================
