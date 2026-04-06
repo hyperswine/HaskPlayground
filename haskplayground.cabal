@@ -40,6 +40,7 @@ library
       RVAsm
       RVLang
       SMT
+      TrafficLight
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
@@ -139,6 +140,7 @@ test-suite haskplayground-test
       ProcessorTest
       RVLangTest
       SpikeRun
+      TrafficLightTest
       Paths_haskplayground
   hs-source-dirs:
       test

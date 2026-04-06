@@ -12,6 +12,7 @@ import qualified Hedgehog.Range as Range
 import NPrologTest (nPrologGroup)
 import ProcessorTest (processorGroup)
 import RVAsm
+import TrafficLightTest (trafficLightGroup)
 import System.Exit (exitFailure)
 
 -- ---------------------------------------------------------------------------
@@ -373,4 +374,5 @@ main = do
         ]
   okNP <- checkParallel nPrologGroup
   okProc <- checkParallel processorGroup
-  unless (okRV && okNP && okProc) exitFailure
+  okTL <- checkParallel trafficLightGroup
+  unless (okRV && okNP && okProc && okTL) exitFailure
