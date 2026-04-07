@@ -1,7 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# HLINT ignore "Replace case with maybe" #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
-{-# HLINT ignore "Replace case with maybe" #-}
+{-# HLINT ignore "Eta reduce" #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 
 module FPFS where
 
@@ -17,64 +20,31 @@ import Data.Word (Word64)
 -- Core types
 -- ---------------------------------------------------------------------------
 
--- A content address: in a real system this would be a blake3 hash.
--- Here we simulate it as a monotone counter.
+-- A content address: in a real system this would be a blake3 hash. Here we simulate it as a monotone counter.
 type NodeAddr = Word64
 
 -- Tag: typed key-value pairs. Path tag has uniqueness semantics.
-data TagName
-  = TagPath -- locator: participates in (path, name) unique key
-  | TagType -- descriptor: e.g. "block-device", "text", "fpr-value"
-  | TagAuthor
-  | TagProject
-  | TagCustom String
-  deriving (Eq, Ord, Show)
+data TagName = TagPath | TagType | TagAuthor | TagProject | TagCustom String deriving (Eq, Ord, Show)
 
-data TagValue
-  = TVString String
-  | TVPath FilePath -- structured path value
-  deriving (Eq, Ord, Show)
+data TagValue = TVString String | TVPath FilePath deriving (Eq, Ord, Show)
 
 type Tag = (TagName, TagValue)
 
--- A node is the unit of content-addressed storage.
--- In a real system the payload would be a typed FP-RISC value tree.
-data NodePayload
-  = PayloadBytes [Word64] -- raw bytes (simulated)
-  | PayloadBranch [NodeAddr] -- record fields / list spine
-  | PayloadTombstone -- deletion marker kept for history
-  deriving (Eq, Show)
+-- A node is the unit of content-addressed storage. In a real system the payload would be a typed FP-RISC value tree.
+data NodePayload = PayloadBytes [Word64] | PayloadBranch [NodeAddr] | PayloadTombstone deriving (Eq, Show)
 
-data Node = Node
-  { nodeAddr :: NodeAddr,
-    nodeName :: String,
-    nodeTags :: [Tag],
-    nodePayload :: NodePayload
-  }
-  deriving (Eq, Show)
+data Node = Node {nodeAddr :: NodeAddr, nodeName :: String, nodeTags :: [Tag], nodePayload :: NodePayload} deriving (Eq, Show)
 
 -- ---------------------------------------------------------------------------
 -- Log entries -- the only thing ever written to "disk"
 -- ---------------------------------------------------------------------------
 
--- Every operation is a log entry. Nothing is ever overwritten.
--- Deletion is an entry, modification is an entry, compaction is an entry.
-data LogEntry
-  = EntryWrite Node -- add or update a node
-  | EntryDelete NodeAddr -- soft-delete: node marked tombstone in index
-  | EntryTag NodeAddr Tag -- attach a tag to an existing node
-  | EntryUntag NodeAddr TagName -- remove a tag from a node
-  | EntryCompactionBegin TxID -- marks start of compacted segment
-  | EntryCompactionEnd TxID -- marks end; head pointer moves here
-  deriving (Show)
+-- Every operation is a log entry. Nothing is ever overwritten. Deletion is an entry, modification is an entry, compaction is an entry.
+data LogEntry = EntryWrite Node | EntryDelete NodeAddr | EntryTag NodeAddr Tag | EntryUntag NodeAddr TagName | EntryCompactionBegin TxID | EntryCompactionEnd TxID deriving (Show)
 
 type TxID = Word64
 
-data LogRecord = LogRecord
-  { lrTxID :: TxID,
-    lrEntry :: LogEntry
-  }
-  deriving (Show)
+data LogRecord = LogRecord {lrTxID :: TxID, lrEntry :: LogEntry} deriving (Show)
 
 -- ---------------------------------------------------------------------------
 -- The append-only log
@@ -82,32 +52,19 @@ data LogRecord = LogRecord
 
 -- In a real system this is an mmap'd file of fixed-size pages.
 -- Here it's a sequence of records plus a monotone counter.
-data Log = Log
-  { logRecords :: [LogRecord], -- oldest first
-    logNextTx :: TxID,
-    logNextAddr :: NodeAddr
-  }
-  deriving (Show)
+data Log = Log {logRecords :: [LogRecord], logNextTx :: TxID, logNextAddr :: NodeAddr} deriving (Show)
 
-emptyLog :: Log
 emptyLog = Log [] 0 1
 
 appendEntry :: LogEntry -> Log -> (Log, TxID)
 appendEntry entry log =
   let tx = logNextTx log
       rec = LogRecord tx entry
-   in ( log
-          { logRecords = logRecords log ++ [rec],
-            logNextTx = tx + 1
-          },
-        tx
-      )
+   in (log {logRecords = logRecords log ++ [rec], logNextTx = tx + 1}, tx)
 
 -- Allocate a fresh content address (simulates hashing in real system)
 allocAddr :: Log -> (Log, NodeAddr)
-allocAddr log =
-  let addr = logNextAddr log
-   in (log {logNextAddr = addr + 1}, addr)
+allocAddr log = let addr = logNextAddr log in (log {logNextAddr = addr + 1}, addr)
 
 -- ---------------------------------------------------------------------------
 -- In-memory index -- rebuilt by replaying the log from head
@@ -117,16 +74,8 @@ allocAddr log =
 -- current head. After compaction the head moves forward so old entries
 -- before it are not replayed.
 
-data Index = Index
-  { idxNodes :: Map NodeAddr Node, -- addr -> live node
-    idxNames :: Map String (Set NodeAddr), -- name -> addrs
-    idxTags :: Map Tag (Set NodeAddr), -- tag  -> addrs
-    idxPathKey :: Map (FilePath, String) NodeAddr, -- (path,name) unique key
-    idxDeleted :: Set NodeAddr -- soft-deleted addrs
-  }
-  deriving (Show)
+data Index = Index {idxNodes :: Map NodeAddr Node, idxNames :: Map String (Set NodeAddr), idxTags :: Map Tag (Set NodeAddr), idxPathKey :: Map (FilePath, String) NodeAddr, idxDeleted :: Set NodeAddr} deriving (Show)
 
-emptyIndex :: Index
 emptyIndex = Index Map.empty Map.empty Map.empty Map.empty Set.empty
 
 -- Replay a single log entry into the index
@@ -138,83 +87,33 @@ applyEntry idx (EntryWrite node) =
       -- insert into nodes map
       idx1 = idx {idxNodes = Map.insert addr node (idxNodes idx)}
       -- index by name
-      idx2 =
-        idx1
-          { idxNames =
-              Map.insertWith
-                Set.union
-                name
-                (Set.singleton addr)
-                (idxNames idx1)
-          }
+      idx2 = idx1 {idxNames = Map.insertWith Set.union name (Set.singleton addr) (idxNames idx1)}
       -- index by each tag
-      idx3 =
-        foldl'
-          ( \i t ->
-              i
-                { idxTags =
-                    Map.insertWith
-                      Set.union
-                      t
-                      (Set.singleton addr)
-                      (idxTags i)
-                }
-          )
-          idx2
-          tags
+      idx3 = foldl' (\i t -> i {idxTags = Map.insertWith Set.union t (Set.singleton addr) (idxTags i)}) idx2 tags
       -- enforce (path, name) unique key for path tags
-      idx4 =
-        foldl'
-          ( \i t -> case t of
-              (TagPath, TVPath p) ->
-                i {idxPathKey = Map.insert (p, name) addr (idxPathKey i)}
-              _ -> i
-          )
-          idx3
-          tags
+      idx4 = foldl' (\i t -> case t of (TagPath, TVPath p) -> i {idxPathKey = Map.insert (p, name) addr (idxPathKey i)}; _ -> i) idx3 tags
    in idx4
-applyEntry idx (EntryDelete addr) =
-  idx
-    { idxDeleted = Set.insert addr (idxDeleted idx),
-      idxNodes =
-        Map.adjust
-          (\n -> n {nodePayload = PayloadTombstone})
-          addr
-          (idxNodes idx)
-    }
-applyEntry idx (EntryTag addr tag) =
-  case Map.lookup addr (idxNodes idx) of
-    Nothing -> idx -- node not known, ignore
-    Just node ->
-      let node' = node {nodeTags = tag : nodeTags node}
-          idx1 = idx {idxNodes = Map.insert addr node' (idxNodes idx)}
-          idx2 =
-            idx1
-              { idxTags =
-                  Map.insertWith
-                    Set.union
-                    tag
-                    (Set.singleton addr)
-                    (idxTags idx1)
-              }
-       in idx2
-applyEntry idx (EntryUntag addr tagName) =
-  case Map.lookup addr (idxNodes idx) of
-    Nothing -> idx
-    Just node ->
-      let tags' = filter (\(n, _) -> n /= tagName) (nodeTags node)
-          node' = node {nodeTags = tags'}
-       in idx {idxNodes = Map.insert addr node' (idxNodes idx)}
+applyEntry idx (EntryDelete addr) = idx {idxDeleted = Set.insert addr (idxDeleted idx), idxNodes = Map.adjust (\n -> n {nodePayload = PayloadTombstone}) addr (idxNodes idx)}
+applyEntry idx (EntryTag addr tag) = case Map.lookup addr (idxNodes idx) of
+  -- node not known, ignore
+  Nothing -> idx
+  Just node ->
+    let node' = node {nodeTags = tag : nodeTags node}
+        idx1 = idx {idxNodes = Map.insert addr node' (idxNodes idx)}
+        idx2 = idx1 {idxTags = Map.insertWith Set.union tag (Set.singleton addr) (idxTags idx1)}
+     in idx2
+applyEntry idx (EntryUntag addr tagName) = case Map.lookup addr (idxNodes idx) of
+  Nothing -> idx
+  Just node ->
+    let tags' = filter (\(n, _) -> n /= tagName) (nodeTags node)
+        node' = node {nodeTags = tags'}
+     in idx {idxNodes = Map.insert addr node' (idxNodes idx)}
 applyEntry idx (EntryCompactionBegin _) = idx
 applyEntry idx (EntryCompactionEnd _) = idx
 
 -- Rebuild the full index by replaying the entire log from head
 buildIndex :: Log -> Index
-buildIndex log =
-  foldl'
-    applyEntry
-    emptyIndex
-    (map lrEntry (logRecords log))
+buildIndex log = foldl' applyEntry emptyIndex $ map lrEntry $ logRecords log
 
 -- ---------------------------------------------------------------------------
 -- Filesystem operations (pure, return updated Log)
@@ -246,65 +145,35 @@ fsUntag addr tagName log = appendEntry (EntryUntag addr tagName) log
 
 -- All live (non-deleted) nodes
 liveNodes :: Index -> [Node]
-liveNodes idx =
-  [ n | (addr, n) <- Map.toList (idxNodes idx), not (Set.member addr (idxDeleted idx))
-  ]
+liveNodes idx = [n | (addr, n) <- Map.toList (idxNodes idx), not (Set.member addr (idxDeleted idx))]
 
 -- Search by name
 searchByName :: String -> Index -> [Node]
-searchByName name idx =
-  let addrs = fromMaybe Set.empty (Map.lookup name (idxNames idx))
-   in mapMaybe
-        ( \a ->
-            if Set.member a (idxDeleted idx)
-              then Nothing
-              else Map.lookup a (idxNodes idx)
-        )
-        (Set.toList addrs)
+searchByName name idx = let addrs = fromMaybe Set.empty (Map.lookup name (idxNames idx)) in mapMaybe (\a -> if Set.member a (idxDeleted idx) then Nothing else Map.lookup a (idxNodes idx)) (Set.toList addrs)
 
 -- Search by tag
 searchByTag :: Tag -> Index -> [Node]
-searchByTag tag idx =
-  let addrs = fromMaybe Set.empty (Map.lookup tag (idxTags idx))
-   in mapMaybe
-        ( \a ->
-            if Set.member a (idxDeleted idx)
-              then Nothing
-              else Map.lookup a (idxNodes idx)
-        )
-        (Set.toList addrs)
+searchByTag tag idx = let addrs = fromMaybe Set.empty (Map.lookup tag (idxTags idx)) in mapMaybe (\a -> if Set.member a (idxDeleted idx) then Nothing else Map.lookup a (idxNodes idx)) (Set.toList addrs)
 
 -- Resolve a unix-style path to exactly one node (or error)
-data ResolveResult
-  = Resolved Node
-  | NotFound
-  | Ambiguous [Node] -- uniqueness constraint violated
-  deriving (Show)
+data ResolveResult = Resolved Node | NotFound | Ambiguous [Node] deriving (Show)
 
 resolvePath :: FilePath -> String -> Index -> ResolveResult
-resolvePath path name idx =
-  case Map.lookup (path, name) (idxPathKey idx) of
-    Nothing -> NotFound
-    Just addr ->
-      if Set.member addr (idxDeleted idx)
-        then NotFound
-        else case Map.lookup addr (idxNodes idx) of
-          Nothing -> NotFound
-          Just node -> Resolved node
+resolvePath path name idx = case Map.lookup (path, name) (idxPathKey idx) of
+  Nothing -> NotFound
+  Just addr ->
+    if Set.member addr $ idxDeleted idx
+      then NotFound
+      else case Map.lookup addr (idxNodes idx) of
+        Nothing -> NotFound
+        Just node -> Resolved node
 
 -- Multi-tag intersection search
 searchByTags :: [Tag] -> Index -> [Node]
 searchByTags [] idx = liveNodes idx
 searchByTags (t : ts) idx =
   let initial = Set.fromList $ map nodeAddr $ searchByTag t idx
-      addrs =
-        foldl'
-          ( \s tag ->
-              let s' = Set.fromList $ map nodeAddr $ searchByTag tag idx
-               in Set.intersection s s'
-          )
-          initial
-          ts
+      addrs = foldl' (\s tag -> let s' = Set.fromList $ map nodeAddr $ searchByTag tag idx in Set.intersection s s') initial ts
    in mapMaybe (\a -> Map.lookup a (idxNodes idx)) (Set.toList addrs)
 
 -- ---------------------------------------------------------------------------
@@ -349,33 +218,10 @@ demo = do
   let pathTag p = (TagPath, TVPath p)
       typeTag t = (TagType, TVString t)
 
-  let (log1, addrSdd, _) =
-        fsWrite
-          "sdd"
-          [pathTag "/dev/", typeTag "block-device"]
-          (PayloadBytes [0xDEAD])
-          emptyLog
-  let (log2, addrNull, _) =
-        fsWrite
-          "null"
-          [pathTag "/dev/", typeTag "char-device"]
-          (PayloadBytes [])
-          log1
-  let (log3, addrCfg, _) =
-        fsWrite
-          "config"
-          [ pathTag "/etc/",
-            typeTag "fpr-value",
-            (TagProject, TVString "fp-risc")
-          ]
-          (PayloadBytes [0xCAFE])
-          log2
-  let (log4, addrTmp, _) =
-        fsWrite
-          "tmp"
-          [pathTag "/tmp/", typeTag "text"]
-          (PayloadBytes [0xFF])
-          log3
+  let (log1, addrSdd, _) = fsWrite "sdd" [pathTag "/dev/", typeTag "block-device"] (PayloadBytes [0xDEAD]) emptyLog
+  let (log2, addrNull, _) = fsWrite "null" [pathTag "/dev/", typeTag "char-device"] (PayloadBytes []) log1
+  let (log3, addrCfg, _) = fsWrite "config" [pathTag "/etc/", typeTag "fpr-value", (TagProject, TVString "fp-risc")] (PayloadBytes [0xCAFE]) log2
+  let (log4, addrTmp, _) = fsWrite "tmp" [pathTag "/tmp/", typeTag "text"] (PayloadBytes [0xFF]) log3
 
   putStrLn $ "Log length after writes: " ++ show (length $ logRecords log4)
 
@@ -416,20 +262,11 @@ demo = do
 
   -- 6. Path uniqueness: try to write a duplicate /dev/sdd
   putStrLn "\n-- Uniqueness check for /dev/sdd --"
-  let (log7, addrSdd2, _) =
-        fsWrite
-          "sdd"
-          [pathTag "/dev/", typeTag "block-device"]
-          (PayloadBytes [0xBEEF])
-          log6
+  let (log7, addrSdd2, _) = fsWrite "sdd" [pathTag "/dev/", typeTag "block-device"] (PayloadBytes [0xBEEF]) log6
   let idx4 = buildIndex log7
   -- resolvePath still returns the first one (last write wins in pathKey map)
   -- a real system would reject this at write time; here we show the ambiguity
-  let pathKeyCount =
-        length $
-          filter
-            (\((p, n), _) -> p == "/dev/" && n == "sdd")
-            (Map.toList $ idxPathKey idx4)
+  let pathKeyCount = length $ filter (\((p, n), _) -> p == "/dev/" && n == "sdd") (Map.toList $ idxPathKey idx4)
   putStrLn $ "  Path key entries for /dev/sdd: " ++ show pathKeyCount
   putStrLn "  (In a real system the write would be rejected at transaction time)"
 
