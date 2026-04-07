@@ -1,10 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# HLINT ignore "Replace case with maybe" #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
-{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
 {-# HLINT ignore "Eta reduce" #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module FPFS where
 
@@ -15,6 +14,7 @@ import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Word (Word64)
+import Prelude hiding (log)
 
 -- ---------------------------------------------------------------------------
 -- Core types
@@ -50,17 +50,18 @@ data LogRecord = LogRecord {lrTxID :: TxID, lrEntry :: LogEntry} deriving (Show)
 -- The append-only log
 -- ---------------------------------------------------------------------------
 
--- In a real system this is an mmap'd file of fixed-size pages.
--- Here it's a sequence of records plus a monotone counter.
+-- In a real system this is an mmap'd file of fixed-size pages. Here it's a sequence of records plus a monotone counter.
 data Log = Log {logRecords :: [LogRecord], logNextTx :: TxID, logNextAddr :: NodeAddr} deriving (Show)
 
 emptyLog = Log [] 0 1
 
+-- EVERY NEW LOG GETS ADDED HERE
 appendEntry :: LogEntry -> Log -> (Log, TxID)
 appendEntry entry log =
   let tx = logNextTx log
       rec = LogRecord tx entry
-   in (log {logRecords = logRecords log ++ [rec], logNextTx = tx + 1}, tx)
+   in -- NOTE THIS IS AN APPEND ++ not cons. With diff lists or finger trees, etc. it shouldnt be too bad
+      (log {logRecords = logRecords log ++ [rec], logNextTx = tx + 1}, tx)
 
 -- Allocate a fresh content address (simulates hashing in real system)
 allocAddr :: Log -> (Log, NodeAddr)
@@ -70,9 +71,7 @@ allocAddr log = let addr = logNextAddr log in (log {logNextAddr = addr + 1}, add
 -- In-memory index -- rebuilt by replaying the log from head
 -- ---------------------------------------------------------------------------
 
--- The live index is the result of replaying all log entries from the
--- current head. After compaction the head moves forward so old entries
--- before it are not replayed.
+-- The live index is the result of replaying all log entries from the current head. After compaction the head moves forward so old entries before it are not replayed.
 
 data Index = Index {idxNodes :: Map NodeAddr Node, idxNames :: Map String (Set NodeAddr), idxTags :: Map Tag (Set NodeAddr), idxPathKey :: Map (FilePath, String) NodeAddr, idxDeleted :: Set NodeAddr} deriving (Show)
 

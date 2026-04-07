@@ -29,6 +29,7 @@ library
       ExActors
       FParser
       FPFS
+      FPFSActor
       FPInterpreter
       FPRunner
       Gameloop
