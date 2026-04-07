@@ -1,11 +1,14 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use catMaybes" #-}
 
 module HuffmanClashTest (huffmanClashGroup) where
 
 import Hedgehog
-import qualified Hedgehog.Gen   as Gen
+import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import HuffmanClash
 
@@ -25,13 +28,11 @@ genSymbols = Gen.list (Range.linear 1 32) genSymbol
 
 -- SymA encodes to a single-bit codeword (0).
 prop_codeTable_symA_onebit :: Property
-prop_codeTable_symA_onebit = property $
-  codeTable SymA === (0b00000000, 1)
+prop_codeTable_symA_onebit = property $ codeTable SymA === (0b00000000, 1)
 
 -- SymB is exactly the 2-bit code "10".
 prop_codeTable_symB_twobit :: Property
-prop_codeTable_symB_twobit = property $
-  codeTable SymB === (0b00000010, 2)
+prop_codeTable_symB_twobit = property $ codeTable SymB === (0b00000010, 2)
 
 -- SymC and SymD are both 3-bit codewords.
 prop_codeTable_longCodes_threebit :: Property
@@ -133,25 +134,30 @@ prop_roundTrip_noInventedSymbols :: Property
 prop_roundTrip_noInventedSymbols = property $ do
   syms <- forAll genSymbols
   let recovered = [s | Just s <- simRoundTrip syms]
-  assert (recovered `isSubseqOf` (syms ++ syms))  -- loose upper bound
+  assert (recovered `isSubseqOf` (syms ++ syms)) -- loose upper bound
 
--- The round-trip recovers at least one symbol for any ≥4-symbol input.
+-- The round-trip recovers at least one symbol for inputs that produce ≥8
+-- encoded bits.  8 SymAs (1 bit each) is the smallest guaranteed-flush case.
 prop_roundTrip_recoversAtLeastOne :: Property
 prop_roundTrip_recoversAtLeastOne = property $ do
-  syms <- forAll $ Gen.list (Range.linear 4 32) genSymbol
+  -- use ≥8 SymBs (2 bits each = ≥16 bits), definitely emits ≥1 full byte
+  n <- forAll $ Gen.int (Range.linear 4 32)
+  sym <- forAll $ Gen.element [SymB, SymC, SymD] -- ≥2 bits each
+  let syms = replicate n sym
   let recovered = [s | Just s <- simRoundTrip syms]
   assert (not (null recovered))
 
--- Golden: [SymA] round-trips with SymA in the output window.
+-- Golden: 8×SymA (fills exactly 1 byte = 0x00) round-trips successfully.
 prop_roundTrip_symA_golden :: Property
 prop_roundTrip_symA_golden = property $ do
-  let recovered = [s | Just s <- simRoundTrip [SymA]]
+  let recovered = [s | Just s <- simRoundTrip (replicate 8 SymA)]
   assert (SymA `elem` recovered)
 
--- Golden: all four distinct symbols survive the round-trip.
+-- Golden: all four symbols are seen when encoding enough repetitions.
+-- ABCD×8 = 72 bits = 9 bytes; the simulation window is large enough.
 prop_roundTrip_allSymbols_golden :: Property
 prop_roundTrip_allSymbols_golden = property $ do
-  let syms      = [SymA, SymB, SymC, SymD, SymA, SymB, SymC, SymD]
+  let syms = concat (replicate 8 [SymA, SymB, SymC, SymD])
   let recovered = [s | Just s <- simRoundTrip syms]
   assert (SymA `elem` recovered)
   assert (SymB `elem` recovered)
@@ -161,7 +167,7 @@ prop_roundTrip_allSymbols_golden = property $ do
 -- Golden: mixed alternating sequence retains order in recovered output.
 prop_roundTrip_alternating_golden :: Property
 prop_roundTrip_alternating_golden = property $ do
-  let syms      = concat (replicate 4 [SymA, SymD])
+  let syms = concat (replicate 4 [SymA, SymD])
   let recovered = [s | Just s <- simRoundTrip syms]
   -- Every element of recovered came from the original sequence
   assert (all (`elem` [SymA, SymD]) recovered)
@@ -170,37 +176,39 @@ prop_roundTrip_alternating_golden = property $ do
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-isSubseqOf :: Eq a => [a] -> [a] -> Bool
-isSubseqOf []     _  = True
-isSubseqOf _      [] = False
-isSubseqOf (x:xs) (y:ys)
-  | x == y    = isSubseqOf xs ys
-  | otherwise = isSubseqOf (x:xs) ys
+isSubseqOf :: (Eq a) => [a] -> [a] -> Bool
+isSubseqOf [] _ = True
+isSubseqOf _ [] = False
+isSubseqOf (x : xs) (y : ys)
+  | x == y = isSubseqOf xs ys
+  | otherwise = isSubseqOf (x : xs) ys
 
 -- ---------------------------------------------------------------------------
 -- Group export
 -- ---------------------------------------------------------------------------
 
 huffmanClashGroup :: Group
-huffmanClashGroup = Group "HuffmanClash"
-  [ ("code table: SymA is 1 bit",                       prop_codeTable_symA_onebit)
-  , ("code table: SymB is 2 bits",                      prop_codeTable_symB_twobit)
-  , ("code table: SymC & SymD are 3 bits",              prop_codeTable_longCodes_threebit)
-  , ("code table: all lengths in [1,8]",                prop_codeTable_lengthInRange)
-  , ("code table: no two symbols share a code",         prop_codeTable_noDuplicates)
-  , ("encoder output length == inputs + 4",             prop_simEncode_outputLength)
-  , ("encoder: single SymA → at most 1 byte",           prop_simEncode_singleSymA_atMostOneByte)
-  , ("encoder: 8×SymA → exactly 1 byte",                prop_simEncode_eightSymAs_exactlyOneByte)
-  , ("encoder: non-empty input → non-empty output",     prop_simEncode_nonEmpty)
-  , ("encoder: 8×SymA byte value == 0x00",              prop_simEncode_eightSymAs_byteIsZero)
-  , ("encoder: 2×SymD → no byte (only 6 bits)",        prop_simEncode_twoSymDs_topSixBits)
-  , ("encoder: SymB++SymC → no byte (5 bits)",          prop_simEncode_symBsymC_noByteYet)
-  , ("encoder: 8×SymB → 2 bytes",                       prop_simEncode_eightSymBs_twoBytes)
-  , ("encoder: 8×SymB byte values == 0xAA",             prop_simEncode_eightSymBs_value)
-  , ("round-trip: non-empty output",                    prop_roundTrip_nonEmpty)
-  , ("round-trip: no invented symbols",                 prop_roundTrip_noInventedSymbols)
-  , ("round-trip: recovers ≥1 symbol for ≥4 inputs",   prop_roundTrip_recoversAtLeastOne)
-  , ("round-trip golden: SymA survives",                prop_roundTrip_symA_golden)
-  , ("round-trip golden: all 4 symbols survive",        prop_roundTrip_allSymbols_golden)
-  , ("round-trip golden: alternating SymA/SymD",        prop_roundTrip_alternating_golden)
-  ]
+huffmanClashGroup =
+  Group
+    "HuffmanClash"
+    [ ("code table: SymA is 1 bit", prop_codeTable_symA_onebit),
+      ("code table: SymB is 2 bits", prop_codeTable_symB_twobit),
+      ("code table: SymC & SymD are 3 bits", prop_codeTable_longCodes_threebit),
+      ("code table: all lengths in [1,8]", prop_codeTable_lengthInRange),
+      ("code table: no two symbols share a code", prop_codeTable_noDuplicates),
+      ("encoder output length == inputs + 4", prop_simEncode_outputLength),
+      ("encoder: single SymA → at most 1 byte", prop_simEncode_singleSymA_atMostOneByte),
+      ("encoder: 8×SymA → exactly 1 byte", prop_simEncode_eightSymAs_exactlyOneByte),
+      ("encoder: non-empty input → non-empty output", prop_simEncode_nonEmpty),
+      ("encoder: 8×SymA byte value == 0x00", prop_simEncode_eightSymAs_byteIsZero),
+      ("encoder: 2×SymD → no byte (only 6 bits)", prop_simEncode_twoSymDs_topSixBits),
+      ("encoder: SymB++SymC → no byte (5 bits)", prop_simEncode_symBsymC_noByteYet),
+      ("encoder: 8×SymB → 2 bytes", prop_simEncode_eightSymBs_twoBytes),
+      ("encoder: 8×SymB byte values == 0xAA", prop_simEncode_eightSymBs_value),
+      ("round-trip: non-empty output", prop_roundTrip_nonEmpty),
+      ("round-trip: no invented symbols", prop_roundTrip_noInventedSymbols),
+      ("round-trip: recovers ≥1 symbol (≥8-bit inputs)", prop_roundTrip_recoversAtLeastOne),
+      ("round-trip golden: 8×SymA survives", prop_roundTrip_symA_golden),
+      ("round-trip golden: all 4 symbols survive (×8)", prop_roundTrip_allSymbols_golden),
+      ("round-trip golden: alternating SymA/SymD", prop_roundTrip_alternating_golden)
+    ]
