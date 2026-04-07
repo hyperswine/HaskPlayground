@@ -9,6 +9,7 @@ import qualified Data.Text as T
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import HuffmanClashTest (huffmanClashGroup)
 import NPrologTest (nPrologGroup)
 import ProcessorTest (processorGroup)
 import RVAsm
@@ -372,7 +373,8 @@ main = do
           ("translate: labels unchanged", prop_translate_labelsUnchanged),
           ("translate: empty program", prop_translate_emptyProgram)
         ]
-  okNP <- checkParallel nPrologGroup
+  okNP   <- checkParallel nPrologGroup
   okProc <- checkParallel processorGroup
-  okTL <- checkParallel trafficLightGroup
-  unless (okRV && okNP && okProc && okTL) exitFailure
+  okTL   <- checkParallel trafficLightGroup
+  okHC   <- checkParallel huffmanClashGroup
+  unless (okRV && okNP && okProc && okTL && okHC) exitFailure

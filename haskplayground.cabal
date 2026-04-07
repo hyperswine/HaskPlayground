@@ -137,6 +137,7 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      HuffmanClashTest
       NPrologTest
       ProcessorTest
       RVLangTest
