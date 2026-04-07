@@ -33,6 +33,7 @@ library
       FPInterpreter
       FPRunner
       Gameloop
+      HuffmanClash
       Lib
       MyHardware
       NProlog
