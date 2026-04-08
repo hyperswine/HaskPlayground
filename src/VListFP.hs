@@ -7,9 +7,7 @@
 
 {-# HLINT ignore "Use camelCase" #-}
 
--- Simulates the FP-RISC List SoA (Structure of Arrays) VList semantics.
---   1. VList  -- segmented list (exponentially growing segments, simulating
---               unboxed contiguous arrays within each segment)
+--   1. VList  -- segmented list (exponentially growing segments, simulating unboxed contiguous arrays within each segment)
 --   2. FPR_Record typeclass -- any record can declare its SoA layout
 --   3. cons (::) fans out to each column simultaneously
 --   4. List.map   -- can split into independent per-column maps
@@ -23,24 +21,18 @@ module VListFP where
 import Data.Proxy (Proxy (..))
 
 -- ---------------------------------------------------------------------------
--- 1.  VList -- segmented list
---     Each segment doubles in capacity.  Within a segment elements are
---     contiguous (in a real impl: an unboxed array).  Here [[a]] simulates
---     the segment chain; the real runtime would use ByteArray# or similar.
+-- 1.  VList -- segmented list. Each segment doubles in capacity. Within a segment elements are contiguous (in a real impl: an unboxed array). Here [[a]] simulates the segment chain; the real runtime would use ByteArray# or similar.
 -- ---------------------------------------------------------------------------
 
 -- | Segment chain: newest segment first. Within each segment, newest element first (i.e. each segment is itself a reversed sub-list). The targetSize field records the capacity of the current head segment; it doubles each time we spill over into a new segment.
 data VList a = VList {segments :: [[a]], targetSize :: Int} deriving (Eq)
 
-instance (Show a) => Show (VList a) where
-  show vl = "VList " ++ show (vlistToList vl)
+instance (Show a) => Show (VList a) where show vl = "VList " ++ show (vlistToList vl)
 
-instance Functor VList where
-  fmap f (VList segs tgt) = VList (map (map f) segs) tgt
+instance Functor VList where fmap f (VList segs tgt) = VList (map (map f) segs) tgt
 
-instance Foldable VList where
-  -- Oldest segment last in `segments`; within each segment oldest element is at the tail. foldr over the logical sequence = foldr segs-reversed, then within each segment reversed.
-  foldr f z (VList segs _) = foldr (flip (foldr f)) z segs
+-- Oldest segment last in `segments`; within each segment oldest element is at the tail. foldr over the logical sequence = foldr segs-reversed, then within each segment reversed.
+instance Foldable VList where foldr f z (VList segs _) = foldr (flip (foldr f)) z segs
 
 -- | O(1) amortised cons. Prepend into the head segment when there is still room; otherwise spill into a new segment of double the target size.
 vcons :: a -> VList a -> VList a
@@ -48,14 +40,11 @@ vcons x (VList [] _) = VList [[x]] 2
 vcons x (VList (h : t) tgt) | length h < tgt = VList ((x : h) : t) tgt
 vcons x (VList (h : t) tgt) = VList ([x] : h : t) (tgt * 2)
 
-vnil :: VList a
 vnil = VList [] 1
 
-fromListV :: [a] -> VList a
 fromListV = foldr vcons vnil
 
 -- | Recover insertion order. `foldr vcons vnil [a,b,c]` = `vcons a (vcons b (vcons c vnil))`, so `a` ends up as the head of the head segment. `concatMap id segments` therefore yields [a, b, c] directly (head segment first, head element first).
-vlistToList :: VList a -> [a]
 vlistToList (VList segs _) = concatMap id segs
 
 vlength :: VList a -> Int
@@ -72,9 +61,7 @@ vzipWith :: (a -> b -> c) -> VList a -> VList b -> VList c
 vzipWith f va vb = fromListV $ zipWith f (vlistToList va) (vlistToList vb)
 
 -- ---------------------------------------------------------------------------
--- 2.  FPR_Record typeclass
---     The associated type `SoA a` is the columnar representation of [a].
---     The compiler would derive instances automatically from record definitions.
+-- 2.  FPR_Record typeclass. The associated type `SoA a` is the columnar representation of [a]. The compiler would derive instances automatically from record definitions.
 -- ---------------------------------------------------------------------------
 
 class FPR_Record a where
@@ -105,17 +92,14 @@ class FPR_Record a where
   zipWithSoA f sa sb = toSoA $ zipWith f (fromSoA sa) (fromSoA sb)
 
 -- ---------------------------------------------------------------------------
--- 3.  ColUpdate -- an explicit per-field update
---     The PE analyses a record lambda and emits one ColUpdate per field.
---     Independent updates can be lowered to parallel SIMD column passes.
+-- 3.  ColUpdate -- an explicit per-field update. The PE analyses a record lambda and emits one ColUpdate per field. Independent updates can be lowered to parallel SIMD column passes.
 -- ---------------------------------------------------------------------------
 
 -- | A lens into one column of the SoA.
 data Field rec col = Field {getCol :: SoA rec -> VList col, setCol :: VList col -> SoA rec -> SoA rec}
 
 -- | A single-field update (existential over col).
-data ColUpdate rec where
-  ColUpdate :: Field rec col -> (col -> col) -> ColUpdate rec
+data ColUpdate rec where ColUpdate :: Field rec col -> (col -> col) -> ColUpdate rec
 
 -- | Apply a list of independent ColUpdates. Each touches exactly one column; order is irrelevant when fields are  mutually independent (the PE guarantees this statically).
 applyUpdates :: [ColUpdate rec] -> SoA rec -> SoA rec
@@ -131,14 +115,12 @@ mapColumn field f soa = setCol field (vmapSegs f (getCol field soa)) soa
 
 data Student = Student {studentName :: String, studentAge :: Int} deriving (Eq)
 
-instance Show Student where
-  show s = "Student{name=" ++ studentName s ++ ", age=" ++ show (studentAge s) ++ "}"
+instance Show Student where show s = "Student{name=" ++ studentName s ++ ", age=" ++ show (studentAge s) ++ "}"
 
 -- | SoA layout for List Student. The compiler derives this automatically from the record definition.
 data StudentSoA = StudentSoA {nameCol :: VList String, ageCol :: VList Int} deriving (Eq)
 
-instance Show StudentSoA where
-  show s = "StudentSoA\n  names: " ++ show (nameCol s) ++ "\n  ages : " ++ show (ageCol s)
+instance Show StudentSoA where show s = "StudentSoA\n  names: " ++ show (nameCol s) ++ "\n  ages : " ++ show (ageCol s)
 
 instance FPR_Record Student where
   type SoA Student = StudentSoA
@@ -149,15 +131,10 @@ instance FPR_Record Student where
 
   emptySoA _ = StudentSoA vnil vnil
 
-  -- \| cons fans out to each column simultaneously.
+  -- | cons fans out to each column simultaneously.
   consSoA s soa = StudentSoA {nameCol = vcons (studentName s) (nameCol soa), ageCol = vcons (studentAge s) (ageCol soa)}
 
-  -- \| Column-split map.
-  -- The PE analyses the lambda AST and finds that the two field updates are independent: new name depends only on old name, new age only on old age.
-  -- It emits two separate column passes, each a SIMD candidate.
-  -- The trick: we map each column by reconstructing a minimal dummy record containing only that field's value, apply f, then project the result.
-  -- The PE does this symbolically (never evaluates f); here it is explicit.
-  -- Note: this is ONLY correct when fields are independent. The PE verifies  this statically before emitting the split.
+  -- | Column-split map. The PE analyses the lambda AST and finds that the two field updates are independent: new name depends only on old name, new age only on old age. It emits two separate column passes, each a SIMD candidate. The trick: we map each column by reconstructing a minimal dummy record containing only that field's value, apply f, then project the result. The PE does this symbolically (never evaluates f); here it is explicit. Note: this is ONLY correct when fields are independent. The PE verifies  this statically before emitting the split.
   mapSoA f soa = StudentSoA {nameCol = vmapSegs (\n -> studentName (f (Student n 0))) (nameCol soa), ageCol = vmapSegs (\a -> studentAge (f (Student "" a))) (ageCol soa)}
 
   filterSoA p (StudentSoA ns as) = let pairs = zip (vlistToList ns) (vlistToList as); kept = filter (uncurry (\n a -> p (Student n a))) pairs; (ns', as') = unzip kept in StudentSoA (fromListV ns') (fromListV as')
@@ -196,21 +173,17 @@ listFoldl :: (FPR_Record a) => (b -> a -> b) -> b -> SoA a -> b
 listFoldl f z = foldl f z . fromSoA
 
 -- ---------------------------------------------------------------------------
--- 6.  FprNum -- numeric type as a record (analogous to FP-RISC's Num)
---     Demonstrates that VList Num expands to three contiguous float columns.
---     Interval arithmetic then operates as three parallel vector ops.
+-- 6.  FprNum -- numeric type as a record (analogous to FP-RISC's Num) Demonstrates that VList Num expands to three contiguous float columns. Interval arithmetic then operates as three parallel vector ops.
 -- ---------------------------------------------------------------------------
 
 -- error interval low bound and error interval high bound
 data FprNum = FprNum {numValue :: Double, numErrLow :: Double, numErrHigh :: Double} deriving (Eq)
 
-instance Show FprNum where
-  show n = show (numValue n) ++ " +/-[" ++ show (numErrLow n) ++ ", " ++ show (numErrHigh n) ++ "]"
+instance Show FprNum where show n = show (numValue n) ++ " +/-[" ++ show (numErrLow n) ++ ", " ++ show (numErrHigh n) ++ "]"
 
 data FprNumSoA = FprNumSoA {numValueCol :: VList Double, numErrLowCol :: VList Double, numErrHighCol :: VList Double} deriving (Eq)
 
-instance Show FprNumSoA where
-  show s = "FprNumSoA\n  values : " ++ show (numValueCol s) ++ "\n  errLow : " ++ show (numErrLowCol s) ++ "\n  errHigh: " ++ show (numErrHighCol s)
+instance Show FprNumSoA where show s = "FprNumSoA\n  values : " ++ show (numValueCol s) ++ "\n  errLow : " ++ show (numErrLowCol s) ++ "\n  errHigh: " ++ show (numErrHighCol s)
 
 instance FPR_Record FprNum where
   type SoA FprNum = FprNumSoA
