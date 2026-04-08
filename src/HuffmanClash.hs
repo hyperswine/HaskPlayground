@@ -4,6 +4,9 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
 
 module HuffmanClash where
 
@@ -12,7 +15,7 @@ import qualified Prelude as P
 
 data Symbol = SymA | SymB | SymC | SymD deriving (Show, Eq, Generic, NFDataX, Enum, Bounded)
 
--- | (code bits packed into low bits of Unsigned 8, code length in bits)
+-- | Code bits packed into low bits of Unsigned 8, Code length in bits
 type Code = (Unsigned 8, Unsigned 4)
 
 codeTable :: Symbol -> Code
@@ -24,11 +27,9 @@ codeTable SymD = (0b00000111, 3) -- 111
 -- EncAcc: bit buffer, bits packed toward MSB number of valid bits in encAcc
 data EncState = EncState {encAcc :: Unsigned 16, encFill :: Unsigned 5} deriving (Show, Generic, NFDataX)
 
-encInit :: EncState
 encInit = EncState {encAcc = 0, encFill = 0}
 
 -- | Encoder transition + output.
-encStep :: EncState -> Maybe Symbol -> (EncState, Maybe (Unsigned 8))
 encStep st inp = (st', outByte)
   where
     -- 1. Optionally append new code bits into the accumulator
@@ -59,7 +60,6 @@ data DecState = DecState {decNode :: Unsigned 2} deriving (Show, Generic, NFData
 decInit = DecState {decNode = 0}
 
 -- | Decoder transition + output.
-decStep :: DecState -> (Bit, Bool) -> (DecState, Maybe Symbol)
 decStep st (b, valid)
   | not valid = (st, Nothing)
   | otherwise = case (decNode st, b) of
@@ -78,16 +78,14 @@ decoder = mealy decStep decInit
 -- serBuf: byte being serialised, serBits: bits remaining (0 = idle)
 data SerState = SerState {serBuf :: Unsigned 8, serBits :: Unsigned 4} deriving (Show, Generic, NFDataX)
 
-serInit :: SerState
 serInit = SerState {serBuf = 0, serBits = 0}
 
-serStep :: SerState -> Maybe (Unsigned 8) -> (SerState, (Bit, Bool))
 serStep st inp =
   case (serBits st, inp) of
     -- Idle and new byte arrives: load it, emit MSB this cycle
-    (0, Just byte) -> let topBit = boolToBit (testBit (toInteger byte) 7); st' = SerState {serBuf = byte `shiftL` 1, serBits = 7} in (st', (topBit, True))
+    (0, Just byte) -> let topBit = boolToBit $ testBit (toInteger byte) 7; st' = SerState {serBuf = byte `shiftL` 1, serBits = 7} in (st', (topBit, True))
     -- Busy: emit next MSB, shift left
-    (n, _) | n > 0 -> let topBit = boolToBit (testBit (toInteger (serBuf st)) 7); st' = SerState {serBuf = serBuf st `shiftL` 1, serBits = n - 1} in (st', (topBit, True))
+    (n, _) | n > 0 -> let topBit = boolToBit $ testBit (toInteger (serBuf st)) 7; st' = SerState {serBuf = serBuf st `shiftL` 1, serBits = n - 1} in (st', (topBit, True))
     -- Idle, nothing to do
     _ -> (st, (0, False))
 
@@ -98,11 +96,9 @@ roundTrip :: (HiddenClockResetEnable dom) => Signal dom (Maybe Symbol) -> Signal
 roundTrip symIn = let compressed = encoder symIn; bits = serialiser compressed in decoder bits
 
 -- | Run encoder over a list of symbols, collect output bytes.
-simEncode :: [Symbol] -> [Maybe (Unsigned 8)]
 simEncode syms = P.take (P.length syms + 4) $ simulate @System encoder $ P.map Just syms P.++ P.repeat Nothing
 
 -- | Run the full round-trip simulation. P.length syms * 6 generous window for pipeline latency
-simRoundTrip :: [Symbol] -> [Maybe Symbol]
 simRoundTrip syms = P.take (P.length syms * 6) $ simulate @System roundTrip $ P.map Just syms P.++ P.repeat Nothing
 
 -- simEncode [SymA, SymB, SymC, SymD, SymA, SymA, SymA, SymA]
