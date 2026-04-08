@@ -43,6 +43,7 @@ library
       RVLang
       SMT
       TrafficLight
+      VListFP
   other-modules:
       Paths_haskplayground
   hs-source-dirs:

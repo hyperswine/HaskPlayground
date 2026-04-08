@@ -1,5 +1,3 @@
--- EncDecClash.hs
---
 -- Word-level Huffman compression implemented in Clash.
 --
 --  PURE HASKELL (elaboration-time, not synthesisable):
@@ -18,7 +16,6 @@
 --
 --  DEMO (fixed corpus "the cat sat on the mat the cat sat"):
 --    demoEncoder, demoDecoder, demoRoundTrip, simEncode, simRoundTrip
---
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
@@ -26,10 +23,10 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-
-{-# HLINT ignore "Use newtype instead of data" #-}
 
 module EncDecClash where
 
@@ -174,7 +171,7 @@ type TreeNode = (Bool, Index MaxSyms, NodeIdx, NodeIdx)
 buildTreeROM :: [(Token, P.Int)] -> HTree -> Vec MaxNodes TreeNode
 buildTreeROM vocab tree = go tree 0 1 (repeat (P.True, 0, 0, 0))
   where
-    symIdx w = fromIntegral $ fromMaybe 0 (P.lookup w (P.zip (P.map P.fst vocab) [0 ..]))
+    symIdx w = fromIntegral $ fromMaybe 0 $ P.lookup w $ P.zip (P.map P.fst vocab) [0 ..]
 
     go (Leaf _ sym) idx _ v = replace (fromIntegral idx :: NodeIdx) (P.True, symIdx sym, 0, 0) v
     go (Branch _ l r) idx nextFree v =
@@ -194,11 +191,8 @@ buildTreeROM vocab tree = go tree 0 1 (repeat (P.True, 0, 0, 0))
 -- After appending a code of up to MaxCodeLen=16 bits the fill reaches ≤ 23,
 -- so the 24-bit accumulator is always wide enough.
 
-data EncState = EncState
-  { encAcc :: Unsigned AccWidth, -- bit accumulator, most-significant bits first
-    encFill :: Unsigned 5 -- number of valid bits currently in encAcc
-  }
-  deriving (P.Show, Generic, NFDataX)
+-- encAcc: bit accumulator, most-significant bits first, encFill: number of valid bits currently in encAcc
+data EncState = EncState {encAcc :: Unsigned AccWidth, encFill :: Unsigned 5} deriving (P.Show, Generic, NFDataX)
 
 encInit = EncState {encAcc = 0, encFill = 0}
 
