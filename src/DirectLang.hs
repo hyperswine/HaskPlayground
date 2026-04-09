@@ -69,13 +69,15 @@ popToFt0 :: [Text]
 popToFt0 = ["  fld ft0, 0(sp)", "  addi sp, sp, 8"]
 
 binaryOp :: Text -> Attr -> Attr -> Attr
-binaryOp instr (Attr cl dl) (Attr cr dr) =
-  Attr (cl ++ pushFa0 ++ cr ++ popToFt0 ++ ["  " <> instr]) (M.union dl dr)
+binaryOp instr (Attr cl dl) (Attr cr dr) = Attr (cl ++ pushFa0 ++ cr ++ popToFt0 ++ ["  " <> instr]) (M.union dl dr)
 
-addA, subA, mulA, divA :: Attr -> Attr -> Attr
+-- addA, subA, mulA, divA :: Attr -> Attr -> Attr
 addA = binaryOp "fadd.d fa0, ft0, fa0" -- ft0 + fa0 = left + right
+
 subA = binaryOp "fsub.d fa0, ft0, fa0" -- ft0 - fa0 = left - right
+
 mulA = binaryOp "fmul.d fa0, ft0, fa0"
+
 divA = binaryOp "fdiv.d fa0, ft0, fa0" -- ft0 / fa0 = left / right
 
 -- pow: libm pow(x, y); calling convention fa0 = x, fa1 = y, result in fa0.
@@ -127,8 +129,7 @@ pExpr = makeExprParser pTerm operatorTable
 pTerm :: Parser Attr
 pTerm = parens pExpr <|> pFunc <|> pUserFuncCall <|> pNumber <|> pVariable
 
--- Load a double literal via a .data label.
--- Labels are derived from the value so identical constants share one entry.
+-- Load a double literal via a .data label. Labels are derived from the value so identical constants share one entry.
 constLabel :: Double -> Text
 constLabel d = ".Llit_" <> T.map sanitize (T.pack (show d))
   where
@@ -140,30 +141,17 @@ pNumber :: Parser Attr
 pNumber = do
   val <- try (lexeme L.float) <|> ((fromIntegral :: Integer -> Double) <$> lexeme L.decimal)
   let lbl = constLabel val
-  return $
-    Attr
-      ["  la t0, " <> lbl, "  fld fa0, 0(t0)"]
-      (M.singleton lbl (".double " <> T.pack (show val)))
+  return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] (M.singleton lbl (".double " <> T.pack (show val)))
 
--- Emit code for a user function call with any number of args.
--- Single arg: evaluate → fa0, call (no stack traffic).
--- Multi arg : evaluate each → fa0 and push; then load fa0..fa(n-1) from stack; call.
+-- Emit code for a user function call with any number of args. Single arg: evaluate → fa0, call (no stack traffic). Multi arg : evaluate each → fa0 and push; then load fa0..fa(n-1) from stack; call.
 emitFuncCall :: Text -> [Attr] -> Attr
 emitFuncCall fname [argAttr] =
   Attr (aInstrs argAttr ++ ["  call fn_" <> fname]) (aData argAttr)
 emitFuncCall fname argAttrs =
   let n = length argAttrs
       pushAll = concatMap (\a -> aInstrs a ++ pushFa0) argAttrs
-      -- After pushAll: sp+0 = argN (last), sp+(n-1)*8 = arg1 (first)
-      -- fa0 gets arg1 (deepest), fa(n-1) gets argN (shallowest)
-      loadArgs =
-        [ "  fld fa"
-            <> T.pack (show i)
-            <> ", "
-            <> T.pack (show ((n - 1 - i) * 8))
-            <> "(sp)"
-          | i <- [0 .. n - 1]
-        ]
+      -- After pushAll: sp+0 = argN (last), sp+(n-1)*8 = arg1 (first) fa0 gets arg1 (deepest), fa(n-1) gets argN (shallowest)
+      loadArgs = ["  fld fa" <> T.pack (show i) <> ", " <> T.pack (show ((n - 1 - i) * 8)) <> "(sp)" | i <- [0 .. n - 1]]
       cleanup = ["  addi sp, sp, " <> T.pack (show (n * 8))]
       allData = foldl M.union M.empty (map aData argAttrs)
    in Attr (pushAll ++ loadArgs ++ cleanup ++ ["  call fn_" <> fname]) allData
@@ -194,39 +182,28 @@ dispatchFuncInParens fname = case fname of
         -- Parse comma-separated args; arity must match definition.
         args <- pExpr `sepBy1` symbol ","
         _ <- symbol ")"
-        if length args == length params
-          then return (emitFuncCall other args)
-          else fail ("Wrong number of arguments for '" ++ T.unpack other ++ "'")
+        if length args == length params then return $ emitFuncCall other args else fail $ "Wrong number of arguments for '" ++ T.unpack other ++ "'"
 
--- User-defined functions called with juxtaposition: fname e1 e2 ... en
--- Each argument is a pTerm to avoid operator ambiguity.
+-- User-defined functions called with juxtaposition: fname e1 e2 ... en. Each argument is a pTerm to avoid operator ambiguity.
 pUserFuncCall :: Parser Attr
 pUserFuncCall = try $ do
-  fname <- lexeme (T.pack <$> some letterChar)
+  fname <- lexeme $ T.pack <$> some letterChar
   env <- ask
   case M.lookup fname (envFunDefs env) of
     Nothing -> fail "not a user-defined function"
     Just (params, _) -> do
       args <- count (length params) pTerm
-      return (emitFuncCall fname args)
+      return $ emitFuncCall fname args
 
 pVariable :: Parser Attr
 pVariable = do
   varName <- lexeme (T.pack <$> some letterChar)
   env <- ask
   case M.lookup varName (envVars env) of
-    Just (VarData lbl) ->
-      return $
-        Attr
-          ["  la t0, " <> lbl, "  fld fa0, 0(t0)"]
-          M.empty
-    Just (VarReg reg) ->
-      return $
-        if reg == "fa0"
-          then Attr [] M.empty -- already in result register
-          else Attr ["  fmv.d fa0, " <> reg] M.empty -- move from param register
-    Just (VarFrame offset) ->
-      return $ Attr ["  fld fa0, " <> T.pack (show offset) <> "(s0)"] M.empty
+    Just (VarData lbl) -> return $ Attr ["  la t0, " <> lbl, "  fld fa0, 0(t0)"] M.empty
+    -- already in result register or move from param register
+    Just (VarReg reg) -> return $ if reg == "fa0" then Attr [] M.empty else Attr ["  fmv.d fa0, " <> reg] M.empty
+    Just (VarFrame offset) -> return $ Attr ["  fld fa0, " <> T.pack (show offset) <> "(s0)"] M.empty
     Nothing -> customFailure (UndefinedVar varName)
 
 -- Parse "x = 1.5," → returns (varName, .data label, .double directive)
@@ -289,14 +266,7 @@ pProgram = do
         paramSrcs
           | isMultiArg = [VarFrame (-(24 + k * 8)) | k <- [0 .. n - 1]]
           | otherwise = [VarReg "fa0"]
-        fnEnv =
-          fullEnv
-            { envVars =
-                foldl
-                  (\m (p, src) -> M.insert p src m)
-                  (envVars fullEnv)
-                  (zip params paramSrcs)
-            }
+        fnEnv = fullEnv {envVars = foldl (\m (p, src) -> M.insert p src m) (envVars fullEnv) (zip params paramSrcs)}
     bodyAttr <- withInput bodyText (local (const fnEnv) pExpr)
     let hasCall = any (T.isInfixOf "call") (aInstrs bodyAttr)
         (prologue, epilogue)
@@ -306,13 +276,7 @@ pProgram = do
                   "  sd s0, " <> T.pack (show (frameSize - 16)) <> "(sp)",
                   "  addi s0, sp, " <> T.pack (show frameSize)
                 ]
-                  ++ [ "  fsd fa"
-                         <> T.pack (show k)
-                         <> ", "
-                         <> T.pack (show (frameSize - 24 - k * 8))
-                         <> "(sp)"
-                       | k <- [0 .. n - 1]
-                     ],
+                  ++ ["  fsd fa" <> T.pack (show k) <> ", " <> T.pack (show (frameSize - 24 - k * 8)) <> "(sp)" | k <- [0 .. n - 1]],
                 [ "  ld ra, " <> T.pack (show (frameSize - 8)) <> "(sp)",
                   "  ld s0, " <> T.pack (show (frameSize - 16)) <> "(sp)",
                   "  addi sp, sp, " <> T.pack (show frameSize)
@@ -323,8 +287,7 @@ pProgram = do
                 ["  ld ra, 8(sp)", "  addi sp, sp, 16"]
               )
           | otherwise = ([], [])
-        block =
-          ("fn_" <> fname <> ":") : prologue ++ aInstrs bodyAttr ++ epilogue ++ ["  ret"]
+        block = ("fn_" <> fname <> ":") : prologue ++ aInstrs bodyAttr ++ epilogue ++ ["  ret"]
     return (block, aData bodyAttr)
 
   -- Assemble the .data section: builtins + variables + inline constants from expressions.
@@ -335,11 +298,7 @@ pProgram = do
             (".Lfmt", ".asciz \"Result: %.10g\\n\"")
           ]
       varEntries = M.fromList [(lbl, entry) | (_, lbl, entry) <- bindings]
-      allData =
-        foldl
-          M.union
-          (M.union builtins varEntries)
-          (aData mainAttr : map snd fnResults)
+      allData = foldl M.union (M.union builtins varEntries) (aData mainAttr : map snd fnResults)
       dataLines = [lbl <> ": " <> def | (lbl, def) <- M.toAscList allData]
 
   -- Assemble the .text section: function blocks then main.
@@ -351,9 +310,7 @@ pProgram = do
         ]
           ++ aInstrs mainAttr
           ++
-          -- RISC-V variadic ABI: floating-point variadic args go in integer
-          -- registers, not float registers. Move the double result (fa0) to a1
-          -- as raw bits before calling printf.
+          -- RISC-V variadic ABI: floating-point variadic args go in integer registers, not float registers. Move the double result (fa0) to a1 as raw bits before calling printf.
           [ "  fmv.x.d a1, fa0",
             "  la a0, .Lfmt",
             "  call printf",
@@ -376,11 +333,7 @@ pProgram = do
 
 runCodeGen :: Text -> Either String Text
 runCodeGen input =
-  let baseEnv =
-        Env
-          { envVars = M.fromList [("pi", VarData ".Lconst_pi"), ("e", VarData ".Lconst_e")],
-            envFunDefs = M.empty
-          }
+  let baseEnv = Env {envVars = M.fromList [("pi", VarData ".Lconst_pi"), ("e", VarData ".Lconst_e")], envFunDefs = M.empty}
       parser = runReaderT (pProgram <* eof) baseEnv
    in case parse parser "" input of
         Left bundle -> Left (errorBundlePretty bundle)
