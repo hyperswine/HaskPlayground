@@ -210,9 +210,7 @@ encStep codeROM st (inp, flush) = (st', outByte)
       P.Nothing -> (encAcc st, encFill st)
       P.Just sym ->
         let (codeBits, codeLen) = codeROM !! sym
-            shifted =
-              (encAcc st `shiftL` fromIntegral codeLen)
-                .|. resize (unpack codeBits :: Unsigned MaxCodeLen)
+            shifted = (encAcc st `shiftL` fromIntegral codeLen) .|. resize (unpack codeBits :: Unsigned MaxCodeLen)
          in (shifted, encFill st + resize codeLen)
 
     -- 2. Emit: full byte when fill ≥ 8; zero-padded partial byte on flush.
