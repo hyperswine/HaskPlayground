@@ -2,6 +2,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unused-do-bind #-}
+{-# OPTIONS_GHC -Wno-type-defaults #-}
 
 -- FP-RISC v1 Compiler
 -- Single-pass: ReaderT Env (StateT CompState (Parsec ...))
@@ -23,9 +24,9 @@ module FPL1 where
 
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (intercalate, isPrefixOf)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
+import Data.Char (isUpper)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Void (Void)
@@ -259,7 +260,7 @@ pLetExpr = do
   body <- local (\e -> e { envVars = M.insert name (paramIdx, PInt) (envVars e) }) pExpr
   -- Emit: result of rhs is in a0; store to stack slot; body uses it
   n <- freshLabel
-  let slot = "let_" <> T.pack (show n)
+  let _slot = "let_" <> T.pack (show n)
   let code = atCode rhs
            ++ ["  # let " <> name <> " = ..."]
            ++ ["  mv t1, a0   # save let binding " <> name]
@@ -317,7 +318,7 @@ pAlt = do
   -- We need to parse the body in an extended env.
   -- We defer: return the pat and a function that takes scrut attr.
   bodyStr <- pExprRaw
-  return (pat, \_ -> bodyStr)
+  return (pat, \_ -> return bodyStr)
 
 -- Simplified: parse expression for alt body
 pExprRaw :: Parser Attr
@@ -332,9 +333,8 @@ pPat =
   <|> (PVar <$> identifier)
 
 emitAlt :: Text -> Attr -> Env -> (Int, (Pat, Expr -> Parser Attr)) -> Parser Code
-emitAlt ns scrut env (i, (pat, mkBody)) = do
+emitAlt ns _scrut _env (i, (pat, mkBody)) = do
   let nextL  = ".Lalt_" <> ns <> "_" <> T.pack (show (i+1))
-      matchL = ".Lalt_" <> ns <> "_" <> T.pack (show i) <> "_body"
   body <- mkBody (EUnit)
   case pat of
     PWild -> return $ atCode body
@@ -433,7 +433,11 @@ pVarOrAccess :: Parser Attr
 pVarOrAccess = do
   name <- identifier
   -- check for dot-access (module.fn or record.field)
-  mDot <- optional (symbol "." >> identifier)
+  -- Only uppercase-starting names can be module refs; also wrap in try so a
+  -- failed identifier after '.' doesn't consume the '.' function terminator.
+  mDot <- if not (T.null name) && isUpper (T.head name)
+              then optional (try (symbol "." >> identifier))
+              else return Nothing
   env  <- ask
   case mDot of
     Just field -> do
@@ -449,7 +453,7 @@ pVarOrAccess = do
             Nothing -> return $ Attr ["  # unresolved: " <> name, "  li a0, 0"] "a0" TInt
 
 emitParamLoad :: Text -> Int -> ParamKind -> Attr
-emitParamLoad name idx kind = case kind of
+emitParamLoad _name idx kind = case kind of
   PFloat -> Attr (if idx == 0
                     then []
                     else ["  fmv.d fa0, fa" <> T.pack (show idx)])
@@ -464,19 +468,17 @@ emitParamLoad name idx kind = case kind of
 pVListLit :: Parser Attr
 pVListLit = do
   elems <- brackets (pExpr `sepBy` symbol ",")
-  n <- freshLabel
-  let ns    = T.pack (show n)
-      count = length elems
+  let elemCount = length elems
       -- Allocate count*8 bytes via a simple bump-allocator runtime call
       allocCode =
-        [ "  li a0, " <> T.pack (show (count * 8))
+        [ "  li a0, " <> T.pack (show (elemCount * 8))
         , "  call fpr_alloc   # VList alloc"
         , "  mv s2, a0        # base ptr"
         ]
       storeElem (i, elemAttr) =
         atCode elemAttr ++
         [ "  sd a0, " <> T.pack (show (i*8)) <> "(s2)  # VList[" <> T.pack (show i) <> "]" ]
-      storeAll = concatMap storeElem (zip [0..] elems)
+      storeAll = concatMap storeElem (zip [(0::Int)..] elems)
       finalise = [ "  mv a0, s2" ]
   return $ Attr (allocCode ++ storeAll ++ finalise) "a0" (TVList TInt)
 
@@ -493,7 +495,7 @@ pFixExpr = do
     Just cur | cur == fname -> return ()
     _ -> warn $ "fix " <> fname <> ": ensure this is in tail position"
   -- Load args into registers, then jump
-  let loadArgs = concatMap (\(i, a) -> atCode a ++ ["  mv a" <> T.pack (show i) <> ", a0"]) (zip [0..] args)
+  let loadArgs = concatMap (\(i, a) -> atCode a ++ ["  mv a" <> T.pack (show (i::Int)) <> ", a0"]) (zip [0..] args)
       jumpCode = ["  j fn_" <> fname <> "  # fix tail-jump"]
   return $ Attr (loadArgs ++ jumpCode) "a0" TUnit
 
@@ -503,7 +505,7 @@ pSpawnExpr = do
   keyword "spawn"
   fname <- identifier
   args  <- many (try pAtom)
-  let setupArgs = concatMap (\(i, a) -> atCode a ++ ["  mv a" <> T.pack (show i) <> ", a0"]) (zip [0..] args)
+  let setupArgs = concatMap (\(i, a) -> atCode a ++ ["  mv a" <> T.pack (show (i::Int)) <> ", a0"]) (zip [0..] args)
       spawnCode =
         [ "  la a0, fn_" <> fname   -- actor entry fn
         , "  call fpr_spawn          # -> actor ref in a0"
@@ -552,7 +554,7 @@ emitBinOp op lhs rhs = do
   -- Evaluate lhs first, push, evaluate rhs, pop lhs into t0, combine
   let isFloat = atType lhs == TFloat || atType rhs == TFloat
   n <- freshLabel
-  let ns = T.pack (show n)
+  let _ns = T.pack (show n)
   if isFloat
     then do
       let pushCode = atCode lhs ++ ["  addi sp, sp, -8", "  fsd fa0, 0(sp)"]
@@ -604,8 +606,8 @@ emitCall fn args = do
   let argSetup = concatMap (\(i, a) ->
         atCode a ++
         [ if atType a == TFloat
-            then "  fmv.d fa" <> T.pack (show i) <> ", fa0"
-            else "  mv a" <> T.pack (show i) <> ", a0"
+            then "  fmv.d fa" <> T.pack (show (i::Int)) <> ", fa0"
+            else "  mv a" <> T.pack (show (i::Int)) <> ", a0"
         ]) (zip [0..] args)
   let callCode
         | isFnPtrReg = argSetup ++ ["  jalr ra, s1, 0  # call fn-ptr"]
@@ -760,7 +762,8 @@ pParam = do
         (PFnPtr <$ symbol "#")
     <|> (PActor <$ symbol "@")
   name <- identifier
-  optTy <- optional (symbol ":" >> pType)
+  -- Don't consume ': Type' if '=' immediately follows — that's the return-type annotation
+  optTy <- optional (try (symbol ":" >> pType <* notFollowedBy (char '=')))
   let k = case optTy of
             Just TFloat -> PFloat
             Just TActor -> PActor
@@ -780,7 +783,7 @@ pModuleDecl :: Parser (Env -> Env, Code, M.Map Text Text)
 pModuleDecl = do
   keyword "module"
   name  <- upperIdent
-  decls <- braces (many pDecl)
+  decls <- braces (many (try pDecl))
   -- Prefix all function names with ModuleName_
   let code    = concatMap (\(_,c,_) -> c) decls
       dataMap = M.unions (map (\(_,_,d) -> d) decls)
