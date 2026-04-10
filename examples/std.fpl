@@ -1,0 +1,134 @@
+-- FPL1 standard examples
+-- Covers: arithmetic, comparisons, tail recursion (fix),
+--         higher-order functions (fn-ptr), let bindings, 0-param demo runners.
+--
+-- Expected output (in order):
+--   7        add 3 4
+--   42       mul 6 7
+--   42       max2 17 42
+--   17       min2 17 42
+--   99       abs_val (-99)
+--   120      fact 5
+--   3628800  fact 10
+--   55       fib 10
+--   6765     fib 20
+--   6        gcd 48 18
+--   25       gcd 100 75
+--   1024     pow 2 10
+--   243      pow 3 5
+--   5050     sum_to 100
+--   42       apply double 21
+--   81       apply square 9
+
+-- ── Arithmetic ────────────────────────────────────────────────────────────────
+
+fn add (a : Int) (b : Int) = a + b.
+
+fn mul (a : Int) (b : Int) = a * b.
+
+-- ── Comparisons ───────────────────────────────────────────────────────────────
+
+fn max2 (a : Int) (b : Int) =
+  if a > b then a else b.
+
+fn min2 (a : Int) (b : Int) =
+  if a < b then a else b.
+
+fn abs_val (n : Int) =
+  if n < 0 then 0 - n else n.
+
+-- ── Tail-recursive via fix ────────────────────────────────────────────────────
+
+fn fact (n : Int) (acc : Int) =
+  if n == 0
+  then acc
+  else fix fact (n - 1) (n * acc).
+
+fn fib (n : Int) (a : Int) (b : Int) =
+  if n == 0
+  then a
+  else fix fib (n - 1) b (a + b).
+
+fn gcd (a : Int) (b : Int) =
+  if b == 0
+  then a
+  else fix gcd b (a % b).
+
+fn pow (base : Int) (exp : Int) (acc : Int) =
+  if exp == 0
+  then acc
+  else fix pow base (exp - 1) (base * acc).
+
+fn sum_to (n : Int) (acc : Int) =
+  if n == 0
+  then acc
+  else fix sum_to (n - 1) (acc + n).
+
+-- ── Higher-order via fn-ptr ───────────────────────────────────────────────────
+
+fn apply (#f : FnPtr) (x : Int) = f x.
+
+fn double (x : Int) = x * 2.
+
+fn square (x : Int) = x * x.
+
+-- ── Demo runners (0-param functions called as thunks) ─────────────────────────
+
+fn demo_arith : Int =
+  let a = add 3 4 in
+  let b = mul 6 7 in
+  let _ = print a in
+  print b.
+
+fn demo_compare : Int =
+  let c = max2 17 42 in
+  let d = min2 17 42 in
+  let e = abs_val (0 - 99) in
+  let _ = print c in
+  let _ = print d in
+  print e.
+
+fn demo_fact : Int =
+  let r5  = fact 5  1 in
+  let r10 = fact 10 1 in
+  let _ = print r5 in
+  print r10.
+
+fn demo_fib : Int =
+  let f10 = fib 10 0 1 in
+  let f20 = fib 20 0 1 in
+  let _ = print f10 in
+  print f20.
+
+fn demo_gcd : Int =
+  let g1 = gcd 48  18 in
+  let g2 = gcd 100 75 in
+  let _ = print g1 in
+  print g2.
+
+fn demo_pow : Int =
+  let p1 = pow 2 10 1 in
+  let p2 = pow 3  5 1 in
+  let _ = print p1 in
+  print p2.
+
+fn demo_sum : Int =
+  let s = sum_to 100 0 in
+  print s.
+
+fn demo_ho : Int =
+  let d = apply double 21 in
+  let s = apply square  9 in
+  let _ = print d in
+  print s.
+
+-- ── Main ──────────────────────────────────────────────────────────────────────
+
+let _ = demo_arith in
+let _ = demo_compare in
+let _ = demo_fact in
+let _ = demo_fib in
+let _ = demo_gcd in
+let _ = demo_pow in
+let _ = demo_sum in
+demo_ho

@@ -509,6 +509,10 @@ pVarOrAccess = do
         Just (idx, kind) -> return $ emitParamLoad name idx kind
         Nothing ->
           case M.lookup name (envFns env) of
+            -- 0-param functions: emit a direct call rather than loading the fn ptr.
+            -- This lets them be used as expressions (thunks) without explicit ().
+            Just sig | null (fnParams sig) ->
+              return $ Attr ["  call fn_" <> name] "a0" (fnRetType sig)
             Just _ -> return $ Attr ["  la a0, fn_" <> name] "a0" TFnPtr
             Nothing -> return $ Attr ["  # unresolved: " <> name, "  li a0, 0"] "a0" TInt
 
