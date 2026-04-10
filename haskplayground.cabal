@@ -33,6 +33,7 @@ library
       FPFS
       FPFSActor
       FPInterpreter
+      FPL1
       FPRunner
       Gameloop
       HuffmanClash

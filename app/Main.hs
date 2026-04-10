@@ -7,4 +7,6 @@ import qualified NProlog
 import qualified RVAsm
 import qualified SMT
 
-main = SMT.main
+-- main = SMT.main
+
+main = FPRunner.main

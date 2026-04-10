@@ -13,6 +13,8 @@
 -- ── Generic cons-list utilities ──────────────────────────────────────────────
 -- These functions deal only with Cons/Nil; they know nothing about any brand.
 
+-- Use Tag for these kinds of things
+
 let listFoldr = fix listFoldr(f, z, xs) => {
   send "main" Tag Inspect(xs)
   receive {
