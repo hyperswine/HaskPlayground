@@ -1,0 +1,7 @@
+fn fact n (acc : Int) =
+  if n == 0 then acc else fix fact (n - 1) (n * acc).
+
+fn fact0 (n : Int) =
+  fact n 1.
+
+fact0 5.

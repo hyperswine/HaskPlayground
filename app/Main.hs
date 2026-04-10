@@ -1,11 +1,6 @@
 module Main where
 
-import qualified Civ4x
-import qualified FPL1Main
-import qualified FPRunner
-import qualified Gameloop
-import qualified NProlog
-import qualified RVAsm
-import qualified SMT
+import qualified FPL1Runner
 
-main = FPL1Main.main
+main :: IO ()
+main = FPL1Runner.main

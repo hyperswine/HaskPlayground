@@ -55,26 +55,26 @@ codegen = sh "stack exec -- runghc {tmp_hs}".
 res = if failed codegen then echo "Codegen error:" else "".
 # res' = if res then echo codegen|stderr |> exit 1.
 
-asm = codegen|stdout.
-write tmp_asm asm.
-echo "Assembly written to {tmp_asm}".
+# asm = codegen|stdout.
+# write tmp_asm asm.
+# echo "Assembly written to {tmp_asm}".
 
-# ── 5. Compile with riscv64-unknown-elf-gcc ─────────────────────────────────
+# # ── 5. Compile with riscv64-unknown-elf-gcc ─────────────────────────────────
 
-echo "Compiling ...".
-compile = sh "{cc} {tmp_asm} -o {tmp_bin} -static -lm -O0".
+# echo "Compiling ...".
+# compile = sh "{cc} {tmp_asm} -o {tmp_bin} -static -lm -O0".
 
-if failed compile then echo "Compile error:" |> echo compile|stderr |> echo compile|stdout |> exit 1.
+# if failed compile then echo "Compile error:" |> echo compile|stderr |> echo compile|stdout |> exit 1.
 
-echo "Binary written to {tmp_bin}".
+# echo "Binary written to {tmp_bin}".
 
-# ── 6. Run on spike + pk ────────────────────────────────────────────────────
+# # ── 6. Run on spike + pk ────────────────────────────────────────────────────
 
-echo "Running on spike ...".
-run = sh "spike {pk} {tmp_bin}".
+# echo "Running on spike ...".
+# run = sh "spike {pk} {tmp_bin}".
 
-if failed run then echo "Spike error (exit {run|exitcode}):" |> echo run|stderr |> echo run|stdout |> exit 1.
+# if failed run then echo "Spike error (exit {run|exitcode}):" |> echo run|stderr |> echo run|stdout |> exit 1.
 
-echo "".
-echo "Result:".
-echo run|stdout.
+# echo "".
+# echo "Result:".
+# echo run|stdout.

@@ -35,6 +35,7 @@ library
       FPInterpreter
       FPL1
       FPL1Main
+      FPL1Runner
       FPRunner
       Gameloop
       HuffmanClash
