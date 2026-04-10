@@ -4,4 +4,4 @@ fn fact n (acc : Int) =
 fn fact0 (n : Int) =
   fact n 1.
 
-fact0 5.
+print (fact0 5).
