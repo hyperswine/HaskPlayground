@@ -10,3 +10,5 @@ There's a script to auto copy stuff from verilog output to examples. Use lushay 
 `stack exec ghci -- -ghci-script /dev/stdin test/RVLangTest.hs 2>&1 <<'EOF'`
 
 Use `3.14.2.0` for cabal.
+
+`stack exec haskplayground-exe -- examples/fact.fpl` For speed.

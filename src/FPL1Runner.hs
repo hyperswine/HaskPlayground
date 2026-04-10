@@ -9,6 +9,7 @@
 module FPL1Runner where
 
 import qualified Data.Text.IO as TIO
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import FPL1 (runCompiler)
 import System.Environment (getArgs)
 import System.Exit (ExitCode (..), exitFailure)
@@ -16,7 +17,6 @@ import System.FilePath (takeBaseName, (</>))
 import System.IO (hPutStrLn, stderr)
 import System.IO.Temp (withSystemTempDirectory)
 import System.Process (readProcessWithExitCode)
-import Data.Time.Clock (getCurrentTime, diffUTCTime)
 
 blue :: String -> String
 blue s = "\ESC[34m" <> s <> "\ESC[0m"
@@ -62,8 +62,7 @@ runFile fplFile = do
 
         -- Assemble + link
         t2 <- getCurrentTime
-        (ccEc, ccOut, ccErr) <-
-          readProcessWithExitCode cc [asmFile, "-o", binFile, "-static", "-lm", "-O0"] ""
+        (ccEc, ccOut, ccErr) <- readProcessWithExitCode cc [asmFile, "-o", binFile, "-static", "-lm", "-O0"] ""
         t3 <- getCurrentTime
         let assembleElapsed = diffUTCTime t3 t2
         case ccEc of
@@ -75,8 +74,7 @@ runFile fplFile = do
 
             -- Run under spike + pk
             t4 <- getCurrentTime
-            (spEc, spOut, spErr) <-
-              readProcessWithExitCode "spike" [pk, binFile] ""
+            (spEc, spOut, spErr) <- readProcessWithExitCode "spike" [pk, binFile] ""
             t5 <- getCurrentTime
             let execElapsed = diffUTCTime t5 t4
             case spEc of
