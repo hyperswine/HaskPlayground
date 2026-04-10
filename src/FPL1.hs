@@ -501,23 +501,13 @@ pVarOrAccess = do
             Nothing -> return $ Attr ["  # unresolved: " <> name, "  li a0, 0"] "a0" TInt
 
 emitParamLoad :: Text -> Int -> ParamKind -> Attr
+-- Always load from the stable s0-relative frame slot so that
+-- prior expression evaluation (which clobbers a0) does not corrupt param access.
 emitParamLoad _name idx kind = case kind of
   PFloat ->
-    Attr
-      ( if idx == 0
-          then []
-          else ["  fmv.d fa0, fa" <> T.pack (show idx)]
-      )
-      "fa0"
-      TFloat
+    Attr ["  fld  fa0, " <> T.pack (show (idx * 8)) <> "(s0)"] "fa0" TFloat
   _ ->
-    Attr
-      ( if idx == 0
-          then []
-          else ["  mv a0, a" <> T.pack (show idx)]
-      )
-      "a0"
-      TInt
+    Attr ["  ld   a0, " <> T.pack (show (idx * 8)) <> "(s0)"] "a0" TInt
 
 -- VList literal: [e1, e2, e3]
 -- Emits heap allocation for n elements, then stores each
@@ -550,10 +540,16 @@ pFixExpr = do
   case envCurrentFn env of
     Just cur | cur == fname -> return ()
     _ -> warn $ "fix " <> fname <> ": ensure this is in tail position"
-  -- Load args into registers, then jump
-  let loadArgs = concatMap (\(i, a) -> atCode a ++ ["  mv a" <> T.pack (show (i :: Int)) <> ", a0"]) (zip [0 ..] args)
-      jumpCode = ["  j fn_" <> fname <> "  # fix tail-jump"]
-  return $ Attr (loadArgs ++ jumpCode) "a0" TUnit
+  -- Load updated params into a0..aN, then jump to the entry label (after frame
+  -- setup) so the function re-saves params to its frame without re-adjusting sp.
+  let numArgs  = length args
+      pushArg a = atCode a ++ ["  addi sp, sp, -8", "  sd   a0, 0(sp)"]
+      popArg i  = "  ld   a" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
+      pushCode  = concatMap pushArg args
+      popCode   = map popArg [0 .. numArgs - 1]
+      cleanup   = ["  addi sp, sp, " <> T.pack (show (numArgs * 8))]
+      jumpCode  = ["  j fn_" <> fname <> "_entry  # fix tail-jump"]
+  return $ Attr (pushCode ++ popCode ++ cleanup ++ jumpCode) "a0" TUnit
 
 -- spawn actor_fn arg1 arg2
 pSpawnExpr :: Parser Attr
@@ -675,28 +671,33 @@ intOp _ = ("add  a0, t0, a0", TInt)
 
 emitCall :: Attr -> [Attr] -> Parser Attr
 emitCall fn args = do
-  -- fn is either a direct fn pointer (la a0, fn_name) or a fn-ptr param (in a register)
-  let isFnPtrReg = case atCode fn of
-        ["  mv a0, s1"] -> True -- fn-ptr param in s1
-        _ -> False
-  -- Push all args, then call
-  let argSetup =
-        concatMap
-          ( \(i, a) ->
-              atCode a
-                ++ [ if atType a == TFloat
-                       then "  fmv.d fa" <> T.pack (show (i :: Int)) <> ", fa0"
-                       else "  mv a" <> T.pack (show (i :: Int)) <> ", a0"
-                   ]
-          )
-          (zip [0 ..] args)
-  let callCode
-        | isFnPtrReg = argSetup ++ ["  jalr ra, s1, 0  # call fn-ptr"]
+  -- Evaluate each arg into a0/fa0, push to stack.  Pop in order into a0..aN.
+  -- This avoids register clobbering when arg N overwrites a0 before arg 0 is saved.
+  let numArgs = length args
+      pushArg a =
+        atCode a
+          ++ [ if atType a == TFloat
+                 then "  addi sp, sp, -8\n  fsd  fa0, 0(sp)"
+                 else "  addi sp, sp, -8\n  sd   a0, 0(sp)"
+             ]
+      -- After pushing numArgs items, arg i is at (numArgs-1-i)*8(sp)
+      popArg (i, a)
+        | atType a == TFloat =
+            "  fld  fa" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
         | otherwise =
-            let target = case atCode fn of
-                  [t] | "  la a0, " `T.isPrefixOf` t -> T.drop (T.length "  la a0, ") t
-                  _ -> "unknown"
-             in argSetup ++ ["  call " <> target]
+            "  ld   a" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
+      pushCode  = concatMap pushArg args
+      popCode   = map popArg (zip [0 ..] args)
+      cleanupSp = ["  addi sp, sp, " <> T.pack (show (numArgs * 8))]
+      argSetup  = pushCode ++ popCode ++ cleanupSp
+  let callCode =
+        case atCode fn of
+          -- Direct named call: fn_XXX is statically known
+          [t] | "  la a0, fn_" `T.isPrefixOf` t ->
+                let target = T.drop (T.length "  la a0, ") t
+                 in argSetup ++ ["  call " <> target]
+          -- Indirect fn-ptr call: address computed into a0
+          _ -> atCode fn ++ ["  mv t1, a0"] ++ argSetup ++ ["  jalr ra, t1, 0  # fn-ptr call"]
   return $ Attr callCode "a0" TInt
 
 --------------------------------------------------------------------------------
@@ -798,8 +799,7 @@ pFnDecl = do
   keyword "fn"
   name <- identifier
   params <- many pParam
-  symbol ":"
-  retTy <- pType
+  retTy <- option TInt (try (symbol ":" >> pType))
   symbol "="
   -- Build inner env with params
   env <- ask
@@ -808,28 +808,47 @@ pFnDecl = do
   bodyAttr <- local (const innerEnv) pExpr
   symbol "."
 
-  -- Prologue / epilogue
-  let hasCall = any ("call" `T.isInfixOf`) (atCode bodyAttr)
-      hasFnPtr = any (\(_, k) -> k == PFnPtr) params
-      needFrame = hasCall || hasFnPtr
-      prologue
-        | needFrame =
-            [ "  addi sp, sp, -16",
-              "  sd   ra, 8(sp)"
-            ]
-              ++ (if hasFnPtr then ["  sd   s1, 0(sp)", "  mv   s1, a1"] else [])
-        | otherwise = []
-      epilogue
-        | needFrame =
-            (if hasFnPtr then ["  ld   s1, 0(sp)"] else [])
-              ++ [ "  ld   ra, 8(sp)",
-                   "  addi sp, sp, 16"
-                 ]
-        | otherwise = []
+  -- Frame layout (from sp = s0 at entry):
+  --   s0 + 0          .. s0 + (n-1)*8   : param slots (n = numParams)
+  --   s0 + n*8                          : saved s0
+  --   s0 + (n+1)*8                      : saved ra
+  -- Frame size is rounded up to 16-byte alignment.
+  let numParams  = length params
+      rawSize    = (numParams + 2) * 8          -- param slots + s0 + ra
+      frameSize  = ((rawSize + 15) `div` 16) * 16
+      raOff      = frameSize - 8               -- saved ra
+      s0Off      = frameSize - 16              -- saved s0
+
+      -- Prologue: allocate frame, save ra + old s0, set s0 = sp.
+      prologue =
+        [ "  addi sp, sp, -" <> T.pack (show frameSize),
+          "  sd   ra, " <> T.pack (show raOff) <> "(sp)",
+          "  sd   s0, " <> T.pack (show s0Off) <> "(sp)",
+          "  mv   s0, sp"                          -- stable frame pointer
+        ]
+
+      -- fn_name_entry: label for fix tail-jumps (frame already set up).
+      -- Re-saves updated params from incoming a0..aN.
+      entryLabel  = ["fn_" <> name <> "_entry:"]
+      paramSaves  =
+        [ case k of
+            PFloat -> "  fsd  fa" <> T.pack (show i) <> ", " <> T.pack (show (i * 8)) <> "(s0)"
+            _      -> "  sd   a"  <> T.pack (show i) <> ", " <> T.pack (show (i * 8)) <> "(s0)"
+        | (i, (_, k)) <- zip [(0 :: Int) ..] params
+        ]
+
+      -- Epilogue: restore ra from stable s0, restore sp, restore old s0.
+      epilogue =
+        [ "  ld   ra, " <> T.pack (show raOff) <> "(s0)",
+          "  addi sp, s0, " <> T.pack (show frameSize),   -- sp = pre-call sp
+          "  ld   s0, -16(sp)"                            -- restore old s0
+        ]
 
       block =
         ["", "fn_" <> name <> ":"]
           ++ prologue
+          ++ [""] ++ entryLabel
+          ++ paramSaves
           ++ ["  # params: " <> T.intercalate ", " (map (\(p, k) -> p <> ":" <> showKind k) params)]
           ++ atCode bodyAttr
           ++ epilogue
@@ -841,21 +860,32 @@ pFnDecl = do
   return (extend, block, M.empty)
 
 pParam :: Parser (Text, ParamKind)
-pParam = do
-  -- #name = fn-ptr param, @name = actor param, name = int/bool, name:Float = float
-  kind <-
-    option PInt $
-      (PFnPtr <$ symbol "#")
-        <|> (PActor <$ symbol "@")
-  name <- identifier
-  -- Don't consume ': Type' if '=' immediately follows — that's the return-type annotation
-  optTy <- optional (try (symbol ":" >> pType <* notFollowedBy (char '=')))
-  let k = case optTy of
-        Just TFloat -> PFloat
-        Just TActor -> PActor
-        Just TFnPtr -> PFnPtr
-        _ -> kind
-  return (name, k)
+pParam = parenParam <|> plainParam
+  where
+    -- (name : Type) syntax — explicit per-param annotation
+    parenParam = between (symbol "(") (symbol ")") $ do
+      kind <- option PInt $ (PFnPtr <$ symbol "#") <|> (PActor <$ symbol "@")
+      name <- identifier
+      _ <- symbol ":"
+      ty <- pType
+      let k = case ty of
+            TFloat -> PFloat
+            TActor -> PActor
+            TFnPtr -> PFnPtr
+            _ -> kind
+      return (name, k)
+    -- plain name / #name / @name / name : Type syntax
+    plainParam = do
+      kind <- option PInt $ (PFnPtr <$ symbol "#") <|> (PActor <$ symbol "@")
+      name <- identifier
+      -- Don't consume ': Type' if '=' immediately follows — that's the return-type annotation
+      optTy <- optional (try (symbol ":" >> pType <* notFollowedBy (char '=')))
+      let k = case optTy of
+            Just TFloat -> PFloat
+            Just TActor -> PActor
+            Just TFnPtr -> PFnPtr
+            _ -> kind
+      return (name, k)
 
 showKind :: ParamKind -> Text
 showKind PInt = "Int"
@@ -885,20 +915,22 @@ pProgram = do
   sc
   env0 <- ask
 
-  -- Parse declarations accumulating env
+  -- Parse declarations accumulating env; returns (code, warns, data, finalEnv)
   let parseDecls env = do
         md <- optional (try pDecl)
         case md of
-          Nothing -> return ([], [], M.empty)
+          Nothing -> return ([], [], M.empty, env)
           Just (ext, code, dat) -> do
             let env' = ext env
-            (restCode, restWarns, restDat) <- local (const env') (parseDecls env')
-            return (code ++ restCode, restWarns, M.union dat restDat)
+            (restCode, restWarns, restDat, finalEnv) <- local (const env') (parseDecls env')
+            return (code ++ restCode, restWarns, M.union dat restDat, finalEnv)
 
-  (declCode, _ws, declData) <- parseDecls env0
+  (declCode, _ws, declData, finalEnv) <- parseDecls env0
 
-  -- Main expression (entry point)
-  mainAttr <- pExpr
+  -- Main expression (entry point) — parsed in the fully-extended env so all
+  -- declared functions are in scope.
+  mainAttr <- local (const finalEnv) pExpr
+  optional (symbol ".")
   eof
 
   st <- get

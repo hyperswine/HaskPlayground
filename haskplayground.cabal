@@ -95,6 +95,7 @@ library
 executable haskplayground-exe
   main-is: Main.hs
   other-modules:
+      DumpAsm
       Paths_haskplayground
   hs-source-dirs:
       app
