@@ -9,6 +9,7 @@ import qualified Data.Text as T
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import CPURiscVTest (cpuRiscVGroup)
 import HuffmanClashTest (huffmanClashGroup)
 import NPrologTest (nPrologGroup)
 import ProcessorTest (processorGroup)
@@ -377,4 +378,5 @@ main = do
   okProc <- checkParallel processorGroup
   okTL   <- checkParallel trafficLightGroup
   okHC   <- checkParallel huffmanClashGroup
-  unless (okRV && okNP && okProc && okTL && okHC) exitFailure
+  okRV32 <- checkParallel $ Group "CPURiscV" cpuRiscVGroup
+  unless (okRV && okNP && okProc && okTL && okHC && okRV32) exitFailure

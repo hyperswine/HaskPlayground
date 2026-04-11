@@ -11,6 +11,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Eta reduce" #-}
 
 -- | RISC-V RV32I base integer instruction set CPU
 --
@@ -366,7 +368,7 @@ alu op a b =
     AluXor  -> a `xor` b
     AluSll  -> pack (unpack a :: Unsigned 32) `shiftL` fromIntegral shamt
     AluSrl  -> pack (unpack a :: Unsigned 32) `shiftR` fromIntegral shamt
-    AluSra  -> pack sa `shiftR` fromIntegral shamt
+    AluSra  -> pack (sa `shiftR` fromIntegral shamt)
     AluSlt  -> if sa < sb then 1 else 0
     AluSltu -> if (unpack a :: Unsigned 32) < (unpack b :: Unsigned 32) then 1 else 0
     AluLui  -> b   -- pass-through (used for LUI and JAL which just write the imm)
@@ -411,9 +413,9 @@ memLoad mem memOp byteAddr =
       selHalf = if byteOff < 2 then half0 else half1
   in case memOp of
     MemLb  -> pack (signExtend (unpack selByte  :: Signed 8)  :: Signed 32)
-    MemLbu -> zeroExtend (unpack selByte  :: Unsigned 8)
+    MemLbu -> zeroExtend selByte
     MemLh  -> pack (signExtend (unpack selHalf  :: Signed 16) :: Signed 32)
-    MemLhu -> zeroExtend (unpack selHalf  :: Unsigned 16)
+    MemLhu -> zeroExtend selHalf
     MemLw  -> word
     _      -> 0  -- non-load: unused
 
@@ -424,19 +426,18 @@ memStore mem memOp byteAddr storeVal =
   let wordIdx = truncateB (byteAddr `shiftR` 2) :: Unsigned 10
       byteOff = resize (byteAddr .&. 3) :: Unsigned 2
       old     = mem !! wordIdx
+      b8  = zeroExtend (slice d7  d0  storeVal) :: BitVector 32
+      h16 = zeroExtend (slice d15 d0  storeVal) :: BitVector 32
       newWord = case memOp of
-        MemSb ->
-          let b = slice d7 d0 storeVal
-          in case byteOff of
-               0 -> replaceBits d7  d0  old b
-               1 -> replaceBits d15 d8  old b
-               2 -> replaceBits d23 d16 old b
-               _ -> replaceBits d31 d24 old b
+        MemSb -> case byteOff of
+          0 -> (old .&. 0xFFFFFF00) .|. b8
+          1 -> (old .&. 0xFFFF00FF) .|. (b8  `shiftL` 8)
+          2 -> (old .&. 0xFF00FFFF) .|. (b8  `shiftL` 16)
+          _ -> (old .&. 0x00FFFFFF) .|. (b8  `shiftL` 24)
         MemSh ->
-          let h = slice d15 d0 storeVal
-          in if byteOff < 2
-               then replaceBits d15 d0  old h
-               else replaceBits d31 d16 old h
+          if byteOff < 2
+            then (old .&. 0xFFFF0000) .|. h16
+            else (old .&. 0x0000FFFF) .|. (h16 `shiftL` 16)
         MemSw -> storeVal
         _     -> old
   in case memOp of
@@ -448,19 +449,6 @@ memStore mem memOp byteAddr storeVal =
     MemLhu  -> Nothing
     _       -> Just (wordIdx, newWord)
 
--- | Replace a bit slice of a BitVector 32.
-replaceBits
-  :: SNat hi -> SNat lo
-  -> BitVector 32
-  -> BitVector (hi - lo + 1)
-  -> BitVector 32
-replaceBits hi lo old new =
-  let hiN = snatToNum hi :: Int
-      loN = snatToNum lo :: Int
-      mask = complement (foldl (\acc i -> acc .|. (1 `shiftL` i)) 0 [loN..hiN] :: BitVector 32)
-      cleared = old .&. mask
-      shifted = pack new `shiftL` loN
-  in cleared .|. shifted
 
 -- ===========================================================================
 -- Pipeline state
@@ -566,7 +554,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
           (dataMem', wbVal) =
             if exwbValid exwb
               then
-                let addr    = resize (exwbAluOut exwb) :: Addr
+                let addr    = unpack (exwbAluOut exwb) :: Addr
                     storeV  = exwbRs2Val exwb
                     mop     = exwbMemOp exwb
                 in case mop of
@@ -633,10 +621,10 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
             BrJal -> -- JAL: PC + imm; JALR: (rs1 + imm) & ~1
               if opcode (ifidInstr rvIfId) == opJALR
                 -- JALR target is ALU result (rs1+imm) with bit 0 cleared
-                then resize (pack (aluResult .&. complement 1) :: BitVector 32) :: PC
-                else resize (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
+                then unpack (aluResult .&. complement 1) :: PC
+                else unpack (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
             _ ->
-              resize (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
+              unpack (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
 
           squash = idexValid idex && (brTaken || uBranchOp uop == BrJal)
 
@@ -689,12 +677,10 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
 
           -- ── Stage 0: IF (advance PC) ──────────────────────────────────
           -- When stalling (load-use): hold PC and IF/ID, insert bubble into ID/EX
-          nextPC =
-            if loadUseHazard
-              then rvPC
-              else if squash
-                     then brTarget
-                     else rvPC + 4
+          nextPC
+            | loadUseHazard = rvPC
+            | squash = brTarget
+            | otherwise = rvPC + 4
 
           ifid' =
             if loadUseHazard
@@ -861,10 +847,10 @@ testProgRV =
   in     replace ( 0 :: Unsigned 10) (iADDI 1 0 10)     -- x1 = 10
        $ replace ( 1 :: Unsigned 10) (iADDI 2 0 0)      -- x2 = 0
        -- loop (byte addr 8, word addr 2):
-       $ replace ( 2 :: Unsigned 10) (iBEQ  1 0 12)     -- if x1==0 goto +12 (word 5)
+       $ replace ( 2 :: Unsigned 10) (iBEQ  1 0 16)     -- if x1==0 goto +16 (word 6 = done)
        $ replace ( 3 :: Unsigned 10) (iADD  2 2 1)      -- x2 += x1
        $ replace ( 4 :: Unsigned 10) (iADDI 1 1 (-1))   -- x1 -= 1
-       $ replace ( 5 :: Unsigned 10) (iBEQ  0 0 (-12))  -- goto -12 (back to word 2)
-       -- done (word 5, byte addr 20, but branch above lands here at +12 from word 2 = word 5):
+       $ replace ( 5 :: Unsigned 10) (iBEQ  0 0 (-12))  -- goto -12 (back to word 2, byte 8)
+       -- done (word 6, byte 24):
        $ replace ( 6 :: Unsigned 10) nop
        $ base
