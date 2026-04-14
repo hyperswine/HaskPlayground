@@ -173,12 +173,12 @@ initSysStateRV = SysStateRV {sTop = initTopStateRV, sCpu = initCpuStateRV, sMC =
 -- System step (Mealy body)
 -- ===========================================================================
 
--- Outputs: ((txPin, led[5:0]), instrBramRdAddr, instrBramWrCmd)
-type SysOut = ((Bit, BitVector 6), Unsigned 10, Maybe (Unsigned 10, Word32))
+-- Outputs: ((txPin, led[5:0]), instrBramRdAddr, instrBramWrCmd, dataRdAddr, dataWrCmd)
+type SysOut = ((Bit, BitVector 6), Unsigned 10, Maybe (Unsigned 10, Word32), Unsigned 10, Maybe (Unsigned 10, Word32))
 
--- (Bit, Word32): (rxPin, instrBRAM read output)
-sysStepRV :: SysStateRV -> (Bit, Word32) -> (SysStateRV, SysOut)
-sysStepRV SysStateRV {..} (rxPin, bramOut) =
+-- (Bit, Word32, Word32): (rxPin, instrBRAM read output, dataBRAM read output)
+sysStepRV :: SysStateRV -> (Bit, Word32, Word32) -> (SysStateRV, SysOut)
+sysStepRV SysStateRV {..} (rxPin, bramOut, dataBramOut) =
   let top = sTop
       cpu0 = sCpu
       mc0 = sMC
@@ -192,10 +192,10 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
       cpuEn = ctrlFSM top == PgRun && not (outPending top)
 
       -- ── CPU step (or reset) ──────────────────────────────────────────
-      (cpu1, mc1) =
+      (cpu1, mc1, dataWrCmd) =
         if cpuRst top
-          then (initCpuStateRV, mc0)
-          else let (cpu', mc', _pc, _rd, _val, _wbEn) = stepCpuRV cpu0 (bramOut, mc0, cpuEn) in (cpu', mc')
+          then (initCpuStateRV, mc0, Nothing)
+          else let (cpu', mc', wc, _pc, _rd, _val, _wbEn) = stepCpuRV cpu0 (bramOut, dataBramOut, mc0, cpuEn) in (cpu', mc', wc)
 
       -- Drain the UART_TX byte that the CPU may have written this cycle
       (mc2, cpuTxMaybe) = uartPop mc1
@@ -271,8 +271,13 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
       -- ── Instruction BRAM word address for next fetch ─────────────────
       instrRdAddr = truncateB (rvPC cpu2 `shiftR` 2) :: Unsigned 10
 
+      -- ── Data BRAM read address: pre-fetch for next cycle's MEM/WB ────
+      --   Driven by the updated ExWb effective address so that the BRAM
+      --   output is ready exactly when the MEM/WB stage needs it.
+      dataRdAddr = truncateB (unpack (exwbAluOut (rvExWb cpu2)) `shiftR` 2) :: Unsigned 10
+
       sys' = SysStateRV top3 cpu2 mc2 fifo4 rx' tx'
-   in (sys', ((txPin tx', led), instrRdAddr, instrWrCmd))
+   in (sys', ((txPin tx', led), instrRdAddr, instrWrCmd, dataRdAddr, dataWrCmd))
 
 -- ===========================================================================
 -- Top entity
@@ -287,10 +292,24 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
 topEntityRV :: Clock Dom27 -> Signal Dom27 Bit -> Signal Dom27 (Bit, BitVector 6)
 topEntityRV clk rxPin =
   withClockResetEnable clk resetGen enableGen
-    $ let fullOut = mealy sysStepRV initSysStateRV (bundle (rxPin, bramOut))
-          rdAddr = (\(_, a, _) -> a) <$> fullOut
-          wrCmd = (\(_, _, w) -> w) <$> fullOut
+    $ let fullOut     = mealy sysStepRV initSysStateRV (bundle (rxPin, instrBramOut, dataBramOut))
+          instrRdAddr = (\(_, a, _, _, _) -> a) <$> fullOut
+          instrWrCmd  = (\(_, _, w, _, _) -> w) <$> fullOut
+          dataRdAddr  = (\(_, _, _, a, _) -> a) <$> fullOut
+          dataWrCmdS  = (\(_, _, _, _, w) -> w) <$> fullOut
           -- Instruction block-RAM: initialised to all-NOP (ADDI x0,x0,0 = 0x0000_0013).
-          -- Replace with blockRamFile "riscv-prog.hex" once you have a .hex file.
-          bramOut = blockRam (repeat (0x00000013 :: Word32) :: Vec 1024 Word32) rdAddr wrCmd
-       in (\(x, _, _) -> x) <$> fullOut
+          instrBramOut = blockRam (repeat (0x00000013 :: Word32) :: Vec 1024 Word32) instrRdAddr instrWrCmd
+          -- Data block-RAM: zeroed.
+          --   Clash's blockRam is read-before-write, so a SW immediately followed
+          --   by an LW to the same address would yield stale data.  The bypass
+          --   mux below detects this and forwards the written word instead.
+          dataBramRaw = blockRam (repeat (0 :: Word32) :: Vec 1024 Word32) dataRdAddr dataWrCmdS
+          prevWrCmd   = register Nothing dataWrCmdS
+          prevRdAddr  = register 0 dataRdAddr
+          dataBramOut = wfBypass <$> prevWrCmd <*> prevRdAddr <*> dataBramRaw
+       in (\(x, _, _, _, _) -> x) <$> fullOut
+  where
+    -- Write-first bypass: if last cycle's write address == last cycle's read
+    -- address, return the written word rather than the stale BRAM output.
+    wfBypass (Just (wa, wd)) pra _   | wa == pra = wd
+    wfBypass _               _   raw             = raw

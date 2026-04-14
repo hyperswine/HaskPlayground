@@ -42,12 +42,18 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
     go st n lastPC sameCount
       | sameCount >= 4 = (rvRegs (simCpu st), simData st)
       | otherwise =
-          let cpu = simCpu st
-              mc = simData st
-              pcW = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
-              instr = iMem !! pcW
-              (cpu', mc', pc, _, _, _) = stepCpuRV cpu (instr, mc, True)
-              st' = st {simCpu = cpu', simData = mc'}
+          let cpu      = simCpu st
+              mc       = simData st
+              ram      = simRam st
+              pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
+              instr    = iMem !! pcW
+              dataAddr = truncateB (unpack (exwbAluOut (rvExWb cpu)) `shiftR` 2) :: Unsigned 10
+              dataWord = ram !! dataAddr
+              (cpu', mc', wc, pc, _, _, _) = stepCpuRV cpu (instr, dataWord, mc, True)
+              ram'  = case wc of
+                Just (idx, w) -> replace idx w ram
+                Nothing       -> ram
+              st'  = st { simCpu = cpu', simData = mc', simRam = ram' }
               same = if pc == lastPC then sameCount + 1 else 0
            in go st' (n - 1) pc same
 
@@ -55,9 +61,9 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
 reg :: RegFile -> RegIdx -> Word32
 reg rf r = rf !! r
 
--- | Read a word from the RAM region of the memory controller (word-addressed).
-dmem :: MemCtrl -> Unsigned 10 -> Word32
-dmem mc idx = mcRam mc !! idx
+-- | Read a word from the simulation data RAM (word-addressed).
+dmem :: SimState -> Unsigned 10 -> Word32
+dmem st idx = simRam st !! idx
 
 -- | Build an instruction memory: fill with NOPs then patch in (wordAddr, instr) pairs.
 buildMem :: [(Unsigned 10, Word32)] -> InstrMem

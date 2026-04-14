@@ -104,14 +104,14 @@ data UartState = UartState
 initUartState :: UartState
 initUartState = UartState 0 False
 
--- | Memory-controller state: block-RAM pool + UART peripheral.
+-- | Memory-controller state: UART peripheral only.
+--   The 4 KiB data RAM is now a separate blockRam at the top level.
 data MemCtrl = MemCtrl
-  { mcRam  :: RamPool    -- 4 KiB block RAM
-  , mcUart :: UartState
+  { mcUart :: UartState
   } deriving (Generic, NFDataX, Show)
 
 initMemCtrl :: MemCtrl
-initMemCtrl = MemCtrl (repeat 0) initUartState
+initMemCtrl = MemCtrl initUartState
 
 -- | Consume the pending UART TX byte (if any) and clear the valid flag.
 uartPop :: MemCtrl -> (MemCtrl, Maybe (BitVector 8))
@@ -438,13 +438,11 @@ evalBranch brOp a b =
 -- Data memory helpers (byte/halfword sub-word access)
 -- ===========================================================================
 
--- | Word-addressed data memory read, then extract the sub-word.
---   byteAddr is the full byte address.
-memLoad :: DataMem -> MemOp -> Addr -> Word32
-memLoad mem memOp byteAddr =
-  let wordIdx = truncateB (byteAddr `shiftR` 2) :: Unsigned 10
-      byteOff = resize (byteAddr .&. 3) :: Unsigned 2
-      word    = mem !! wordIdx
+-- | Extract a sub-word from a pre-fetched 32-bit word.
+--   byteAddr supplies the byte offset; 'word' is the full aligned word.
+memLoad :: MemOp -> Addr -> Word32 -> Word32
+memLoad memOp byteAddr word =
+  let byteOff = resize (byteAddr .&. 3) :: Unsigned 2
       -- extract byte / halfword based on byte offset
       byte0   = slice d7  d0  word
       byte1   = slice d15 d8  word
@@ -464,26 +462,27 @@ memLoad mem memOp byteAddr =
     _      -> 0  -- non-load: unused
 
 -- | Produce the (wordIdx, newWord) pair for a data memory write.
+--   'oldWord' is the current word at the target address (pre-fetched from BRAM);
+--   it is used for the read-modify-write of sub-word (byte / halfword) stores.
 --   Returns Nothing when memOp is not a store.
-memStore :: DataMem -> MemOp -> Addr -> Word32 -> Maybe (Unsigned 10, Word32)
-memStore mem memOp byteAddr storeVal =
+memStore :: MemOp -> Addr -> Word32 -> Word32 -> Maybe (Unsigned 10, Word32)
+memStore memOp byteAddr storeVal oldWord =
   let wordIdx = truncateB (byteAddr `shiftR` 2) :: Unsigned 10
       byteOff = resize (byteAddr .&. 3) :: Unsigned 2
-      old     = mem !! wordIdx
       b8  = zeroExtend (slice d7  d0  storeVal) :: BitVector 32
       h16 = zeroExtend (slice d15 d0  storeVal) :: BitVector 32
       newWord = case memOp of
         MemSb -> case byteOff of
-          0 -> (old .&. 0xFFFFFF00) .|. b8
-          1 -> (old .&. 0xFFFF00FF) .|. (b8  `shiftL` 8)
-          2 -> (old .&. 0xFF00FFFF) .|. (b8  `shiftL` 16)
-          _ -> (old .&. 0x00FFFFFF) .|. (b8  `shiftL` 24)
+          0 -> (oldWord .&. 0xFFFFFF00) .|. b8
+          1 -> (oldWord .&. 0xFFFF00FF) .|. (b8  `shiftL` 8)
+          2 -> (oldWord .&. 0xFF00FFFF) .|. (b8  `shiftL` 16)
+          _ -> (oldWord .&. 0x00FFFFFF) .|. (b8  `shiftL` 24)
         MemSh ->
           if byteOff < 2
-            then (old .&. 0xFFFF0000) .|. h16
-            else (old .&. 0x0000FFFF) .|. (h16 `shiftL` 16)
+            then (oldWord .&. 0xFFFF0000) .|. h16
+            else (oldWord .&. 0x0000FFFF) .|. (h16 `shiftL` 16)
         MemSw -> storeVal
-        _     -> old
+        _     -> oldWord
   in case memOp of
     MemNone -> Nothing
     MemLb   -> Nothing
@@ -498,28 +497,28 @@ memStore mem memOp byteAddr storeVal =
 -- ===========================================================================
 
 -- | Route a load through the memory controller.
-memCtrlLoad :: MemCtrl -> MemOp -> Addr -> Word32
-memCtrlLoad mc memOp byteAddr
-  | byteAddr <= ramTop       = memLoad (mcRam mc) memOp byteAddr
+--   'ramWord' is the word pre-fetched from the data blockRam this cycle.
+memCtrlLoad :: MemCtrl -> MemOp -> Addr -> Word32 -> Word32
+memCtrlLoad _mc memOp byteAddr ramWord
+  | byteAddr <= ramTop       = memLoad memOp byteAddr ramWord
   | byteAddr == uartTxAddr   = 0  -- TX is write-only; reads return 0
   | byteAddr == uartStatAddr = 1  -- STATUS bit 0 = tx_ready, always 1 in sim
   | otherwise                = 0
 
--- | Route a store through the memory controller and return the updated state.
---   Non-store 'MemOp' values leave the controller unchanged.
-memCtrlStore :: MemCtrl -> MemOp -> Addr -> Word32 -> MemCtrl
-memCtrlStore mc memOp byteAddr storeVal
-  | byteAddr <= ramTop =
-      case memStore (mcRam mc) memOp byteAddr storeVal of
-        Just (idx, w) -> mc { mcRam = replace idx w (mcRam mc) }
-        Nothing       -> mc
+-- | Route a store through the memory controller.
+--   Returns the updated controller state and an optional data-BRAM write command.
+--   'oldWord' is the word pre-fetched from the data blockRam (needed for RMW).
+memCtrlStore :: MemCtrl -> MemOp -> Addr -> Word32 -> Word32
+            -> (MemCtrl, Maybe (Unsigned 10, Word32))
+memCtrlStore mc memOp byteAddr storeVal oldWord
+  | byteAddr <= ramTop    = (mc, memStore memOp byteAddr storeVal oldWord)
   | byteAddr == uartTxAddr =
       case memOp of
-        MemSb -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
-        MemSh -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
-        MemSw -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
-        _     -> mc
-  | otherwise = mc
+        MemSb -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+        MemSh -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+        MemSw -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+        _     -> (mc, Nothing)
+  | otherwise = (mc, Nothing)
 
 -- ===========================================================================
 -- Pipeline state
@@ -602,45 +601,48 @@ initCpuStateRV = CpuStateRV
 -- | One-cycle step of the RV32I pipeline.
 --
 --   Inputs:
---     instrWord   – instruction from instruction memory at rvPC
---     dataMem     – the current data memory image
---     en          – clock enable
+--     instrWord    – instruction from instruction memory at rvPC
+--     dataBramWord – word pre-fetched from the data blockRam
+--                    (the aligned word at the current MEM/WB effective address).
+--                    For synthesis this comes from a blockRam with 1-cycle
+--                    latency; for simulation it is read combinatorially.
+--     memCtrl      – peripheral state (UART only; data RAM is external)
+--     en           – clock enable
 --
 --   Outputs:
---     (newState, newDataMem, newPC, wbRd, wbVal, wbValid)
---
---   Callers should present instrWord = instrMem[rvPC >> 2].
+--     (newState, newMemCtrl, dataWrCmd, newPC, wbRd, wbVal, wbValid)
+--     dataWrCmd – optional write to the data blockRam produced by stores.
 stepCpuRV
   :: CpuStateRV
-  -> (Word32, MemCtrl, Bool)
-  -> (CpuStateRV, MemCtrl, PC, RegIdx, Word32, Bool)
-stepCpuRV s@CpuStateRV{..} (instrWord, memCtrl, en)
-  | rvHalt  = (s, memCtrl, rvPC, 0, 0, False)
-  | not en  = (s, memCtrl, rvPC, 0, 0, False)
+  -> (Word32, Word32, MemCtrl, Bool)
+  -> (CpuStateRV, MemCtrl, Maybe (Unsigned 10, Word32), PC, RegIdx, Word32, Bool)
+stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, memCtrl, en)
+  | rvHalt  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
+  | not en  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
   | otherwise =
       -- ── Stage 3: MEM / WB ────────────────────────────────────────────
       let exwb = rvExWb
 
           -- Data memory access for loads/stores
-          (memCtrl', wbVal) =
+          (memCtrl', dataWrCmd, wbVal) =
             if exwbValid exwb
               then
                 let addr   = unpack (exwbAluOut exwb) :: Addr
                     storeV = exwbRs2Val exwb
                     mop    = exwbMemOp exwb
                 in case mop of
-                     -- loads: route through the memory controller
-                     MemLb  -> (memCtrl, memCtrlLoad memCtrl mop addr)
-                     MemLbu -> (memCtrl, memCtrlLoad memCtrl mop addr)
-                     MemLh  -> (memCtrl, memCtrlLoad memCtrl mop addr)
-                     MemLhu -> (memCtrl, memCtrlLoad memCtrl mop addr)
-                     MemLw  -> (memCtrl, memCtrlLoad memCtrl mop addr)
-                     -- stores: controller returns updated state
-                     MemSb  -> (memCtrlStore memCtrl mop addr storeV, 0)
-                     MemSh  -> (memCtrlStore memCtrl mop addr storeV, 0)
-                     MemSw  -> (memCtrlStore memCtrl mop addr storeV, 0)
-                     MemNone -> (memCtrl, exwbAluOut exwb)
-              else (memCtrl, 0)
+                     -- loads: use the pre-fetched word from the data blockRam
+                     MemLb   -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                     MemLbu  -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                     MemLh   -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                     MemLhu  -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                     MemLw   -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                     -- stores: return updated peripheral state + BRAM write command
+                     MemSb   -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                     MemSh   -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                     MemSw   -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                     MemNone -> (memCtrl, Nothing, exwbAluOut exwb)
+              else (memCtrl, Nothing, 0)
 
           -- Choose write-back value
           wbResult = case exwbWbSrc exwb of
@@ -771,7 +773,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, memCtrl, en)
             , rvHalt = False
             }
 
-      in (s', memCtrl', nextPC, exwbRd exwb, wbResult, wbEn)
+      in (s', memCtrl', dataWrCmd, nextPC, exwbRd exwb, wbResult, wbEn)
 
 -- ===========================================================================
 -- Simple simulation helper (no UART)
@@ -780,10 +782,19 @@ stepCpuRV s@CpuStateRV{..} (instrWord, memCtrl, en)
 data SimState = SimState
   { simCpu  :: CpuStateRV
   , simData :: MemCtrl
+  , simRam  :: Vec 1024 Word32   -- data RAM (separate from MemCtrl for synthesis)
   } deriving (Generic, NFDataX, Show)
 
 initSimState :: SimState
-initSimState = SimState initCpuStateRV initMemCtrl
+initSimState = SimState initCpuStateRV initMemCtrl (repeat 0)
+
+-- | Pre-fetch the aligned word the MEM/WB stage will read this cycle.
+--   In hardware this is provided by the data blockRam (1-cycle latency,
+--   address driven from the previous cycle's ExWb output).
+simDataWord :: SimState -> Word32
+simDataWord st =
+  let addr = truncateB (unpack (exwbAluOut (rvExWb (simCpu st))) `shiftR` 2) :: Unsigned 10
+  in simRam st !! addr
 
 -- | Run the CPU for n cycles on a fixed instruction memory image.
 --   Returns a list of (pc, wbRd, wbVal, wbEn) per cycle.
@@ -795,8 +806,12 @@ simulateRV iMem n = P.take n $ go initSimState
           mc    = simData st
           pcW   = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
           instr = iMem !! pcW
-          (cpu', mc', pc, rd, val, wbEn) = stepCpuRV cpu (instr, mc, True)
-          st'   = st { simCpu = cpu', simData = mc' }
+          dword = simDataWord st
+          (cpu', mc', wc, pc, rd, val, wbEn) = stepCpuRV cpu (instr, dword, mc, True)
+          ram'  = case wc of
+            Just (idx, w) -> replace idx w (simRam st)
+            Nothing       -> simRam st
+          st'   = st { simCpu = cpu', simData = mc', simRam = ram' }
       in (pc, rd, val, wbEn) : go st'
 
 -- ===========================================================================
