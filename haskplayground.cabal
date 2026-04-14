@@ -28,6 +28,7 @@ library
       Civ4x
       CPU3
       CPURiscV
+      CPURiscVTop
       DirectLang
       EncDecClash
       ExActors

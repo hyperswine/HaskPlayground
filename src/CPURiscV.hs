@@ -708,7 +708,13 @@ stepCpuRV s@CpuStateRV{..} (instrWord, memCtrl, en)
           -- ── Load-use hazard detection ─────────────────────────────────
           -- If the ID/EX stage is a load and its rd matches one of the
           -- IF/ID stage's source registers, we must stall one cycle.
-          isLoad op = op `elem` [MemLb, MemLbu, MemLh, MemLhu, MemLw]
+          isLoad op = case op of
+            MemLb  -> True
+            MemLbu -> True
+            MemLh  -> True
+            MemLhu -> True
+            MemLw  -> True
+            _      -> False
           loadUseHazard =
             idexValid idex
             && isLoad (uMemOp uop)
