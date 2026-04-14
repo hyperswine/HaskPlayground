@@ -73,15 +73,22 @@ uartRxStep s@UartRxSt {..} rxPin =
   let sampled = rxSync2
       clksPB = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 9
       half = snatToNum (SNat :: SNat HalfBitRV) :: Unsigned 9
+      shifted = pack sampled ++# slice d7 d1 rxShift
       (fsm', cnt', bitIdx', shift', valid') = case rxFSM of
-        RxIdle -> if sampled == 0 then (RxStart, 0, 0, rxShift, False) else (RxIdle, 0, 0, rxShift, False)
-        RxStart -> if rxCnt == half - 1 then if sampled == 0 then (RxData, 0, 0, rxShift, False) else (RxIdle, 0, 0, rxShift, False) else (RxStart, rxCnt + 1, rxBitIdx, rxShift, False)
-        RxData ->
-          if rxCnt == clksPB - 1
-            then
-              let shifted = pack sampled ++# slice d7 d1 rxShift in if rxBitIdx == 7 then (RxStop, 0, rxBitIdx, shifted, False) else (RxData, 0, rxBitIdx + 1, shifted, False)
-            else (RxData, rxCnt + 1, rxBitIdx, rxShift, False)
-        RxStop -> if rxCnt == clksPB - 1 then (RxIdle, 0, 0, rxShift, sampled == 1) else (RxStop, rxCnt + 1, rxBitIdx, rxShift, False)
+        RxIdle
+          | sampled == 0 -> (RxStart, 0, 0, rxShift, False)
+          | otherwise -> (RxIdle, 0, 0, rxShift, False)
+        RxStart
+          | rxCnt == half - 1, sampled == 0 -> (RxData, 0, 0, rxShift, False)
+          | rxCnt == half - 1 -> (RxIdle, 0, 0, rxShift, False)
+          | otherwise -> (RxStart, rxCnt + 1, rxBitIdx, rxShift, False)
+        RxData
+          | rxCnt == clksPB - 1, rxBitIdx == 7 -> (RxStop, 0, rxBitIdx, shifted, False)
+          | rxCnt == clksPB - 1 -> (RxData, 0, rxBitIdx + 1, shifted, False)
+          | otherwise -> (RxData, rxCnt + 1, rxBitIdx, rxShift, False)
+        RxStop
+          | rxCnt == clksPB - 1 -> (RxIdle, 0, 0, rxShift, sampled == 1)
+          | otherwise -> (RxStop, rxCnt + 1, rxBitIdx, rxShift, False)
       dataOut = if valid' then shift' else rxData
       s' = s {rxFSM = fsm', rxCnt = cnt', rxBitIdx = bitIdx', rxShift = shift', rxSync1 = rxPin, rxSync2 = rxSync1, rxData = dataOut, rxValid = valid'}
    in (s', (dataOut, valid'))
@@ -101,16 +108,22 @@ uartTxStep :: UartTxSt -> (BitVector 8, Bool) -> (UartTxSt, (Bit, Bool))
 uartTxStep s@UartTxSt {..} (dat, send) =
   let clksPB = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 9
       busy = txFSM /= TxIdle
+      bit0 = lsb txShift
+      shifted = 0 ++# slice d7 d1 txShift
       (fsm', cnt', bitIdx', shift', pin') = case txFSM of
-        TxIdle -> if send && not busy then (TxStart, 0, 0, dat, 1) else (TxIdle, txCnt, txBitIdx, txShift, 1)
-        TxStart -> if txCnt == clksPB - 1 then (TxData, 0, 0, txShift, 0) else (TxStart, txCnt + 1, txBitIdx, txShift, 0)
-        TxData ->
-          let bit0 = lsb txShift
-              shifted = 0 ++# slice d7 d1 txShift
-           in if txCnt == clksPB - 1
-                then if txBitIdx == 7 then (TxStop, 0, txBitIdx, shifted, bit0) else (TxData, 0, txBitIdx + 1, shifted, bit0)
-                else (TxData, txCnt + 1, txBitIdx, txShift, bit0)
-        TxStop -> if txCnt == clksPB - 1 then (TxIdle, 0, txBitIdx, txShift, 1) else (TxStop, txCnt + 1, txBitIdx, txShift, 1)
+        TxIdle
+          | send, not busy -> (TxStart, 0, 0, dat, 1)
+          | otherwise -> (TxIdle, txCnt, txBitIdx, txShift, 1)
+        TxStart
+          | txCnt == clksPB - 1 -> (TxData, 0, 0, txShift, 0)
+          | otherwise -> (TxStart, txCnt + 1, txBitIdx, txShift, 0)
+        TxData
+          | txCnt == clksPB - 1, txBitIdx == 7 -> (TxStop, 0, txBitIdx, shifted, bit0)
+          | txCnt == clksPB - 1 -> (TxData, 0, txBitIdx + 1, shifted, bit0)
+          | otherwise -> (TxData, txCnt + 1, txBitIdx, txShift, bit0)
+        TxStop
+          | txCnt == clksPB - 1 -> (TxIdle, 0, txBitIdx, txShift, 1)
+          | otherwise -> (TxStop, txCnt + 1, txBitIdx, txShift, 1)
       s' = s {txFSM = fsm', txCnt = cnt', txBitIdx = bitIdx', txShift = shift', txPin = pin'}
    in (s', (pin', busy))
 
@@ -189,11 +202,15 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
 
       -- ── UART TX path ────────────────────────────────────────────────
       txBusy = txFSM tx /= TxIdle
-      (fifo1, txDat, txSend) = if not (fifoEmpty fifo) && not txBusy then let (f', b) = fifoPop fifo in (f', b, True) else (fifo, 0, False)
+      (fifo1, txDat, txSend) = case (fifoEmpty fifo, txBusy) of
+        (False, False) -> let (f', b) = fifoPop fifo in (f', b, True)
+        _ -> (fifo, 0, False)
       (tx', _) = uartTxStep tx (txDat, txSend)
 
       -- ── Drain outPending into TX FIFO ───────────────────────────────
-      (fifo2, top1) = if outPending top && not (fifoFull fifo1) then (fifoPush fifo1 (outPendDat top), top {outPending = False}) else (fifo1, top)
+      (fifo2, top1) = case (outPending top, fifoFull fifo1) of
+        (True, False) -> (fifoPush fifo1 (outPendDat top), top {outPending = False})
+        _ -> (fifo1, top)
 
       -- ── Control FSM ─────────────────────────────────────────────────
       (top2, fifo3, cpu2, instrWrCmd) = case ctrlFSM top1 of
@@ -205,9 +222,9 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
                 | rxByte == 0x58 = top1 {cpuRst = True}
                 | otherwise = top1 {cpuRst = True}
            in (top', fifo2, cpu1, Nothing)
-        PgLoad ->
-          if rxVld
-            then
+        PgLoad
+          | not rxVld -> (top1, fifo2, cpu1, Nothing)
+          | otherwise ->
               let bytePos = progByteIdx top1 `mod` 4
                   shiftAmt = (3 - resize bytePos) * 8 :: Unsigned 5
                   newByte = resize (unpack rxByte :: Unsigned 8) :: Unsigned 32
@@ -217,22 +234,29 @@ sysStepRV SysStateRV {..} (rxPin, bramOut) =
                   pgWr = if bytePos == 3 then Just (wordIdx, wordAcc') else Nothing
                   byteIdx' = progByteIdx top1 + 1
                   done = progByteIdx top1 == 4095
+                  f' = if not (fifoFull fifo2) then fifoPush fifo2 0x4B else fifo2
                in if done
-                    then
-                      let f' = if not (fifoFull fifo2) then fifoPush fifo2 0x4B else fifo2 in (top1 {ctrlFSM = PgIdle, progByteIdx = 0, progWordAcc = 0}, f', cpu1, pgWr)
+                    then (top1 {ctrlFSM = PgIdle, progByteIdx = 0, progWordAcc = 0}, f', cpu1, pgWr)
                     else (top1 {progByteIdx = byteIdx', progWordAcc = wacc''}, fifo2, cpu1, pgWr)
-            else (top1, fifo2, cpu1, Nothing)
         PgRun ->
           let top1' = top1 {cpuRst = False}
+              cpuHalted = rvHalt cpu1
               -- Forward CPU UART_TX writes into host TX FIFO
               (fifo2', top2') = case cpuTxMaybe of
-                Just b -> if not (fifoFull fifo2) then (fifoPush fifo2 b, top1' {runTimeout = 0}) else (fifo2, top1' {outPending = True, outPendDat = b, runTimeout = 0})
-                Nothing -> if cpuEn && not (outPending top1') then (fifo2, top1' {runTimeout = runTimeout top1' + 1}) else (fifo2, top1')
+                Just b
+                  | not (fifoFull fifo2) -> (fifoPush fifo2 b, top1' {runTimeout = 0})
+                  | otherwise -> (fifo2, top1' {outPending = True, outPendDat = b, runTimeout = 0})
+                Nothing
+                  | cpuEn, not (outPending top1') -> (fifo2, top1' {runTimeout = runTimeout top1' + 1})
+                  | otherwise -> (fifo2, top1')
               -- Check halt / timeout
-              cpuHalted = rvHalt cpu1
-              top2'' = if (cpuHalted || runTimeout top2' == 0xFFFF) && not (outPending top2') then top2' {ctrlFSM = PgSendDone} else top2'
+              top2'' = case (cpuHalted || runTimeout top2' == 0xFFFF, outPending top2') of
+                (True, False) -> top2' {ctrlFSM = PgSendDone}
+                _ -> top2'
            in (top2'', fifo2', cpu1, Nothing)
-        PgSendDone -> if not (fifoFull fifo2) then (top1 {ctrlFSM = PgIdle}, fifoPush fifo2 0x44, cpu1, Nothing) else (top1, fifo2, cpu1, Nothing)
+        PgSendDone
+          | not (fifoFull fifo2) -> (top1 {ctrlFSM = PgIdle}, fifoPush fifo2 0x44, cpu1, Nothing)
+          | otherwise -> (top1, fifo2, cpu1, Nothing)
 
       -- ── Post-cycle: enqueue 'K' ack on reset command ─────────────────
       fifo4 = if rxVld && rxByte == 0x58 && ctrlFSM top == PgIdle && not (fifoFull fifo3) then fifoPush fifo3 0x4B else fifo3
