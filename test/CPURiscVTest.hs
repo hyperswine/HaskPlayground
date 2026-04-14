@@ -35,8 +35,8 @@ import qualified Prelude as P
 
 -- | Run the CPU until the PC remains stationary for 4 consecutive cycles
 --   (no instruction changes it), or until a cycle budget is exhausted.
---   Returns the final register file and data memory.
-runUntilDone :: InstrMem -> Int -> (RegFile, DataMem)
+--   Returns the final register file and memory-controller state.
+runUntilDone :: InstrMem -> Int -> (RegFile, MemCtrl)
 runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
   where
     go st 0 _ _ = (rvRegs (simCpu st), simData st)
@@ -44,11 +44,11 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
       | sameCount >= 4 = (rvRegs (simCpu st), simData st)
       | otherwise =
           let cpu  = simCpu st
-              dMem = simData st
+              mc   = simData st
               pcW  = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
               instr = iMem !! pcW
-              (cpu', dMem', pc, _, _, _) = stepCpuRV cpu (instr, dMem, True)
-              st'  = st { simCpu = cpu', simData = dMem' }
+              (cpu', mc', pc, _, _, _) = stepCpuRV cpu (instr, mc, True)
+              st'  = st { simCpu = cpu', simData = mc' }
               same = if pc == lastPC then sameCount + 1 else 0
           in go st' (n - 1) pc same
 
@@ -56,9 +56,9 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
 reg :: RegFile -> RegIdx -> Word32
 reg rf r = rf !! r
 
--- | Read a word from the result data memory (word-addressed).
-dmem :: DataMem -> Unsigned 10 -> Word32
-dmem dm idx = dm !! idx
+-- | Read a word from the RAM region of the memory controller (word-addressed).
+dmem :: MemCtrl -> Unsigned 10 -> Word32
+dmem mc idx = mcRam mc !! idx
 
 -- | Build an instruction memory: fill with NOPs then patch in (wordAddr, instr) pairs.
 buildMem :: [(Unsigned 10, Word32)] -> InstrMem
@@ -345,13 +345,12 @@ prop_forwarding_chain = property $ do
 -- | SW + LW round-trip: store a word, load it back.
 prop_sw_lw :: Property
 prop_sw_lw = property $ do
-  -- Store 0xDEADBEEF to data address 0x100 (byte), load it back into x2.
+  -- Store 42 to data address 0x100 (within RAM), load it back into x4.
   let mem = buildMem
-        [ (0, iLUI   1 0x00001)    -- x1 = 0x1000  (base address)
-        , (1, iADDI  3 0 (-559))   -- x3 = 0xFFFF_FDDF → wrong; use LUI+ADDI for 0xDEADBEEF
-                , (2, iADDI  3 0 42)       -- x3 = 42
-        , (3, iSW    1 3 0)        -- mem[x1 + 0] = x3 = 42
-        , (4, iLW    4 1 0)        -- x4 = mem[x1 + 0]
+        [ (0, iADDI  1 0 0x100)    -- x1 = 0x100 (base address)
+        , (1, iADDI  3 0 42)       -- x3 = 42
+        , (2, iSW    1 3 0)        -- mem[x1 + 0] = x3 = 42
+        , (3, iLW    4 1 0)        -- x4 = mem[x1 + 0]
         ]
       (rf, _) = runUntilDone mem 30
   reg rf 4 === 42

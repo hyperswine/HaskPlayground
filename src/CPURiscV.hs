@@ -76,6 +76,49 @@ type InstrMem = Vec 1024 Word32
 -- | Data memory: 1024 × 32-bit words (4 KiB), word-addressed.
 type DataMem = Vec 1024 Word32
 
+-- | RAM pool backing the controller's RAM region (same layout as DataMem).
+type RamPool = Vec 1024 Word32
+
+-- ===========================================================================
+-- Memory controller
+-- ===========================================================================
+--
+-- Address map
+-- ┌──────────────────────────────┬─────────────────────────────────────────┐
+-- │ 0x0000_0000 – 0x0000_0FFF   │ Block RAM  (4 KiB, 1024 × 32-bit words) │
+-- │ 0x0001_0000 – 0x0001_0003   │ UART_TX    (W: send byte; R: 0x00)      │
+-- │ 0x0001_0004 – 0x0001_0007   │ UART_STATUS (R: bit 0 = tx_ready; W: -) │
+-- └──────────────────────────────┴─────────────────────────────────────────┘
+
+ramTop       :: Addr; ramTop       = 0x0000_0FFF
+uartTxAddr   :: Addr; uartTxAddr   = 0x0001_0000
+uartStatAddr :: Addr; uartStatAddr = 0x0001_0004
+
+-- | Minimal simulated UART: captures the last byte written to UART_TX.
+data UartState = UartState
+  { uartTxByte  :: BitVector 8  -- last byte written to UART_TX
+  , uartTxValid :: Bool         -- True when a new byte is available
+  } deriving (Generic, NFDataX, Show)
+
+initUartState :: UartState
+initUartState = UartState 0 False
+
+-- | Memory-controller state: block-RAM pool + UART peripheral.
+data MemCtrl = MemCtrl
+  { mcRam  :: RamPool    -- 4 KiB block RAM
+  , mcUart :: UartState
+  } deriving (Generic, NFDataX, Show)
+
+initMemCtrl :: MemCtrl
+initMemCtrl = MemCtrl (repeat 0) initUartState
+
+-- | Consume the pending UART TX byte (if any) and clear the valid flag.
+uartPop :: MemCtrl -> (MemCtrl, Maybe (BitVector 8))
+uartPop mc
+  | uartTxValid (mcUart mc) =
+      (mc { mcUart = initUartState }, Just (uartTxByte (mcUart mc)))
+  | otherwise = (mc, Nothing)
+
 -- ===========================================================================
 -- Instruction decode helpers
 -- ===========================================================================
@@ -449,6 +492,33 @@ memStore mem memOp byteAddr storeVal =
     MemLhu  -> Nothing
     _       -> Just (wordIdx, newWord)
 
+-- ===========================================================================
+-- Memory controller dispatch
+-- ===========================================================================
+
+-- | Route a load through the memory controller.
+memCtrlLoad :: MemCtrl -> MemOp -> Addr -> Word32
+memCtrlLoad mc memOp byteAddr
+  | byteAddr <= ramTop       = memLoad (mcRam mc) memOp byteAddr
+  | byteAddr == uartTxAddr   = 0  -- TX is write-only; reads return 0
+  | byteAddr == uartStatAddr = 1  -- STATUS bit 0 = tx_ready, always 1 in sim
+  | otherwise                = 0
+
+-- | Route a store through the memory controller and return the updated state.
+--   Non-store 'MemOp' values leave the controller unchanged.
+memCtrlStore :: MemCtrl -> MemOp -> Addr -> Word32 -> MemCtrl
+memCtrlStore mc memOp byteAddr storeVal
+  | byteAddr <= ramTop =
+      case memStore (mcRam mc) memOp byteAddr storeVal of
+        Just (idx, w) -> mc { mcRam = replace idx w (mcRam mc) }
+        Nothing       -> mc
+  | byteAddr == uartTxAddr =
+      case memOp of
+        MemSb -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
+        MemSh -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
+        MemSw -> mc { mcUart = UartState (truncateB (pack storeVal)) True }
+        _     -> mc
+  | otherwise = mc
 
 -- ===========================================================================
 -- Pipeline state
@@ -541,41 +611,35 @@ initCpuStateRV = CpuStateRV
 --   Callers should present instrWord = instrMem[rvPC >> 2].
 stepCpuRV
   :: CpuStateRV
-  -> (Word32, DataMem, Bool)
-  -> (CpuStateRV, DataMem, PC, RegIdx, Word32, Bool)
-stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
-  | rvHalt  = (s, dataMem, rvPC, 0, 0, False)
-  | not en  = (s, dataMem, rvPC, 0, 0, False)
+  -> (Word32, MemCtrl, Bool)
+  -> (CpuStateRV, MemCtrl, PC, RegIdx, Word32, Bool)
+stepCpuRV s@CpuStateRV{..} (instrWord, memCtrl, en)
+  | rvHalt  = (s, memCtrl, rvPC, 0, 0, False)
+  | not en  = (s, memCtrl, rvPC, 0, 0, False)
   | otherwise =
       -- ── Stage 3: MEM / WB ────────────────────────────────────────────
       let exwb = rvExWb
 
           -- Data memory access for loads/stores
-          (dataMem', wbVal) =
+          (memCtrl', wbVal) =
             if exwbValid exwb
               then
-                let addr    = unpack (exwbAluOut exwb) :: Addr
-                    storeV  = exwbRs2Val exwb
-                    mop     = exwbMemOp exwb
+                let addr   = unpack (exwbAluOut exwb) :: Addr
+                    storeV = exwbRs2Val exwb
+                    mop    = exwbMemOp exwb
                 in case mop of
-                     -- load: read data memory then choose wbSrc
-                     MemLb  -> (dataMem, memLoad dataMem mop addr)
-                     MemLbu -> (dataMem, memLoad dataMem mop addr)
-                     MemLh  -> (dataMem, memLoad dataMem mop addr)
-                     MemLhu -> (dataMem, memLoad dataMem mop addr)
-                     MemLw  -> (dataMem, memLoad dataMem mop addr)
-                     -- store: write data memory, wbVal unused
-                     MemSb  -> case memStore dataMem mop addr storeV of
-                                  Just (idx, w) -> (replace idx w dataMem, 0)
-                                  Nothing       -> (dataMem, 0)
-                     MemSh  -> case memStore dataMem mop addr storeV of
-                                  Just (idx, w) -> (replace idx w dataMem, 0)
-                                  Nothing       -> (dataMem, 0)
-                     MemSw  -> case memStore dataMem mop addr storeV of
-                                  Just (idx, w) -> (replace idx w dataMem, 0)
-                                  Nothing       -> (dataMem, 0)
-                     MemNone -> (dataMem, exwbAluOut exwb)
-              else (dataMem, 0)
+                     -- loads: route through the memory controller
+                     MemLb  -> (memCtrl, memCtrlLoad memCtrl mop addr)
+                     MemLbu -> (memCtrl, memCtrlLoad memCtrl mop addr)
+                     MemLh  -> (memCtrl, memCtrlLoad memCtrl mop addr)
+                     MemLhu -> (memCtrl, memCtrlLoad memCtrl mop addr)
+                     MemLw  -> (memCtrl, memCtrlLoad memCtrl mop addr)
+                     -- stores: controller returns updated state
+                     MemSb  -> (memCtrlStore memCtrl mop addr storeV, 0)
+                     MemSh  -> (memCtrlStore memCtrl mop addr storeV, 0)
+                     MemSw  -> (memCtrlStore memCtrl mop addr storeV, 0)
+                     MemNone -> (memCtrl, exwbAluOut exwb)
+              else (memCtrl, 0)
 
           -- Choose write-back value
           wbResult = case exwbWbSrc exwb of
@@ -700,7 +764,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
             , rvHalt = False
             }
 
-      in (s', dataMem', nextPC, exwbRd exwb, wbResult, wbEn)
+      in (s', memCtrl', nextPC, exwbRd exwb, wbResult, wbEn)
 
 -- ===========================================================================
 -- Simple simulation helper (no UART)
@@ -708,11 +772,11 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataMem, en)
 
 data SimState = SimState
   { simCpu  :: CpuStateRV
-  , simData :: DataMem
+  , simData :: MemCtrl
   } deriving (Generic, NFDataX, Show)
 
 initSimState :: SimState
-initSimState = SimState initCpuStateRV (repeat 0)
+initSimState = SimState initCpuStateRV initMemCtrl
 
 -- | Run the CPU for n cycles on a fixed instruction memory image.
 --   Returns a list of (pc, wbRd, wbVal, wbEn) per cycle.
@@ -721,11 +785,11 @@ simulateRV iMem n = P.take n $ go initSimState
   where
     go st =
       let cpu   = simCpu st
-          dMem  = simData st
+          mc    = simData st
           pcW   = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
           instr = iMem !! pcW
-          (cpu', dMem', pc, rd, val, wbEn) = stepCpuRV cpu (instr, dMem, True)
-          st'   = st { simCpu = cpu', simData = dMem' }
+          (cpu', mc', pc, rd, val, wbEn) = stepCpuRV cpu (instr, mc, True)
+          st'   = st { simCpu = cpu', simData = mc' }
       in (pc, rd, val, wbEn) : go st'
 
 -- ===========================================================================
