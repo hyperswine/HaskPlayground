@@ -3,57 +3,44 @@
 -- Cons-lists are built with:
 --   Tag Nil              empty list
 --   Tag Cons(head, tail) non-empty cell
---
--- Because the language has no case-expression, structural pattern matching
--- on cons-cells uses the send-to-self trick: wrap the scrutinee in a tagged
--- envelope and immediately receive it back, letting the receive clauses
--- destructure it.
 
 -- ── show a cons-list of ints ─────────────────────────────────────────────────
 
-let showIntList = fix showIntList(xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => "Nil"
-    Inspect(Cons(h, t)) => strConcat(strConcat(intToStr(h), " : "), showIntList(t))
+let showIntList = fix showIntList(xs) =>
+  match(xs) {
+    Nil => "Nil"
+  | Cons(h, t) => strConcat(strConcat(intToStr(h), " : "), showIntList(t))
   }
-}
 
 -- ── foldr(f, z, xs) ──────────────────────────────────────────────────────────
 -- foldr f z [x1, x2, x3]  =  f(x1, f(x2, f(x3, z)))
 
-let foldr = fix foldr(f, z, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => z
-    Inspect(Cons(h, t)) => f(h, foldr(f, z, t))
+let foldr = fix foldr(f, z, xs) =>
+  match(xs) {
+    Nil => z
+  | Cons(h, t) => f(h, foldr(f, z, t))
   }
-}
 
 -- ── map(f, xs) ───────────────────────────────────────────────────────────────
 -- map f [x1, x2, x3]  =  [f(x1), f(x2), f(x3)]
 
-let map = fix map(f, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => Tag Nil
-    Inspect(Cons(h, t)) => Tag Cons(f(h), map(f, t))
+let map = fix map(f, xs) =>
+  match(xs) {
+    Nil => Tag Nil
+  | Cons(h, t) => Tag Cons(f(h), map(f, t))
   }
-}
 
 -- ── filter(pred, xs) ─────────────────────────────────────────────────────────
 -- filter pred [x1,x2,x3]  =  [xi | pred(xi) == true]
 
-let filter = fix filter(pred, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => Tag Nil
-    Inspect(Cons(h, t)) =>
+let filter = fix filter(pred, xs) =>
+  match(xs) {
+    Nil => Tag Nil
+  | Cons(h, t) =>
       if pred(h)
       then Tag Cons(h, filter(pred, t))
       else filter(pred, t)
   }
-}
 
 -- ── isEven: true when n is even (works for n >= 0) ───────────────────────────
 

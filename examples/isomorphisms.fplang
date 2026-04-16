@@ -13,43 +13,33 @@
 -- ── Generic cons-list utilities ──────────────────────────────────────────────
 -- These functions deal only with Cons/Nil; they know nothing about any brand.
 
--- Use Tag for these kinds of things
-
-let listFoldr = fix listFoldr(f, z, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => z
-    Inspect(Cons(h, t)) => f(h, listFoldr(f, z, t))
+let listFoldr = fix listFoldr(f, z, xs) =>
+  match(xs) {
+    Nil => z
+  | Cons(h, t) => f(h, listFoldr(f, z, t))
   }
-}
 
-let listMap = fix listMap(f, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => Tag Nil
-    Inspect(Cons(h, t)) => Tag Cons(f(h), listMap(f, t))
+let listMap = fix listMap(f, xs) =>
+  match(xs) {
+    Nil => Tag Nil
+  | Cons(h, t) => Tag Cons(f(h), listMap(f, t))
   }
-}
 
-let listFilter = fix listFilter(pred, xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => Tag Nil
-    Inspect(Cons(h, t)) =>
+let listFilter = fix listFilter(pred, xs) =>
+  match(xs) {
+    Nil => Tag Nil
+  | Cons(h, t) =>
       if pred(h)
       then Tag Cons(h, listFilter(pred, t))
       else listFilter(pred, t)
   }
-}
 
-let listShowInts = fix listShowInts(xs) => {
-  send "main" Tag Inspect(xs)
-  receive {
-    Inspect(Nil) => "Nil"
-    Inspect(Cons(h, t)) =>
+let listShowInts = fix listShowInts(xs) =>
+  match(xs) {
+    Nil => "Nil"
+  | Cons(h, t) =>
       strConcat(strConcat(intToStr(h), " : "), listShowInts(t))
   }
-}
 
 let listSum = fn(xs) => listFoldr(fn(h, acc) => intAdd(h, acc), 0, xs)
 let listLen = fn(xs) => listFoldr(fn(h, acc) => intAdd(1, acc), 0, xs)

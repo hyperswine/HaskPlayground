@@ -4,6 +4,7 @@
 
 {-# HLINT ignore "Use <$>" #-}
 {-# HLINT ignore "Use record patterns" #-}
+{-# HLINT ignore "Use unless" #-}
 
 module FPInterpreter (Expr (..), Pattern (..), Value (..), TypeName, Env, primEnv, ActorState (..), ActorM (..), runProgram, eval) where
 
@@ -88,6 +89,8 @@ data Expr
   -- Isomorphism registry
   | IsoDecl TypeName TypeName Expr Expr -- iso A B fwd bkwd  (registers pair)
   | LookupIso TypeName TypeName -- iso A B  → Just (fwd, bkwd) | Nothing
+  -- Direct pattern match
+  | Match Expr [(Pattern, Expr)] -- match(scrutinee) { Pat => expr | ... }
   deriving (Show)
 
 -- -----------------------------------------------------------------------------
@@ -150,17 +153,15 @@ heapAlloc :: Value -> Heap -> (HeapRef, Heap)
 heapAlloc v h = let ref = heapNextRef h in (ref, h {heapCells = Map.insert ref (v, 1) (heapCells h), heapNextRef = ref + 1})
 
 heapDealloc :: HeapRef -> Heap -> Heap
-heapDealloc ref h =
-  case Map.lookup ref (heapCells h) of
-    Nothing -> error $ "heapDealloc: invalid ref " ++ show ref
-    Just (_, 1) -> h {heapCells = Map.delete ref (heapCells h)}
-    Just (v, rc) -> h {heapCells = Map.insert ref (v, rc - 1) (heapCells h)}
+heapDealloc ref h = case Map.lookup ref (heapCells h) of
+  Nothing -> error $ "heapDealloc: invalid ref " ++ show ref
+  Just (_, 1) -> h {heapCells = Map.delete ref (heapCells h)}
+  Just (v, rc) -> h {heapCells = Map.insert ref (v, rc - 1) (heapCells h)}
 
 heapGet :: HeapRef -> Heap -> Value
-heapGet ref h =
-  case Map.lookup ref (heapCells h) of
-    Nothing -> error $ "heapGet: invalid ref " ++ show ref
-    Just (v, _) -> v
+heapGet ref h = case Map.lookup ref (heapCells h) of
+  Nothing -> error $ "heapGet: invalid ref " ++ show ref
+  Just (v, _) -> v
 
 -- -----------------------------------------------------------------------------
 -- § Mailbox  (bounded, crashes on overflow)
@@ -279,8 +280,7 @@ allocValue v = ActorM $ \st -> do
   return (VTagged "Ref" [VInt ref])
 
 deallocRef :: Value -> ActorM ()
-deallocRef (VTagged "Ref" [VInt ref]) = ActorM $ \st -> do
-  modifyIORef' (actorHeap st) (heapDealloc ref)
+deallocRef (VTagged "Ref" [VInt ref]) = ActorM $ \st -> do modifyIORef' (actorHeap st) (heapDealloc ref)
 deallocRef v = actorFail $ "dealloc: not a Ref: " ++ show v
 
 getRef :: Value -> ActorM Value
@@ -445,10 +445,7 @@ eval env = \case
   Alloc e -> eval env e >>= allocValue
   Dealloc e -> eval env e >>= deallocRef >> return VUnit
   GetRef e -> eval env e >>= getRef
-  -- Fix: bind name to a self-referential function in the env.
-  -- The trick: build a VFn whose closed env contains a reference back to itself.
-  -- We achieve this with a lazy knot: construct the env with the binding
-  -- pointing to the VFn that closes over that very env.
+  -- Fix: bind name to a self-referential function in the env. The trick: build a VFn whose closed env contains a reference back to itself. We achieve this with a lazy knot: construct the env with the binding pointing to the VFn that closes over that very env.
   Fix fname params body ->
     let selfFn = VFn fname selfEnv params body
         selfEnv = Map.insert fname selfFn env
@@ -469,16 +466,17 @@ eval env = \case
       Nothing -> VTagged "Nothing" []
       Just (fwd, bk) -> VTagged "Just" [VTagged "Pair" [fwd, bk]]
 
+  -- Match: evaluate scrutinee then find first matching clause.
+  Match scrutinee clauses -> do
+    v <- eval env scrutinee
+    case matchClauses clauses v of
+      Nothing -> actorFail $ "match: no matching pattern for " ++ show v
+      Just (binds, e) -> eval (Map.union binds env) e
+
 applyFn :: Value -> [Value] -> ActorM Value
 applyFn (VFn _ closedEnv params body) args
-  | length params == length args =
-      eval (Map.union (Map.fromList (zip params args)) closedEnv) body
-  | otherwise =
-      actorFail $
-        "arity mismatch: expected "
-          ++ show (length params)
-          ++ " got "
-          ++ show (length args)
+  | length params == length args = eval (Map.union (Map.fromList (zip params args)) closedEnv) body
+  | otherwise = actorFail $ "arity mismatch: expected " ++ show (length params) ++ " got " ++ show (length args)
 applyFn (VPrim _ f) args = f args
 applyFn v _ = actorFail $ "apply: not a function: " ++ show v
 

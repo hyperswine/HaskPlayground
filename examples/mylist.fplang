@@ -101,22 +101,18 @@ iso RleList FlatList rleFwd rleBkwd
 
 -- ── Show helpers ─────────────────────────────────────────────────────────────
 
-let showRun = fn(run) => {
-  send "main" Tag RunInspect(run)
-  receive {
-    RunInspect(Run(count, val)) =>
+let showRun = fn(run) =>
+  match(run) {
+    Run(count, val) =>
       strConcat(strConcat(strConcat("Run(", intToStr(count)), strConcat(",", intToStr(val))), ")")
   }
-}
 
-let showRleList = fix showRleList(runs) => {
-  send "main" Tag Inspect(runs)
-  receive {
-    Inspect(Nil) => "Nil"
-    Inspect(Cons(run, t)) =>
+let showRleList = fix showRleList(runs) =>
+  match(runs) {
+    Nil => "Nil"
+  | Cons(run, t) =>
       strConcat(strConcat(showRun(run), " : "), showRleList(t))
   }
-}
 
 -- ── Lift flat-list operations to RleList via the iso ─────────────────────────
 

@@ -56,7 +56,7 @@ kwN s = kw s *> scn
 -- ─────────────────────────────────────────────────────────────────────────────
 
 keywords :: [String]
-keywords = ["let", "in", "if", "then", "else", "fn", "fix", "iso", "send", "receive", "spawn", "self", "type", "function", "alloc", "dealloc", "getref", "true", "false", "Tag"]
+keywords = ["let", "in", "if", "then", "else", "fn", "fix", "iso", "send", "receive", "spawn", "self", "type", "function", "alloc", "dealloc", "getref", "true", "false", "Tag", "match"]
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- IDENTIFIERS
@@ -121,7 +121,7 @@ parsePattern =
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseExpr :: Parser Expr
-parseExpr = choice [parseLet, try parseIsoDecl, parseIf, parseFix, parseLam, parseSend, parseReceive, parseSpawn, parseAtom]
+parseExpr = choice [parseLet, try parseIsoDecl, parseIf, parseFix, parseLam, parseSend, parseReceive, parseMatch, parseSpawn, parseAtom]
 
 -- let x = rhs              open — body filled in by chainLets
 -- let x = rhs in body      closed
@@ -174,6 +174,26 @@ parseSend = do
   target <- parseAtom
   msg <- parseExpr
   return (Send (Lit VUnit) target msg)
+
+-- match(expr) { Pat => body | Pat => body }
+-- Clauses are separated by '|', newlines, or commas.
+parseMatch :: Parser Expr
+parseMatch = do
+  kw "match"
+  scrutinee <- sym "(" *> parseExpr <* sym ")"
+  sym "{"
+  scn
+  clauses <- sepEndBy1 clause sep
+  scn *> sym "}"
+  return (Match scrutinee clauses)
+  where
+    clause = do
+      optional (void (char '|') *> sc)  -- allow leading | after a newline sep
+      pat <- parsePattern
+      symN "=>"
+      body <- parseExpr
+      return (pat, body)
+    sep = sc *> (void (char '|') <|> void (char ',') <|> void (char '\n')) *> scn
 
 -- receive { Pat => expr, ... }   or   { Pat => expr \n Pat => expr }
 parseReceive :: Parser Expr
@@ -289,7 +309,6 @@ parseProgram = do
     progSep = sc *> (void (char '\n') <|> void (char ';')) *> scn
 
 parseFile :: String -> String -> Either String Expr
-parseFile fname src =
-  case runParser parseProgram fname src of
-    Left err -> Left (errorBundlePretty err)
-    Right ast -> Right ast
+parseFile fname src = case runParser parseProgram fname src of
+  Left err -> Left (errorBundlePretty err)
+  Right ast -> Right ast
