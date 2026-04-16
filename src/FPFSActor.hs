@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 -- All other processes send typed messages; the actor handles them sequentially, batching writes into transactions, serving reads from the cached index without touching the log at all.
@@ -8,19 +7,15 @@ module FPFSActor where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.STM
-import Control.Monad (forM_, forever, void, when)
-import Data.Map.Strict (Map)
+import Control.Monad (forM_, void)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
-import Data.Word (Word64)
 import FPFS
 
 -- ---------------------------------------------------------------------------
 -- Request / Response types  (the typed message protocol)
 -- ---------------------------------------------------------------------------
 
--- Each request carries a reply channel so the sender can await the result.
--- In a real FP-RISC actor system this would be a typed oneshot port.
+-- Each request carries a reply channel so the sender can await the result. In a real FP-RISC actor system this would be a typed oneshot port.
 type ReplyTo a = TMVar a
 
 data FsRequest = ReqResolve FilePath String (ReplyTo ResolveResult) | ReqSearch [Tag] (ReplyTo [Node]) | ReqByName String (ReplyTo [Node]) | ReqWrite String [Tag] NodePayload (ReplyTo (Either FsError NodeAddr)) | ReqDelete NodeAddr (ReplyTo (Either FsError ())) | ReqTag NodeAddr Tag (ReplyTo (Either FsError ())) | ReqUntag NodeAddr TagName (ReplyTo (Either FsError ())) | ReqCompact (ReplyTo ()) | ReqFlush (ReplyTo ()) | ReqShutdown

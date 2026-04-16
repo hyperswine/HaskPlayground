@@ -1,12 +1,15 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use <$>" #-}
+{-# HLINT ignore "Use record patterns" #-}
 
 module FPInterpreter (Expr (..), Pattern (..), Value (..), TypeName, Env, primEnv, ActorState (..), ActorM (..), runProgram, eval) where
 
 import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Monad (forM_, void, when)
+import Control.Monad (void, when)
 import Data.IORef
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -138,23 +141,13 @@ type ActorAddr = (ProcessId, ActorId)
 
 type HeapRef = Int
 
-data Heap = Heap
-  { heapCells :: Map HeapRef (Value, Int), -- value + refcount
-    heapNextRef :: HeapRef
-  }
+-- heapCells: value + refcount
+data Heap = Heap {heapCells :: Map HeapRef (Value, Int), heapNextRef :: HeapRef}
 
-emptyHeap :: Heap
 emptyHeap = Heap Map.empty 0
 
 heapAlloc :: Value -> Heap -> (HeapRef, Heap)
-heapAlloc v h =
-  let ref = heapNextRef h
-   in ( ref,
-        h
-          { heapCells = Map.insert ref (v, 1) (heapCells h),
-            heapNextRef = ref + 1
-          }
-      )
+heapAlloc v h = let ref = heapNextRef h in (ref, h {heapCells = Map.insert ref (v, 1) (heapCells h), heapNextRef = ref + 1})
 
 heapDealloc :: HeapRef -> Heap -> Heap
 heapDealloc ref h =
@@ -176,10 +169,7 @@ heapGet ref h =
 mailboxCapacity :: Int
 mailboxCapacity = 64
 
-data Mailbox = Mailbox
-  { mbQueue :: TQueue Value,
-    mbSize :: TVar Int
-  }
+data Mailbox = Mailbox {mbQueue :: TQueue Value, mbSize :: TVar Int}
 
 newMailbox :: STM Mailbox
 newMailbox = Mailbox <$> newTQueue <*> newTVar 0
@@ -216,8 +206,7 @@ newIsoMap :: IO IsoMap
 newIsoMap = newTVarIO Map.empty
 
 isoRegister :: IsoMap -> TypeName -> TypeName -> Value -> Value -> IO ()
-isoRegister im a b fwd bkwd =
-  atomically $ modifyTVar' im (Map.insert (a, b) (fwd, bkwd))
+isoRegister im a b fwd bkwd = atomically $ modifyTVar' im (Map.insert (a, b) (fwd, bkwd))
 
 isoLookup :: IsoMap -> TypeName -> TypeName -> IO (Maybe (Value, Value))
 isoLookup im a b = Map.lookup (a, b) <$> readTVarIO im
@@ -232,8 +221,7 @@ newRegistry :: IO Registry
 newRegistry = newTVarIO Map.empty
 
 registryRegister :: Registry -> ActorId -> Mailbox -> IO ()
-registryRegister reg aid mb =
-  atomically $ modifyTVar' reg (Map.insert aid mb)
+registryRegister reg aid mb = atomically $ modifyTVar' reg (Map.insert aid mb)
 
 registryLookup :: Registry -> ActorId -> IO (Maybe Mailbox)
 registryLookup reg aid = Map.lookup aid <$> readTVarIO reg
@@ -243,13 +231,8 @@ registryLookup reg aid = Map.lookup aid <$> readTVarIO reg
 -- Bundles an actor's private heap with the shared registry and iso map.
 -- -----------------------------------------------------------------------------
 
-data ActorState = ActorState
-  { actorAddr :: ActorAddr,
-    actorHeap :: IORef Heap,
-    actorMailbox :: Mailbox,
-    actorRegistry :: Registry, -- shared across all actors in process
-    actorIsoMap :: IsoMap -- shared across all actors in process
-  }
+-- actorRegistry: shared across all actors in process. actorIsoMap: shared across all actors in process
+data ActorState = ActorState {actorAddr :: ActorAddr, actorHeap :: IORef Heap, actorMailbox :: Mailbox, actorRegistry :: Registry, actorIsoMap :: IsoMap}
 
 -- =============================================================================
 -- STAGE 4 ── EFFECT LAYER  (ActorM monad)
@@ -270,14 +253,13 @@ instance Monad ActorM where
   ActorM x >>= f = ActorM $ \s -> x s >>= \a -> runActorM (f a) s
 
 liftIO :: IO a -> ActorM a
-liftIO io = ActorM (const io)
+liftIO io = ActorM $ const io
 
 getActorState :: ActorM ActorState
 getActorState = ActorM return
 
 actorFail :: String -> ActorM a
-actorFail msg = ActorM $ \st ->
-  error $ "[Actor " ++ show (actorAddr st) ++ "] " ++ msg
+actorFail msg = ActorM $ \st -> error $ "[Actor " ++ show (actorAddr st) ++ "] " ++ msg
 
 -- =============================================================================
 -- STAGE 5 ── EFFECTFUL OPERATIONS
@@ -291,7 +273,7 @@ actorFail msg = ActorM $ \st ->
 
 allocValue :: Value -> ActorM Value
 allocValue v = ActorM $ \st -> do
-  heap <- readIORef (actorHeap st)
+  heap <- readIORef $ actorHeap st
   let (ref, heap') = heapAlloc v heap
   writeIORef (actorHeap st) heap'
   return (VTagged "Ref" [VInt ref])
@@ -318,13 +300,10 @@ actorSend targetId msg = ActorM $ \st -> do
     Nothing -> error $ "send: unknown actor: " ++ targetId
     Just mb -> do
       ok <- atomically (mailboxPush mb msg)
-      when (not ok) $
-        error $
-          "send: mailbox overflow for actor: " ++ targetId
+      when (not ok) $ error $ "send: mailbox overflow for actor: " ++ targetId
 
 actorReceive :: ActorM Value
-actorReceive = ActorM $ \st ->
-  atomically (mailboxPop (actorMailbox st))
+actorReceive = ActorM $ \st -> atomically (mailboxPop (actorMailbox st))
 
 actorSpawn :: ActorState -> Env -> [String] -> Expr -> [Value] -> String -> ActorM Value
 actorSpawn parentState env params body initArgs requestedId = ActorM $ \_ -> do
@@ -337,10 +316,7 @@ actorSpawn parentState env params body initArgs requestedId = ActorM $ \_ -> do
       childState = ActorState childAddr ref mb reg im
       childEnv = foldr (\(p, v) e -> envExtend p v e) env (zip params initArgs)
   registryRegister reg actualId mb
-  void $
-    forkIO $
-      void $
-        runActorM (eval childEnv body) childState
+  void $ forkIO $ void $ runActorM (eval childEnv body) childState
   return (VAddr childAddr)
 
 actorCounter :: IORef Int
@@ -355,9 +331,9 @@ freshActorId reg base = do
     else do
       n <- atomicModifyIORef' actorCounter (\n -> (n + 1, n))
       let candidate = base ++ "-" ++ show n
-      if candidate `Map.notMember` m
-        then return candidate
-        else freshActorId reg base -- retry on collision
+
+      -- retry on collision on else
+      if candidate `Map.notMember` m then return candidate else freshActorId reg base
 
 -- =============================================================================
 -- STAGE 6 ── EVALUATION
@@ -398,11 +374,7 @@ matchPattern (PLit l) v
   | showVal l == showVal v = Just Map.empty
   | otherwise = Nothing
 matchPattern (PTagged t ps) (VTagged t' vs)
-  | t == t' && length ps == length vs =
-      foldl
-        (\acc (p, v) -> acc >>= \e -> fmap (Map.union e) (matchPattern p v))
-        (Just Map.empty)
-        (zip ps vs)
+  | t == t' && length ps == length vs = foldl (\acc (p, v) -> acc >>= \e -> fmap (Map.union e) (matchPattern p v)) (Just Map.empty) (zip ps vs)
 matchPattern _ _ = Nothing
 
 showVal :: Value -> String
@@ -410,10 +382,9 @@ showVal = show
 
 matchClauses :: [(Pattern, Expr)] -> Value -> Maybe (Env, Expr)
 matchClauses [] _ = Nothing
-matchClauses ((p, e) : rest) v =
-  case matchPattern p v of
-    Just binds -> Just (binds, e)
-    Nothing -> matchClauses rest v
+matchClauses ((p, e) : rest) v = case matchPattern p v of
+  Just binds -> Just (binds, e)
+  Nothing -> matchClauses rest v
 
 -- -----------------------------------------------------------------------------
 -- § eval  (the main reduction table)
@@ -535,23 +506,7 @@ runProgram baseEnv prog = do
 -- =============================================================================
 
 primEnv :: Env
-primEnv =
-  Map.fromList
-    [ ("println", VPrim "println" primPrintln),
-      ("intAdd", VPrim "intAdd" primIntAdd),
-      ("intSub", VPrim "intSub" primIntSub),
-      ("intMul", VPrim "intMul" primIntMul),
-      ("intEq", VPrim "intEq" primIntEq),
-      ("strConcat", VPrim "strConcat" primStrConcat),
-      ("typeEq", VPrim "typeEq" primTypeEq),
-      ("intToStr", VPrim "intToStr" primIntToStr),
-      ("showVal", VPrim "showVal" primShowVal),
-      ("tagPayload", VPrim "tagPayload" primTagPayload),
-      ("withIso", VPrim "withIso" primWithIso),
-      ("true", VBool True),
-      ("false", VBool False),
-      ("unit", VUnit)
-    ]
+primEnv = Map.fromList [("println", VPrim "println" primPrintln), ("intAdd", VPrim "intAdd" primIntAdd), ("intSub", VPrim "intSub" primIntSub), ("intMul", VPrim "intMul" primIntMul), ("intEq", VPrim "intEq" primIntEq), ("strConcat", VPrim "strConcat" primStrConcat), ("typeEq", VPrim "typeEq" primTypeEq), ("intToStr", VPrim "intToStr" primIntToStr), ("showVal", VPrim "showVal" primShowVal), ("tagPayload", VPrim "tagPayload" primTagPayload), ("withIso", VPrim "withIso" primWithIso), ("true", VBool True), ("false", VBool False), ("unit", VUnit)]
 
 primPrintln :: [Value] -> ActorM Value
 primPrintln [v] = liftIO (putStrLn (show v)) >> return VUnit
@@ -605,10 +560,8 @@ primWithIso [VTagged "Just" [VTagged "Pair" [fwd, bkwd]], val] = do
     putStrLn $ "fwd applied: " ++ show forwarded
     putStrLn $ "bkwd applied: " ++ show restored
   return VUnit
-primWithIso [VTagged "Nothing" [], _] =
-  actorFail "withIso: iso not found"
-primWithIso _ =
-  actorFail "withIso: bad arguments"
+primWithIso [VTagged "Nothing" [], _] = actorFail "withIso: iso not found"
+primWithIso _ = actorFail "withIso: bad arguments"
 
 -- =============================================================================
 -- EXAMPLES  (inline test programs; main entry point is in Main.hs)

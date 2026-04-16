@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
+{-# HLINT ignore "Use <$>" #-}
 
 module FParser (parseExpr, parseProgram, parseFile) where
 
@@ -53,28 +56,7 @@ kwN s = kw s *> scn
 -- ─────────────────────────────────────────────────────────────────────────────
 
 keywords :: [String]
-keywords =
-  [ "let",
-    "in",
-    "if",
-    "then",
-    "else",
-    "fn",
-    "fix",
-    "iso",
-    "send",
-    "receive",
-    "spawn",
-    "self",
-    "type",
-    "function",
-    "alloc",
-    "dealloc",
-    "getref",
-    "true",
-    "false",
-    "Tag"
-  ]
+keywords = ["let", "in", "if", "then", "else", "fn", "fix", "iso", "send", "receive", "spawn", "self", "type", "function", "alloc", "dealloc", "getref", "true", "false", "Tag"]
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- IDENTIFIERS
@@ -88,9 +70,7 @@ lowerIdent = lexeme . try $ do
   c <- lowerChar
   cs <- many identChar
   let name = c : cs
-  if name `elem` keywords
-    then fail (show name ++ " is a keyword")
-    else return name
+  if name `elem` keywords then fail (show name ++ " is a keyword") else return name
 
 upperIdent :: Parser String
 upperIdent = lexeme $ (:) <$> upperChar <*> many identChar
@@ -129,15 +109,7 @@ parseLit = Lit <$> choice [parseListLit, parseUnit, parseBool, parseStr, parseIn
 
 parsePattern :: Parser Pattern
 parsePattern =
-  choice
-    [ PWild <$ lexeme (try (string "_" <* notFollowedBy identChar)),
-      PLit (VBool True) <$ kw "true",
-      PLit (VBool False) <$ kw "false",
-      PLit VUnit <$ lexeme (try (string "()")),
-      PLit . VInt <$> lexeme (L.signed sc L.decimal),
-      tagPat,
-      PVar <$> lowerIdent
-    ]
+  choice [PWild <$ lexeme (try (string "_" <* notFollowedBy identChar)), PLit (VBool True) <$ kw "true", PLit (VBool False) <$ kw "false", PLit VUnit <$ lexeme (try (string "()")), PLit . VInt <$> lexeme (L.signed sc L.decimal), tagPat, PVar <$> lowerIdent]
   where
     tagPat = do
       t <- upperIdent
@@ -149,18 +121,7 @@ parsePattern =
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseExpr :: Parser Expr
-parseExpr =
-  choice
-    [ parseLet,
-      try parseIsoDecl,
-      parseIf,
-      parseFix,
-      parseLam,
-      parseSend,
-      parseReceive,
-      parseSpawn,
-      parseAtom
-    ]
+parseExpr = choice [parseLet, try parseIsoDecl, parseIf, parseFix, parseLam, parseSend, parseReceive, parseSpawn, parseAtom]
 
 -- let x = rhs              open — body filled in by chainLets
 -- let x = rhs in body      closed
@@ -257,21 +218,7 @@ parseIsoDecl = do
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseAtom :: Parser Expr
-parseAtom =
-  choice
-    [ parseLit,
-      parseBlock,
-      Self <$ kw "self",
-      TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"),
-      FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"),
-      Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"),
-      Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"),
-      GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"),
-      parseLookupIso,
-      parseTagExpr,
-      parseVarOrApp,
-      parseParens
-    ]
+parseAtom = choice [parseLit, parseBlock, Self <$ kw "self", TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"), FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"), Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"), Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"), GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"), parseLookupIso, parseTagExpr, parseVarOrApp, parseParens]
 
 -- { stmt \n stmt \n stmt }  or  { stmt; stmt; stmt }
 parseBlock :: Parser Expr
@@ -338,8 +285,7 @@ parseProgram = do
   eof
   return (chainLets exprs)
   where
-    -- After sc-based lexemes we're always sitting AT the newline/semicolon.
-    -- Consume it plus any surrounding whitespace.
+    -- After sc-based lexemes we're always sitting AT the newline/semicolon. Consume it plus any surrounding whitespace.
     progSep = sc *> (void (char '\n') <|> void (char ';')) *> scn
 
 parseFile :: String -> String -> Either String Expr
