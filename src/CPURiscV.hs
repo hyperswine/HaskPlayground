@@ -758,11 +758,13 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, memCtrl, en)
           ifid' =
             if loadUseHazard
               then ifid  -- hold
-              else IfIdReg
-                     { ifidValid = True
-                     , ifidPC    = rvPC
-                     , ifidInstr = instrWord
-                     }
+              else if squash
+                then emptyIfId  -- branch/jump taken: kill the speculatively-fetched instruction
+                else IfIdReg
+                       { ifidValid = True
+                       , ifidPC    = rvPC
+                       , ifidInstr = instrWord
+                       }
 
           s' = s
             { rvPC   = nextPC

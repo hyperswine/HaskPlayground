@@ -28,12 +28,12 @@
 
 /* ── Register conventions ─────────────────────────────────────────────── */
 /* s0  : UART_TX address (0x0001_0000)                                     */
-/* sp  : stack pointer into data RAM (grows downward, byte granularity)    */
+/* sp  : stack pointer into data RAM (grows downward, word granularity)    */
 /* ra  : return address (set by jal / used by ret)                         */
 
 _start:
     lui  s0, 0x10           /* s0 = 0x00010000 (UART_TX)                  */
-    li   sp, 0xFFC          /* sp = top of data RAM (0x0000_0FFC)         */
+    li   sp, 0xFF8          /* sp = top of data RAM, word-aligned          */
 
     /* ── Print "Sum 1..10 = " ─────────────────────────────────────────── */
     li   a0, 'S' ; sb a0, 0(s0)
@@ -78,8 +78,10 @@ _start:
  *
  * Algorithm:
  *   1. Repeatedly divide by 10 (subtraction loop) and push each remainder
- *      digit (as ASCII) onto the data-RAM stack.
- *   2. Pop digits off the stack and send to UART in correct order.
+ *      digit (as ASCII) onto the data-RAM stack using SW (one full 32-bit
+ *      word per digit).  Full-word stores avoid byte-lane read-modify-
+ *      write on the BRAM, which can silently corrupt sub-word accesses.
+ *   2. Pop digits off the stack with LW and send to UART in correct order.
  * ════════════════════════════════════════════════════════════════════════ */
 print_uint:
     beqz  a0, .Lpu_zero     /* special-case: value is 0                   */
@@ -104,17 +106,17 @@ print_uint:
 .Lpu_div_done:
     /* t3 = remainder (0–9), t5 = quotient */
     addi  t3, t3, '0'       /* convert to ASCII digit                      */
-    addi  sp, sp, -1        /* push digit onto stack                       */
-    sb    t3, 0(sp)
+    addi  sp, sp, -4        /* push digit: one full word per digit         */
+    sw    t3, 0(sp)         /* SW avoids byte-lane RMW on BRAM             */
     addi  t6, t6, 1
     mv    t4, t5            /* advance to quotient for next iteration      */
     j     .Lpu_extract
 
 .Lpu_print:
     beqz  t6, .Lpu_ret      /* no more digits to print                     */
-    lb    t0, 0(sp)         /* pop digit from stack                        */
-    addi  sp, sp, 1
-    sb    t0, 0(s0)         /* send to UART                                */
+    lw    t0, 0(sp)         /* pop digit (full word, no byte-lane issue)   */
+    addi  sp, sp, 4
+    sb    t0, 0(s0)         /* send low byte to UART                       */
     addi  t6, t6, -1
     j     .Lpu_print
 

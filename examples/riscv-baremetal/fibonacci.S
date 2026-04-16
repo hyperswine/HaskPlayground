@@ -46,7 +46,7 @@
 
 _start:
     lui  s0, 0x10           /* s0 = 0x00010000 (UART_TX)                  */
-    li   sp, 0xFFC          /* sp = top of data RAM                        */
+    li   sp, 0xFF8          /* sp = top of data RAM, word-aligned          */
 
     /* Seed values: F(1)=1, F(2)=1 (we print starting from F(1))          */
     li   s1, 0              /* s1 = F(n-1), initialised to 0 (= F(0))     */
@@ -82,8 +82,8 @@ _start:
  * Preserved : s0-s11, sp, ra
  *
  * Digit extraction uses a subtraction-based divide-by-10 loop (RV32I has
- * no hardware divide).  Digits are pushed MSB-last onto the data-RAM stack
- * and then popped in reverse to print most-significant digit first.
+ * no hardware divide).  Digits are stored as full 32-bit words (SW/LW)
+ * to avoid byte-lane read-modify-write hazards on the data BRAM.
  * ════════════════════════════════════════════════════════════════════════ */
 print_uint:
     beqz  a0, .Lpu_zero
@@ -108,17 +108,17 @@ print_uint:
 
 .Lpu_div_done:
     addi  t3, t3, '0'       /* ASCII digit                                 */
-    addi  sp, sp, -1        /* push to data-RAM stack                      */
-    sb    t3, 0(sp)
+    addi  sp, sp, -4        /* push: one full word per digit               */
+    sw    t3, 0(sp)         /* SW avoids byte-lane RMW on BRAM             */
     addi  t6, t6, 1
     mv    t4, t5            /* continue with quotient                      */
     j     .Lpu_extract
 
 .Lpu_print:
     beqz  t6, .Lpu_ret
-    lb    t0, 0(sp)         /* pop digit                                   */
-    addi  sp, sp, 1
-    sb    t0, 0(s0)         /* send to UART                                */
+    lw    t0, 0(sp)         /* pop digit (full word, no byte-lane issue)   */
+    addi  sp, sp, 4
+    sb    t0, 0(s0)         /* send low byte to UART                       */
     addi  t6, t6, -1
     j     .Lpu_print
 
