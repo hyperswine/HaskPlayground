@@ -305,6 +305,7 @@ actorSend targetId msg = ActorM $ \st -> do
 actorReceive :: ActorM Value
 actorReceive = ActorM $ \st -> atomically (mailboxPop (actorMailbox st))
 
+-- a lot of storage stuff and boiler
 actorSpawn :: ActorState -> Env -> [String] -> Expr -> [Value] -> String -> ActorM Value
 actorSpawn parentState env params body initArgs requestedId = ActorM $ \_ -> do
   let reg = actorRegistry parentState
@@ -373,8 +374,8 @@ matchPattern (PVar x) v = Just (Map.singleton x v)
 matchPattern (PLit l) v
   | showVal l == showVal v = Just Map.empty
   | otherwise = Nothing
-matchPattern (PTagged t ps) (VTagged t' vs)
-  | t == t' && length ps == length vs = foldl (\acc (p, v) -> acc >>= \e -> fmap (Map.union e) (matchPattern p v)) (Just Map.empty) (zip ps vs)
+-- matching a constructor, need to match all its fields
+matchPattern (PTagged t ps) (VTagged t' vs) | t == t' && length ps == length vs = foldl (\acc (p, v) -> acc >>= \e -> fmap (Map.union e) (matchPattern p v)) (Just Map.empty) (zip ps vs)
 matchPattern _ _ = Nothing
 
 showVal :: Value -> String
@@ -413,7 +414,8 @@ eval env = \case
     args <- mapM (eval env) argExprs
     applyFn fv args
   Send addrExpr actorIdExpr msgExpr -> do
-    _addr <- eval env addrExpr -- for inter-process this would carry pid
+    -- for inter-process this would carry pid
+    _addr <- eval env addrExpr
     targetV <- eval env actorIdExpr
     msg <- eval env msgExpr
     let targetId = case targetV of
@@ -475,6 +477,7 @@ eval env = \case
 
 applyFn :: Value -> [Value] -> ActorM Value
 applyFn (VFn _ closedEnv params body) args
+  -- concise way to combine args and params into a map so each param has an arg value, then combine args with external env, prioritizing args
   | length params == length args = eval (Map.union (Map.fromList (zip params args)) closedEnv) body
   | otherwise = actorFail $ "arity mismatch: expected " ++ show (length params) ++ " got " ++ show (length args)
 applyFn (VPrim _ f) args = f args
@@ -572,7 +575,6 @@ primWithIso _ = actorFail "withIso: bad arguments"
 -- typeEq t (type 42)    -- False  (Num vs Int)
 -- typeEq (type 42) (type 99)  -- True
 
-example1 :: Expr
 example1 =
   Seq
     [ Let "x" (Lit (VTagged "Num" [VInt 5])) $
@@ -590,7 +592,6 @@ example1 =
 -- println (getref ref)
 -- dealloc ref
 
-example2 :: Expr
 example2 =
   Seq
     [ Let "ref" (Alloc (Lit (VTagged "Num" [VInt 42]))) $
@@ -605,7 +606,6 @@ example2 =
 -- Spawns a "worker" actor that waits for a message, doubles it, sends back.
 -- Main sends it a number and receives the result.
 
-example3 :: Expr
 example3 =
   Let "workerAddr" (Spawn "worker" (Lam [] workerBody) []) $
     Seq
@@ -648,7 +648,6 @@ example3 =
 -- println (function f)    -- "<lambda>"
 -- println (function println)  -- "println"
 
-example4 :: Expr
 example4 =
   Let "f" (Lam ["x"] (App (Var "intAdd") [Var "x", Lit (VInt 1)])) $
     Seq
@@ -660,7 +659,6 @@ example4 =
 -- fact = fix fact (n) = if n == 0 then 1 else n * fact (n - 1)
 -- println (fact 6)   →  720
 
-example5 :: Expr
 example5 =
   Let
     "fact"
@@ -705,7 +703,6 @@ example5 =
 -- println (fwd (MyList [1,2,3]))   → [1,2,3]  (as VList)
 -- println (bkwd [1,2,3])           → (MyList [1,2,3])
 
-example6 :: Expr
 example6 =
   -- Helper defined first so the iso closure can capture it
   Let
@@ -748,5 +745,3 @@ example6 =
                 [Lit (VStr "iso Foo Bar: "), App (Var "showVal") [Var "missing"]]
             ]
       ]
-
--- Examples and main entry point are in Main.hs

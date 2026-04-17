@@ -6,6 +6,26 @@
 
 {-# HLINT ignore "Replace case with fromMaybe" #-}
 
+{-
+  NEW ADDITION NEEDED:
+    modules
+
+    <- import "mymod#6b4a8d9bb812da79960334da2d1c17b3dee686c0".
+
+    main <- mymod:myprint "hi".
+
+    > main
+
+
+  Hash is calculated from the SHA-1 of the filepath. So 6b4a8d9bb812da79960334da2d1c17b3dee686c0 from /Users/jasonqin/Documents/GitHub/HaskPlayground/examples/mymod.nprolog
+  Each .nprolog can be registered with `nprolog reg <path>` which creates a local nprolog.conf file that stores these things that can then be used with
+  <- import "mymod#6b4a8d9bb812da79960334da2d1c17b3dee686c0". in another file that uses the nprolog.conf
+  The current nprolog.conf in the current working directory is loaded, otherwise use the ~/nprolog/nprolog.conf one
+
+  All importing something does is load the file into the database but prepend all the clause names with the name of the module like `mymod:`
+  so you can reference any functor from the file using mymod:<name>
+-}
+
 module NProlog where
 
 import qualified Control.Exception as CE
