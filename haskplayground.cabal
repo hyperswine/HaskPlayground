@@ -66,6 +66,7 @@ library
     , bytestring
     , clash-prelude
     , containers
+    , cryptohash-sha1
     , directory
     , filepath
     , free
@@ -113,6 +114,7 @@ executable haskplayground-exe
     , bytestring
     , clash-prelude
     , containers
+    , cryptohash-sha1
     , directory
     , filepath
     , free
@@ -168,6 +170,7 @@ test-suite haskplayground-test
     , bytestring
     , clash-prelude
     , containers
+    , cryptohash-sha1
     , directory
     , filepath
     , free

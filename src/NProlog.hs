@@ -32,6 +32,9 @@ import qualified Control.Exception as CE
 import Control.Monad (foldM)
 import Control.Monad.Combinators.Expr
 import Control.Monad.IO.Class (liftIO)
+import qualified Crypto.Hash.SHA1 as SHA1
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import Data.IORef (modifyIORef, newIORef, readIORef, writeIORef)
 import Data.List (dropWhileEnd, intercalate, isPrefixOf, nub)
 import Data.Map.Strict (Map)
@@ -39,10 +42,13 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (unpack)
 import Data.Void
+import Numeric (showHex)
 import Prettyprinter
 import Prettyprinter.Render.Terminal
 import System.Console.Haskeline
+import System.Directory (canonicalizePath, createDirectoryIfMissing, doesFileExist, getHomeDirectory)
 import System.Environment (getArgs)
+import System.FilePath (takeBaseName, (</>))
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -51,7 +57,7 @@ data Term = Atom String | Var String | IntLit Integer | FloatLit Double | CharLi
 
 data Clause = Clause {clauseHead :: Term, clauseBody :: [Term]} deriving (Show, Eq)
 
-data TopLevel = TLClause Clause | TLQuery [Term] deriving (Show, Eq)
+data TopLevel = TLClause Clause | TLQuery [Term] | TLDirective [Term] deriving (Show, Eq)
 
 type Program = [Clause]
 
@@ -92,7 +98,17 @@ pAtomIdent = lexeme $ do
   cs <- many $ alphaNumChar <|> char '_'
 
   let name = c : cs
-  if name == "_" then fail "underscore is a variable" else return name
+  if name == "_" then fail "underscore is a variable" else do
+    -- Optionally parse :qualifier for module-qualified names (but not :: cons operator)
+    qual <- optional $ try $ do
+      char ':'
+      notFollowedBy $ char ':'
+      c' <- lowerChar <|> char '_'
+      cs' <- many $ alphaNumChar <|> char '_'
+      return $ c' : cs'
+    return $ case qual of
+      Nothing -> name
+      Just q  -> name ++ ":" ++ q
 
 pVarIdent = lexeme $ do
   c <- upperChar
@@ -230,7 +246,14 @@ pInlineQuery = do
   symbol "." <|> symbol "?"
   return goals
 
-pTopLevel = try (TLQuery <$> pInlineQuery) <|> (TLClause <$> pClause)
+pTopLevel = try (TLQuery <$> pInlineQuery) <|> try (TLDirective <$> pDirective) <|> (TLClause <$> pClause)
+
+pDirective :: Parser [Term]
+pDirective = do
+  symbol "<-"
+  goals <- pGoals
+  symbol "."
+  return goals
 
 pFile = sc *> many pTopLevel <* eof
 
@@ -467,6 +490,114 @@ runProlog programSrc querySrc = do
   let solns = solveAll prog goals
   if null solns then return ["false."] else return $ map showSolution solns
 
+-- ─── MODULE SYSTEM ───────────────────────────────────────────────────────────────────────────
+
+-- SHA-1 hex digest of a string (used to hash file paths for module IDs)
+sha1Hex :: String -> String
+sha1Hex s = concatMap byte2hex $ BS.unpack $ SHA1.hash $ BSC.pack s
+  where
+    byte2hex b = let h = showHex b "" in if length h == 1 then '0' : h else h
+
+type ModuleConf = Map String FilePath
+
+-- Find nprolog.conf: prefer current directory, fall back to ~/nprolog/nprolog.conf
+findNPrologConf :: IO (Maybe FilePath)
+findNPrologConf = do
+  let local = "nprolog.conf"
+  localExists <- doesFileExist local
+  if localExists
+    then return (Just local)
+    else do
+      home <- getHomeDirectory
+      let homeConf = home </> "nprolog" </> "nprolog.conf"
+      homeExists <- doesFileExist homeConf
+      return $ if homeExists then Just homeConf else Nothing
+
+-- Load nprolog.conf into a map from "modname#hash" -> absolute filepath
+loadNPrologConf :: IO ModuleConf
+loadNPrologConf = do
+  mpath <- findNPrologConf
+  case mpath of
+    Nothing -> return Map.empty
+    Just path -> do
+      contents <- readFile path
+      let lineWords = map words $ filter (\l -> not (null l) && head l /= '#') (lines contents)
+      return $ Map.fromList [(k, fp) | [k, fp] <- lineWords]
+
+-- Register a .nprolog file: compute its module ID (name#sha1-of-path) and write to ./nprolog.conf
+registerModule :: FilePath -> IO ()
+registerModule path = do
+  absPath <- canonicalizePath path
+  let modName = takeBaseName absPath
+      hash    = sha1Hex absPath
+      key     = modName ++ "#" ++ hash
+      entry   = key ++ " " ++ absPath ++ "\n"
+  appendFile "nprolog.conf" entry
+  putStrLn $ "Registered " ++ key ++ " -> " ++ absPath
+
+-- Parse a "modname#hash" module reference string
+parseModRef :: String -> Maybe (String, String)
+parseModRef s = case break (== '#') s of
+  (modName, '#' : hash) | not (null modName), not (null hash) -> Just (modName, hash)
+  _ -> Nothing
+
+-- Collect the set of functor names defined at the heads of clauses
+moduleFunctors :: [Clause] -> [String]
+moduleFunctors cs = nub [f | Clause hd _ <- cs, f <- headFunctor hd]
+  where
+    headFunctor (Atom f)        = [f]
+    headFunctor (Compound f _)  = [f]
+    headFunctor _               = []
+
+-- Qualify a functor name if it's in the known set
+qualifyFunctor :: String -> [String] -> Term -> Term
+qualifyFunctor m known (Atom f)       | f `elem` known = Atom (m ++ ":" ++ f)
+qualifyFunctor m known (Compound f as)| f `elem` known = Compound (m ++ ":" ++ f) (map (qualifyTerm m known) as)
+qualifyFunctor m known (Compound f as)                 = Compound f (map (qualifyTerm m known) as)
+qualifyFunctor m known (TList xs rest)                 = TList (map (qualifyTerm m known) xs) (fmap (qualifyTerm m known) rest)
+qualifyFunctor _ _     t                               = t
+
+qualifyTerm :: String -> [String] -> Term -> Term
+qualifyTerm = qualifyFunctor
+
+-- Prefix clause head and rewrite all body references to module-defined functors
+qualifyClause :: String -> [String] -> Clause -> Clause
+qualifyClause modName known (Clause hd body) =
+  Clause (qualifyFunctor modName known hd) (map (qualifyFunctor modName known) body)
+
+-- Load a module file and return its clauses prefixed with the module name
+processImport :: ModuleConf -> String -> IO (Either String [Clause])
+processImport conf modRef = case parseModRef modRef of
+  Nothing -> return $ Left $ "Invalid module reference: " ++ modRef
+  Just (modName, _) -> case Map.lookup modRef conf of
+    Nothing -> return $ Left $ "Module '" ++ modRef ++ "' not found in nprolog.conf"
+    Just fp -> do
+      result <- CE.try (readFile fp) :: IO (Either CE.SomeException String)
+      case result of
+        Left ex -> return $ Left (show ex)
+        Right contents -> case parseFile contents of
+          Left err -> return $ Left err
+          Right items -> do
+            let rawClauses = [c | TLClause c <- items]
+                known      = moduleFunctors rawClauses
+            -- Rewrite head AND body references so intra-module calls are qualified
+            return $ Right (map (qualifyClause modName known) rawClauses)
+
+-- Process a list of top-level items, resolving import directives against the conf
+processTopLevels :: ModuleConf -> [TopLevel] -> IO (Either String ([Clause], [[Term]]))
+processTopLevels conf = foldM step (Right ([], []))
+  where
+    step (Left e) _ = return (Left e)
+    step (Right (cs, qs)) (TLClause c) = return $ Right (cs ++ [c], qs)
+    step (Right (cs, qs)) (TLQuery gs) = return $ Right (cs, qs ++ [gs])
+    step (Right (cs, qs)) (TLDirective [Compound "import" [StrLit ref]]) = do
+      res <- processImport conf ref
+      case res of
+        Left e       -> return $ Left e
+        Right newCs  -> return $ Right (cs ++ newCs, qs)
+    step (Right _) (TLDirective goals) =
+      return $ Left $ "Unknown directive: " ++ show goals
+
 -- ─── REPL and Completion and PP ───────────────────────────────────────────────────────────────
 
 renderDoc = unpack . renderStrict . layoutPretty defaultLayoutOptions
@@ -566,10 +697,13 @@ runPrologRepl = do
         Right contents -> case parseFile contents of
           Left err -> return $ Left err
           Right items -> do
-            let clauses = [c | TLClause c <- items]
-                queries = [gs | TLQuery gs <- items]
-            liftIO $ writeIORef progRef clauses
-            return $ Right (length clauses, queries)
+            conf <- liftIO loadNPrologConf
+            procResult <- liftIO $ processTopLevels conf items
+            case procResult of
+              Left err -> return $ Left err
+              Right (clauses, queries) -> do
+                liftIO $ writeIORef progRef clauses
+                return $ Right (length clauses, queries)
 
     runInlineQuery prog goals = do
       let queryLabel = annotate (colorDull White) (pretty "> ") <> hsep (punctuate comma (map (pretty . show) goals))
@@ -578,4 +712,9 @@ runPrologRepl = do
       let solns = solveAll prog goals
       if null solns then outputStrLn $ renderDoc $ annotate (bold <> color Red) (pretty "false.") else mapM_ (outputStrLn . renderDoc . docSolution) solns
 
-main = runPrologRepl
+main :: IO ()
+main = do
+  args <- getArgs
+  case args of
+    ("reg" : paths) -> mapM_ registerModule paths
+    _               -> runPrologRepl

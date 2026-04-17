@@ -24,6 +24,7 @@ dependencies:
 - linear
 - vector
 - bytestring
+- cryptohash-sha1
 - async
 - time
 - text

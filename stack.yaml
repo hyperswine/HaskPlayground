@@ -6,3 +6,5 @@ packages:
 extra-deps: []
 
 allow-newer: true
+
+local-bin-path: scripts
