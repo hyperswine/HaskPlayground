@@ -1,0 +1,43 @@
+-- vfs-multi-fd.fplang
+--
+-- Tests that multiple files can be open simultaneously and that fseek resets
+-- state independently per file descriptor.
+--
+-- "/dev/counter" increments on every read.
+-- fseek(fd, 0) resets the counter for that fd back to zero.
+--
+-- Expected output:
+--   [fd-a] read 0
+--   [fd-b] read 0
+--   [fd-a] read 1
+--   [fd-b] read 1
+--   --- seek fd-a back to 0 ---
+--   [fd-a] after seek: 0
+--   [fd-b] still advancing: 2
+
+let fda = fopen("/dev/counter")
+let fdb = fopen("/dev/counter")
+
+let a0 = fread(fda)
+println(strConcat("[fd-a] read ", intToStr(a0)))
+
+let b0 = fread(fdb)
+println(strConcat("[fd-b] read ", intToStr(b0)))
+
+let a1 = fread(fda)
+println(strConcat("[fd-a] read ", intToStr(a1)))
+
+let b1 = fread(fdb)
+println(strConcat("[fd-b] read ", intToStr(b1)))
+
+println("--- seek fd-a back to 0 ---")
+fseek(fda, 0)
+
+let a2 = fread(fda)
+println(strConcat("[fd-a] after seek: ", intToStr(a2)))
+
+let b2 = fread(fdb)
+println(strConcat("[fd-b] still advancing: ", intToStr(b2)))
+
+fclose(fda)
+fclose(fdb)

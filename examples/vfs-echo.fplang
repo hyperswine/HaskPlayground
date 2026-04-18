@@ -1,0 +1,25 @@
+-- vfs-echo.fplang
+--
+-- Tests fopen / fwrite / fread / fclose against the "/dev/echo" virtual device.
+-- The device stores the last value written; reading returns it (or unit if
+-- nothing has been written yet).
+--
+-- Expected output:
+--   echo before write: ()
+--   echo after first write: "hello from fplang"
+--   echo after second write: "second message"
+
+let fd = fopen("/dev/echo")
+
+let before = fread(fd)
+println(strConcat("echo before write: ", showVal(before)))
+
+fwrite(fd, "hello from fplang")
+let after1 = fread(fd)
+println(strConcat("echo after first write: ", showVal(after1)))
+
+fwrite(fd, "second message")
+let after2 = fread(fd)
+println(strConcat("echo after second write: ", showVal(after2)))
+
+fclose(fd)

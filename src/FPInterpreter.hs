@@ -6,7 +6,7 @@
 {-# HLINT ignore "Use record patterns" #-}
 {-# HLINT ignore "Use unless" #-}
 
-module FPInterpreter (Expr (..), Pattern (..), Value (..), TypeName, Env, primEnv, ActorState (..), ActorM (..), runProgram, eval) where
+module FPInterpreter (Expr (..), Pattern (..), Value (..), TypeName, Env, primEnv, ActorState (..), ActorM (..), runProgram, eval, VFSHandlers (..), VFSMap, emptyVFSMap) where
 
 import Control.Concurrent
 import Control.Concurrent.STM
@@ -16,6 +16,40 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import System.IO.Unsafe (unsafePerformIO)
+
+-- =============================================================================
+-- VIRTUAL FILE SYSTEM TYPES
+-- Allows Haskell code to register path-keyed handlers that fplang can call
+-- via fopen / fread / fwrite / fclose / fseek.
+-- =============================================================================
+
+-- | Per-path handler bundle.  Each handler receives the current mutable file
+--   state plus any extra arguments supplied by fplang.
+--   open  : extra args (e.g. mode)           → initial state
+--   read  : (current state, extra args)      → (result data, new state)
+--   write : (current state, extra args)      → new state
+--   close : current state                    → ()
+--   seek  : (current state, extra args)      → new state
+data VFSHandlers = VFSHandlers
+  { vhOpen  :: [Value] -> ActorM Value
+  , vhRead  :: Value -> [Value] -> ActorM (Value, Value)
+  , vhWrite :: Value -> [Value] -> ActorM Value
+  , vhClose :: Value -> ActorM ()
+  , vhSeek  :: Value -> [Value] -> ActorM Value
+  }
+
+type VFSMap = Map FilePath VFSHandlers
+
+emptyVFSMap :: VFSMap
+emptyVFSMap = Map.empty
+
+-- | One entry in an actor's open-file-descriptor table.
+data FDEntry = FDEntry
+  { fdeHandlers :: VFSHandlers
+  , fdeState    :: IORef Value   -- mutable per-fd state (position, buffers, …)
+  }
+
+type FDTable = Map Int FDEntry
 
 -- =============================================================================
 -- STAGE 1 ── AST TYPES
@@ -232,8 +266,18 @@ registryLookup reg aid = Map.lookup aid <$> readTVarIO reg
 -- Bundles an actor's private heap with the shared registry and iso map.
 -- -----------------------------------------------------------------------------
 
--- actorRegistry: shared across all actors in process. actorIsoMap: shared across all actors in process
-data ActorState = ActorState {actorAddr :: ActorAddr, actorHeap :: IORef Heap, actorMailbox :: Mailbox, actorRegistry :: Registry, actorIsoMap :: IsoMap}
+-- actorRegistry: shared across all actors in process. actorIsoMap: shared across all actors in process.
+-- actorVFS: read-only virtual file system shared across all actors in the process.
+-- actorFDTable: per-actor open file-descriptor table (private mutable state).
+data ActorState = ActorState
+  { actorAddr     :: ActorAddr
+  , actorHeap     :: IORef Heap
+  , actorMailbox  :: Mailbox
+  , actorRegistry :: Registry
+  , actorIsoMap   :: IsoMap
+  , actorVFS      :: VFSMap
+  , actorFDTable  :: IORef FDTable
+  }
 
 -- =============================================================================
 -- STAGE 4 ── EFFECT LAYER  (ActorM monad)
@@ -310,11 +354,13 @@ actorSpawn :: ActorState -> Env -> [String] -> Expr -> [Value] -> String -> Acto
 actorSpawn parentState env params body initArgs requestedId = ActorM $ \_ -> do
   let reg = actorRegistry parentState
       im = actorIsoMap parentState
+      vfs = actorVFS parentState
   actualId <- freshActorId reg requestedId
   mb <- atomically newMailbox
   ref <- newIORef emptyHeap
+  childFDTable <- newIORef Map.empty   -- each actor gets its own fresh FD table
   let childAddr = (fst (actorAddr parentState), actualId)
-      childState = ActorState childAddr ref mb reg im
+      childState = ActorState childAddr ref mb reg im vfs childFDTable
       childEnv = foldr (\(p, v) e -> envExtend p v e) env (zip params initArgs)
   registryRegister reg actualId mb
   void $ forkIO $ void $ runActorM (eval childEnv body) childState
@@ -489,14 +535,15 @@ applyFn v _ = actorFail $ "apply: not a function: " ++ show v
 -- a program expression in the context of a "main" actor.
 -- =============================================================================
 
-runProgram :: Env -> Expr -> IO Value
-runProgram baseEnv prog = do
+runProgram :: Env -> VFSMap -> Expr -> IO Value
+runProgram baseEnv vfs prog = do
   reg <- newRegistry
   im <- newIsoMap
   mb <- atomically newMailbox
   heap <- newIORef emptyHeap
+  fdTable <- newIORef Map.empty
   let addr = (0, "main")
-      state = ActorState addr heap mb reg im
+      state = ActorState addr heap mb reg im vfs fdTable
   registryRegister reg "main" mb
   runActorM (eval baseEnv prog) state
 
@@ -507,7 +554,28 @@ runProgram baseEnv prog = do
 -- =============================================================================
 
 primEnv :: Env
-primEnv = Map.fromList [("println", VPrim "println" primPrintln), ("intAdd", VPrim "intAdd" primIntAdd), ("intSub", VPrim "intSub" primIntSub), ("intMul", VPrim "intMul" primIntMul), ("intEq", VPrim "intEq" primIntEq), ("strConcat", VPrim "strConcat" primStrConcat), ("typeEq", VPrim "typeEq" primTypeEq), ("intToStr", VPrim "intToStr" primIntToStr), ("showVal", VPrim "showVal" primShowVal), ("tagPayload", VPrim "tagPayload" primTagPayload), ("withIso", VPrim "withIso" primWithIso), ("true", VBool True), ("false", VBool False), ("unit", VUnit)]
+primEnv = Map.fromList
+  [ ("println",    VPrim "println"    primPrintln)
+  , ("intAdd",     VPrim "intAdd"     primIntAdd)
+  , ("intSub",     VPrim "intSub"     primIntSub)
+  , ("intMul",     VPrim "intMul"     primIntMul)
+  , ("intEq",      VPrim "intEq"      primIntEq)
+  , ("strConcat",  VPrim "strConcat"  primStrConcat)
+  , ("typeEq",     VPrim "typeEq"     primTypeEq)
+  , ("intToStr",   VPrim "intToStr"   primIntToStr)
+  , ("showVal",    VPrim "showVal"    primShowVal)
+  , ("tagPayload", VPrim "tagPayload" primTagPayload)
+  , ("withIso",    VPrim "withIso"    primWithIso)
+  -- Virtual UNIX file API
+  , ("fopen",      VPrim "fopen"      primFOpen)
+  , ("fread",      VPrim "fread"      primFRead)
+  , ("fwrite",     VPrim "fwrite"     primFWrite)
+  , ("fclose",     VPrim "fclose"     primFClose)
+  , ("fseek",      VPrim "fseek"      primFSeek)
+  , ("true",       VBool True)
+  , ("false",      VBool False)
+  , ("unit",       VUnit)
+  ]
 
 primPrintln :: [Value] -> ActorM Value
 primPrintln [v] = liftIO (putStrLn (show v)) >> return VUnit
@@ -563,6 +631,81 @@ primWithIso [VTagged "Just" [VTagged "Pair" [fwd, bkwd]], val] = do
   return VUnit
 primWithIso [VTagged "Nothing" [], _] = actorFail "withIso: iso not found"
 primWithIso _ = actorFail "withIso: bad arguments"
+
+-- =============================================================================
+-- VIRTUAL UNIX FILE API PRIMITIVES
+-- fopen / fread / fwrite / fclose / fseek
+-- Each primitive looks up the path (or fd) in the ActorState and delegates
+-- to the Haskell handler bundle registered in actorVFS / actorFDTable.
+-- =============================================================================
+
+-- Helper: pick next available fd (≥3, reserving 0/1/2 for stdio)
+nextFD :: FDTable -> Int
+nextFD t
+  | Map.null t = 3
+  | otherwise  = fst (Map.findMax t) + 1
+
+primFOpen :: [Value] -> ActorM Value
+primFOpen (VStr path : extraArgs) = ActorM $ \st -> do
+  case Map.lookup path (actorVFS st) of
+    Nothing -> error $ "fopen: no virtual file registered at: " ++ show path
+    Just handlers -> do
+      initState <- runActorM (vhOpen handlers extraArgs) st
+      stRef     <- newIORef initState
+      fdTable   <- readIORef (actorFDTable st)
+      let fd    = nextFD fdTable
+          entry = FDEntry handlers stRef
+      writeIORef (actorFDTable st) (Map.insert fd entry fdTable)
+      return (VInt fd)
+primFOpen _ = actorFail "fopen: expected a string path as first argument"
+
+primFRead :: [Value] -> ActorM Value
+primFRead (VInt fd : extraArgs) = ActorM $ \st -> do
+  fdTable <- readIORef (actorFDTable st)
+  case Map.lookup fd fdTable of
+    Nothing    -> error $ "fread: unknown file descriptor: " ++ show fd
+    Just entry -> do
+      state <- readIORef (fdeState entry)
+      (result, newState) <- runActorM (vhRead (fdeHandlers entry) state extraArgs) st
+      writeIORef (fdeState entry) newState
+      return result
+primFRead _ = actorFail "fread: expected an Int file descriptor as first argument"
+
+primFWrite :: [Value] -> ActorM Value
+primFWrite (VInt fd : extraArgs) = ActorM $ \st -> do
+  fdTable <- readIORef (actorFDTable st)
+  case Map.lookup fd fdTable of
+    Nothing    -> error $ "fwrite: unknown file descriptor: " ++ show fd
+    Just entry -> do
+      state    <- readIORef (fdeState entry)
+      newState <- runActorM (vhWrite (fdeHandlers entry) state extraArgs) st
+      writeIORef (fdeState entry) newState
+      return VUnit
+primFWrite _ = actorFail "fwrite: expected an Int file descriptor as first argument"
+
+primFClose :: [Value] -> ActorM Value
+primFClose [VInt fd] = ActorM $ \st -> do
+  fdTable <- readIORef (actorFDTable st)
+  case Map.lookup fd fdTable of
+    Nothing    -> error $ "fclose: unknown file descriptor: " ++ show fd
+    Just entry -> do
+      state <- readIORef (fdeState entry)
+      runActorM (vhClose (fdeHandlers entry) state) st
+      writeIORef (actorFDTable st) (Map.delete fd fdTable)
+      return VUnit
+primFClose _ = actorFail "fclose: expected exactly one Int file descriptor"
+
+primFSeek :: [Value] -> ActorM Value
+primFSeek (VInt fd : extraArgs) = ActorM $ \st -> do
+  fdTable <- readIORef (actorFDTable st)
+  case Map.lookup fd fdTable of
+    Nothing    -> error $ "fseek: unknown file descriptor: " ++ show fd
+    Just entry -> do
+      state    <- readIORef (fdeState entry)
+      newState <- runActorM (vhSeek (fdeHandlers entry) state extraArgs) st
+      writeIORef (fdeState entry) newState
+      return VUnit
+primFSeek _ = actorFail "fseek: expected an Int file descriptor as first argument"
 
 -- =============================================================================
 -- EXAMPLES  (inline test programs; main entry point is in Main.hs)

@@ -1,0 +1,22 @@
+-- vfs-counter.fplang
+--
+-- Tests fopen / fread / fclose against the "/dev/counter" virtual device.
+-- The Haskell handler keeps a mutable integer that increments on every read.
+--
+-- Expected output:
+--   counter read 1: 0
+--   counter read 2: 1
+--   counter read 3: 2
+
+let fd = fopen("/dev/counter")
+
+let v0 = fread(fd)
+println(strConcat("counter read 1: ", intToStr(v0)))
+
+let v1 = fread(fd)
+println(strConcat("counter read 2: ", intToStr(v1)))
+
+let v2 = fread(fd)
+println(strConcat("counter read 3: ", intToStr(v2)))
+
+fclose(fd)

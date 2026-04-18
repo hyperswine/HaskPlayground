@@ -3,7 +3,9 @@
 module FPRunner where
 
 import Control.Concurrent (threadDelay)
+import Data.IORef
 import Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import FPInterpreter
@@ -330,7 +332,7 @@ runSrc name src =
   case parseFile name src of
     Left err -> putStrLn $ "Parse error:\n" ++ err
     Right ast -> do
-      _ <- runProgram primEnv ast
+      _ <- runProgram primEnv emptyVFSMap ast
       return ()
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -341,23 +343,23 @@ testMain :: IO ()
 testMain = do
   -- Original AST-level examples
   putStrLn "── Example 1: type/1 reflection ──"
-  _ <- runProgram primEnv example1
+  _ <- runProgram primEnv emptyVFSMap example1
 
   putStrLn "\n── Example 2: RC allocator ──"
-  _ <- runProgram primEnv example2
+  _ <- runProgram primEnv emptyVFSMap example2
 
   putStrLn "\n── Example 3: actor send/receive ──"
-  _ <- runProgram primEnv example3
+  _ <- runProgram primEnv emptyVFSMap example3
   threadDelay 100000
 
   putStrLn "\n── Example 4: function/1 reflection ──"
-  _ <- runProgram primEnv example4
+  _ <- runProgram primEnv emptyVFSMap example4
 
   putStrLn "\n── Example 5: fix combinator ──"
-  _ <- runProgram primEnv example5
+  _ <- runProgram primEnv emptyVFSMap example5
 
   putStrLn "\n── Example 6: iso registry ──"
-  _ <- runProgram primEnv example6
+  _ <- runProgram primEnv emptyVFSMap example6
 
   -- Parser test suite
   putStrLn ""
@@ -370,18 +372,98 @@ testMain = do
 -- MAIN  (reads a .fplang file and runs it)
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- ── Virtual file handlers ────────────────────────────────────────────────────
+
+-- | /dev/counter
+--   open  → initial counter state (VInt 0)
+--   read  → returns current value, then increments
+--   seek  → resets counter to the Int argument (fseek(fd, n))
+--   write → no-op
+--   close → no-op
+counterHandlers :: VFSHandlers
+counterHandlers = VFSHandlers
+  { vhOpen  = \_ -> return (VInt 0)
+  , vhRead  = \st _ -> case st of
+      VInt n -> return (VInt n, VInt (n + 1))
+      _      -> return (VInt 0, VInt 1)
+  , vhWrite = \st _ -> return st
+  , vhClose = \_ -> return ()
+  , vhSeek  = \_ args -> case args of
+      (VInt n : _) -> return (VInt n)
+      _            -> return (VInt 0)
+  }
+
+-- | /dev/echo
+--   open  → initial state: VUnit (nothing written yet)
+--   read  → returns current stored value
+--   write → first extra arg becomes the new stored value
+--   seek  → resets to VUnit
+--   close → no-op
+echoHandlers :: VFSHandlers
+echoHandlers = VFSHandlers
+  { vhOpen  = \_ -> return VUnit
+  , vhRead  = \st _ -> return (st, st)
+  , vhWrite = \_ args -> case args of
+      (v : _) -> return v
+      []      -> return VUnit
+  , vhClose = \_ -> return ()
+  , vhSeek  = \_ _ -> return VUnit
+  }
+
+-- | /dev/null
+--   open  → VUnit
+--   read  → always VUnit
+--   write → discards
+--   close → no-op
+--   seek  → no-op
+nullHandlers :: VFSHandlers
+nullHandlers = VFSHandlers
+  { vhOpen  = \_ -> return VUnit
+  , vhRead  = \st _ -> return (VUnit, st)
+  , vhWrite = \st _ -> return st
+  , vhClose = \_ -> return ()
+  , vhSeek  = \st _ -> return st
+  }
+
+-- | The demonstration VFS map used when running with --vfs
+demoVFS :: VFSMap
+demoVFS = Map.fromList
+  [ ("/dev/counter", counterHandlers)
+  , ("/dev/echo",    echoHandlers)
+  , ("/dev/null",    nullHandlers)
+  ]
+
+-- | Run a .fplang source file against the demo VFS
+runSrcWithVFS :: String -> String -> IO ()
+runSrcWithVFS name src =
+  case parseFile name src of
+    Left err -> putStrLn $ "Parse error:\n" ++ err
+    Right ast -> do
+      _ <- runProgram primEnv demoVFS ast
+      return ()
+
+-- | Run several VFS example files in sequence
+vfsMain :: [String] -> IO ()
+vfsMain paths = mapM_ runOne paths
+  where
+    runOne path = do
+      putStrLn $ "\n── " ++ path ++ " ──"
+      src <- readFile path
+      runSrcWithVFS path src
+
 main :: IO ()
 main = do
   args <- getArgs
   case args of
+    ("--vfs" : paths) -> vfsMain paths
     [path] -> do
       src <- readFile path
       case parseFile path src of
         Left err -> putStrLn ("Parse error:\n" ++ err) >> exitFailure
         Right ast -> do
-          _ <- runProgram primEnv ast
+          _ <- runProgram primEnv emptyVFSMap ast
           return ()
     _ -> do
-      putStrLn "Usage: fplang <file.fplang>"
+      putStrLn "Usage: fplang [--vfs file1.fplang ...] <file.fplang>"
       putStrLn "Running built-in tests instead..."
       testMain
