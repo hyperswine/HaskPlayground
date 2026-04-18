@@ -1,29 +1,23 @@
 -- test-vlist-pattern.fplang
--- Tests that [1,2,3] list literals can be destructured via Cons/Nil patterns
--- and that list primitives work correctly.
 
--- listHead / listTail on native VList literals
 let xs = [10, 20, 30]
 let h = listHead(xs)
 let t = listTail(xs)
-println(strConcat("head [10,20,30] = ", intToStr(h)))     -- 10
-println(strConcat("tail length    = ", intToStr(listLen(t))))  -- 2
+println(strConcat("head [10,20,30] = ", intToStr(h)))
+println(strConcat("tail length    = ", intToStr(listLen(t))))
 
--- Pattern match on VList via Cons/Nil
-let showList = fix showList(xs) =>
+let showList = fix(fn(self) => fn(xs) =>
   match(xs) {
     Nil        => "Nil"
-  | Cons(h, t) => strConcat(intToStr(h), strConcat(" : ", showList(t)))
-  }
+  | Cons(h, t) => strConcat(intToStr(h), strConcat(" : ", self(t)))
+  })
 
--- listToCons converts VList literal to Cons/Nil chain for matching
 let cl = listToCons([3, 1, 4])
 println(strConcat("cons form: ", showList(cl)))
 
--- foldr over a VList
-let sum = fix sum(xs) =>
+let sum = fix(fn(self) => fn(xs) =>
   match(xs) {
     Nil        => 0
-  | Cons(h, t) => intAdd(h, sum(t))
-  }
-println(strConcat("sum [3,1,4] = ", intToStr(sum(listToCons([3, 1, 4])))))  -- 8
+  | Cons(h, t) => intAdd(h, self(t))
+  })
+println(strConcat("sum [3,1,4] = ", intToStr(sum(listToCons([3, 1, 4])))))

@@ -56,7 +56,7 @@ kwN s = kw s *> scn
 -- ─────────────────────────────────────────────────────────────────────────────
 
 keywords :: [String]
-keywords = ["let", "in", "if", "then", "else", "fn", "fix", "iso", "send", "receive", "spawn", "self", "type", "function", "alloc", "dealloc", "getref", "true", "false", "Tag", "match"]
+keywords = ["let", "in", "if", "then", "else", "fn", "iso", "send", "receive", "spawn", "type", "function", "alloc", "dealloc", "getref", "true", "false", "Tag", "match"]
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- IDENTIFIERS
@@ -121,7 +121,7 @@ parsePattern =
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseExpr :: Parser Expr
-parseExpr = choice [parseLet, try parseIsoDecl, parseIf, parseFix, parseLam, parseSend, parseReceive, parseMatch, parseSpawn, parseAtom]
+parseExpr = choice [parseLet, try parseIsoDecl, parseIf, parseLam, parseSend, parseReceive, parseMatch, parseSpawn, parseAtom]
 
 -- let x = rhs              open — body filled in by chainLets
 -- let x = rhs in body      closed
@@ -156,16 +156,6 @@ parseLam = do
   symN "=>"
   body <- parseExpr
   return (Lam params body)
-
--- fix name(x, y) => body
-parseFix :: Parser Expr
-parseFix = do
-  kw "fix"
-  name <- lowerIdent
-  params <- sym "(" *> sepBy lowerIdent (sym ",") <* sym ")"
-  symN "=>"
-  body <- parseExpr
-  return (Fix name params body)
 
 -- send targetAtom msgExpr
 parseSend :: Parser Expr
@@ -243,7 +233,7 @@ parseAtom :: Parser Expr
 parseAtom = chainCalls parseAtomBase
 
 parseAtomBase :: Parser Expr
-parseAtomBase = choice [parseLit, parseBlock, Self <$ kw "self", TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"), FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"), Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"), Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"), GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"), parseLookupIso, parseTagExpr, parseVarOrApp, parseParens]
+parseAtomBase = choice [parseLit, parseBlock, TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"), FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"), Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"), Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"), GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"), parseLookupIso, parseTagExpr, parseVarOrApp, parseParens]
 
 -- { stmt \n stmt \n stmt }  or  { stmt; stmt; stmt }
 -- chainLets is applied so that `let` bindings are visible to later

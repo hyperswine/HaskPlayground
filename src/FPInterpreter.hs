@@ -361,7 +361,8 @@ actorSpawn parentState env params body initArgs requestedId = ActorM $ \_ -> do
   childFDTable <- newIORef Map.empty   -- each actor gets its own fresh FD table
   let childAddr = (fst (actorAddr parentState), actualId)
       childState = ActorState childAddr ref mb reg im vfs childFDTable
-      childEnv = foldr (\(p, v) e -> envExtend p v e) env (zip params initArgs)
+      baseChildEnv = Map.insert "self" (VAddr childAddr) env
+      childEnv = foldr (\(p, v) e -> envExtend p v e) baseChildEnv (zip params initArgs)
   registryRegister reg actualId mb
   void $ forkIO $ void $ runActorM (eval childEnv body) childState
   return (VAddr childAddr)
@@ -492,6 +493,9 @@ eval env = \case
   Self -> do
     st <- getActorState
     return (VAddr (actorAddr st))
+  -- Note: 'self' is now injected as Var "self" into the environment at actor
+  -- startup; the Self AST node is kept for backward compatibility with
+  -- Haskell-constructed ASTs but is no longer emitted by the parser.
   TypeOf e -> typeOf <$> eval env e
   FnOf e -> fnNameOf <$> eval env e
   Tag t argExprs -> do
@@ -551,8 +555,9 @@ runProgram baseEnv vfs prog = do
   fdTable <- newIORef Map.empty
   let addr = (0, "main")
       state = ActorState addr heap mb reg im vfs fdTable
+      env0 = Map.insert "self" (VAddr addr) baseEnv
   registryRegister reg "main" mb
-  runActorM (eval baseEnv prog) state
+  runActorM (eval env0 prog) state
 
 -- =============================================================================
 -- STAGE 8 ── BUILT-IN PRIMITIVES
@@ -583,6 +588,9 @@ primEnv = Map.fromList
   , ("showVal",    VPrim "showVal"    primShowVal)
   , ("tagPayload", VPrim "tagPayload" primTagPayload)
   , ("withIso",    VPrim "withIso"    primWithIso)
+  -- Fixed-point combinator: fix(f) = f(fn(args) => fix(f)(args))
+  -- This is the Z combinator so it works under strict evaluation.
+  , ("fix",        VPrim "fix"        primFix)
   -- List utilities
   , ("listHead",   VPrim "listHead"   primListHead)
   , ("listTail",   VPrim "listTail"   primListTail)
@@ -695,6 +703,15 @@ primWithIso [VTagged "Just" [VTagged "Pair" [fwd, bkwd]], val] = do
   return VUnit
 primWithIso [VTagged "Nothing" [], _] = actorFail "withIso: iso not found"
 primWithIso _ = actorFail "withIso: bad arguments"
+
+-- Z combinator: fix(f) = f(fn(args...) => fix(f)(args...))
+-- The thunk delays recursive unfolding until the self-reference is actually
+-- called, which is necessary for strict (IO-based) evaluation.
+primFix :: [Value] -> ActorM Value
+primFix [f] = do
+  let thunk = VPrim "fix-thunk" $ \args -> primFix [f] >>= \r -> applyFn r args
+  applyFn f [thunk]
+primFix _ = actorFail "fix: expected exactly one function argument"
 
 -- =============================================================================
 -- LIST PRIMITIVES

@@ -1,55 +1,36 @@
 -- Recursion schemes: map, foldr, and filter for singly-linked cons-lists.
---
--- Cons-lists are built with:
---   Tag Nil              empty list
---   Tag Cons(head, tail) non-empty cell
 
--- ── show a cons-list of ints ─────────────────────────────────────────────────
-
-let showIntList = fix showIntList(xs) =>
+let showIntList = fix(fn(self) => fn(xs) =>
   match(xs) {
     Nil => "Nil"
-  | Cons(h, t) => strConcat(strConcat(intToStr(h), " : "), showIntList(t))
-  }
+  | Cons(h, t) => strConcat(strConcat(intToStr(h), " : "), self(t))
+  })
 
--- ── foldr(f, z, xs) ──────────────────────────────────────────────────────────
--- foldr f z [x1, x2, x3]  =  f(x1, f(x2, f(x3, z)))
-
-let foldr = fix foldr(f, z, xs) =>
+let foldr = fix(fn(self) => fn(f, z, xs) =>
   match(xs) {
     Nil => z
-  | Cons(h, t) => f(h, foldr(f, z, t))
-  }
+  | Cons(h, t) => f(h, self(f, z, t))
+  })
 
--- ── map(f, xs) ───────────────────────────────────────────────────────────────
--- map f [x1, x2, x3]  =  [f(x1), f(x2), f(x3)]
-
-let map = fix map(f, xs) =>
+let map = fix(fn(self) => fn(f, xs) =>
   match(xs) {
     Nil => Tag Nil
-  | Cons(h, t) => Tag Cons(f(h), map(f, t))
-  }
+  | Cons(h, t) => Tag Cons(f(h), self(f, t))
+  })
 
--- ── filter(pred, xs) ─────────────────────────────────────────────────────────
--- filter pred [x1,x2,x3]  =  [xi | pred(xi) == true]
-
-let filter = fix filter(pred, xs) =>
+let filter = fix(fn(self) => fn(pred, xs) =>
   match(xs) {
     Nil => Tag Nil
   | Cons(h, t) =>
       if pred(h)
-      then Tag Cons(h, filter(pred, t))
-      else filter(pred, t)
-  }
+      then Tag Cons(h, self(pred, t))
+      else self(pred, t)
+  })
 
--- ── isEven: true when n is even (works for n >= 0) ───────────────────────────
-
-let isEven = fix isEven(n) =>
+let isEven = fix(fn(self) => fn(n) =>
   if intEq(n, 0) then true
   else if intEq(n, 1) then false
-  else isEven(intSub(n, 2))
-
--- ── Demo ─────────────────────────────────────────────────────────────────────
+  else self(intSub(n, 2)))
 
 let xs = Tag Cons(1, Tag Cons(2, Tag Cons(3, Tag Cons(4, Tag Cons(5, Tag Nil)))))
 

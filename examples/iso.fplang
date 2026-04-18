@@ -1,6 +1,7 @@
 -- Define MyList <-> List isomorphism
 
-let unwrap = fix unwrap(v) => if typeEq(type(v), type(Tag MyList)) then tagPayload(v) else v
+let unwrap = fix(fn(self) => fn(v) =>
+  if typeEq(type(v), type(Tag MyList)) then tagPayload(v) else v)
 
 iso MyList List fn(v) => unwrap(v) fn(xs) => Tag MyList(xs)
 

@@ -13,33 +13,33 @@
 -- ── Generic cons-list utilities ──────────────────────────────────────────────
 -- These functions deal only with Cons/Nil; they know nothing about any brand.
 
-let listFoldr = fix listFoldr(f, z, xs) =>
+let listFoldr = fix(fn(self) => fn(f, z, xs) =>
   match(xs) {
     Nil => z
-  | Cons(h, t) => f(h, listFoldr(f, z, t))
-  }
+  | Cons(h, t) => f(h, self(f, z, t))
+  })
 
-let listMap = fix listMap(f, xs) =>
+let listMap = fix(fn(self) => fn(f, xs) =>
   match(xs) {
     Nil => Tag Nil
-  | Cons(h, t) => Tag Cons(f(h), listMap(f, t))
-  }
+  | Cons(h, t) => Tag Cons(f(h), self(f, t))
+  })
 
-let listFilter = fix listFilter(pred, xs) =>
+let listFilter = fix(fn(self) => fn(pred, xs) =>
   match(xs) {
     Nil => Tag Nil
   | Cons(h, t) =>
       if pred(h)
-      then Tag Cons(h, listFilter(pred, t))
-      else listFilter(pred, t)
-  }
+      then Tag Cons(h, self(pred, t))
+      else self(pred, t)
+  })
 
-let listShowInts = fix listShowInts(xs) =>
+let listShowInts = fix(fn(self) => fn(xs) =>
   match(xs) {
     Nil => "Nil"
   | Cons(h, t) =>
-      strConcat(strConcat(intToStr(h), " : "), listShowInts(t))
-  }
+      strConcat(strConcat(intToStr(h), " : "), self(t))
+  })
 
 let listSum = fn(xs) => listFoldr(fn(h, acc) => intAdd(h, acc), 0, xs)
 let listLen = fn(xs) => listFoldr(fn(h, acc) => intAdd(1, acc), 0, xs)
@@ -81,10 +81,10 @@ let scoreShow  = fn(sl)        =>
 
 -- ── isEven helper ────────────────────────────────────────────────────────────
 
-let isEven = fix isEven(n) =>
+let isEven = fix(fn(self) => fn(n) =>
   if intEq(n, 0) then true
   else if intEq(n, 1) then false
-  else isEven(intSub(n, 2))
+  else self(intSub(n, 2)))
 
 -- ── Demo ─────────────────────────────────────────────────────────────────────
 
