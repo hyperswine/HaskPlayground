@@ -1,0 +1,31 @@
+-- test-block-scoping.fplang
+-- Tests that let bindings inside { } blocks are visible to later statements
+-- in the same block. This requires chainLets to apply inside parseBlock.
+
+-- Basic: let in a block body
+let r1 = {
+  let x = 10
+  let y = 20
+  intAdd(x, y)
+}
+println(strConcat("block let chain: ", intToStr(r1)))
+
+-- Nested blocks
+let r2 = {
+  let a = 3
+  let b = {
+    let c = intMul(a, 2)
+    intAdd(c, 1)
+  }
+  b
+}
+println(strConcat("nested block: ", intToStr(r2)))
+
+-- Shadow outer binding
+let x = 99
+let r3 = {
+  let x = 1
+  x
+}
+println(strConcat("shadow outer (expect 1): ", intToStr(r3)))
+println(strConcat("outer x unchanged (expect 99): ", intToStr(x)))

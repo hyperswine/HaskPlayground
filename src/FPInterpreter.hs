@@ -422,6 +422,13 @@ matchPattern (PLit l) v
   | otherwise = Nothing
 -- matching a constructor, need to match all its fields
 matchPattern (PTagged t ps) (VTagged t' vs) | t == t' && length ps == length vs = foldl (\acc (p, v) -> acc >>= \e -> fmap (Map.union e) (matchPattern p v)) (Just Map.empty) (zip ps vs)
+-- VList sugar: treat VList [] as Nil, VList (v:vs) as Cons(v, VList vs)
+-- so that [1,2,3] literals can be destructured with the same Nil/Cons patterns
+matchPattern (PTagged "Nil" []) (VList []) = Just Map.empty
+matchPattern (PTagged "Cons" [ph, pt]) (VList (v : vs)) =
+  matchPattern ph v >>= \he ->
+    matchPattern pt (VList vs) >>= \te ->
+      Just (Map.union he te)
 matchPattern _ _ = Nothing
 
 showVal :: Value -> String
@@ -559,13 +566,28 @@ primEnv = Map.fromList
   , ("intAdd",     VPrim "intAdd"     primIntAdd)
   , ("intSub",     VPrim "intSub"     primIntSub)
   , ("intMul",     VPrim "intMul"     primIntMul)
+  , ("intDiv",     VPrim "intDiv"     primIntDiv)
+  , ("intMod",     VPrim "intMod"     primIntMod)
+  , ("intNeg",     VPrim "intNeg"     primIntNeg)
+  , ("intAbs",     VPrim "intAbs"     primIntAbs)
   , ("intEq",      VPrim "intEq"      primIntEq)
+  , ("intLt",      VPrim "intLt"      primIntLt)
+  , ("intLe",      VPrim "intLe"      primIntLe)
+  , ("intGt",      VPrim "intGt"      primIntGt)
+  , ("intGe",      VPrim "intGe"      primIntGe)
+  , ("boolNot",    VPrim "boolNot"    primBoolNot)
   , ("strConcat",  VPrim "strConcat"  primStrConcat)
+  , ("strEq",      VPrim "strEq"      primStrEq)
   , ("typeEq",     VPrim "typeEq"     primTypeEq)
   , ("intToStr",   VPrim "intToStr"   primIntToStr)
   , ("showVal",    VPrim "showVal"    primShowVal)
   , ("tagPayload", VPrim "tagPayload" primTagPayload)
   , ("withIso",    VPrim "withIso"    primWithIso)
+  -- List utilities
+  , ("listHead",   VPrim "listHead"   primListHead)
+  , ("listTail",   VPrim "listTail"   primListTail)
+  , ("listLen",    VPrim "listLen"    primListLen)
+  , ("listToCons", VPrim "listToCons" primListToCons)
   -- Virtual UNIX file API
   , ("fopen",      VPrim "fopen"      primFOpen)
   , ("fread",      VPrim "fread"      primFRead)
@@ -593,6 +615,44 @@ primIntMul :: [Value] -> ActorM Value
 primIntMul [VInt a, VInt b] = return (VInt (a * b))
 primIntMul _ = actorFail "intMul: type error"
 
+primIntDiv :: [Value] -> ActorM Value
+primIntDiv [VInt _, VInt 0] = actorFail "intDiv: division by zero"
+primIntDiv [VInt a, VInt b] = return (VInt (a `div` b))
+primIntDiv _ = actorFail "intDiv: type error"
+
+primIntMod :: [Value] -> ActorM Value
+primIntMod [VInt _, VInt 0] = actorFail "intMod: modulo by zero"
+primIntMod [VInt a, VInt b] = return (VInt (a `mod` b))
+primIntMod _ = actorFail "intMod: type error"
+
+primIntNeg :: [Value] -> ActorM Value
+primIntNeg [VInt a] = return (VInt (negate a))
+primIntNeg _ = actorFail "intNeg: type error"
+
+primIntAbs :: [Value] -> ActorM Value
+primIntAbs [VInt a] = return (VInt (abs a))
+primIntAbs _ = actorFail "intAbs: type error"
+
+primIntLt :: [Value] -> ActorM Value
+primIntLt [VInt a, VInt b] = return (VBool (a < b))
+primIntLt _ = actorFail "intLt: type error"
+
+primIntLe :: [Value] -> ActorM Value
+primIntLe [VInt a, VInt b] = return (VBool (a <= b))
+primIntLe _ = actorFail "intLe: type error"
+
+primIntGt :: [Value] -> ActorM Value
+primIntGt [VInt a, VInt b] = return (VBool (a > b))
+primIntGt _ = actorFail "intGt: type error"
+
+primIntGe :: [Value] -> ActorM Value
+primIntGe [VInt a, VInt b] = return (VBool (a >= b))
+primIntGe _ = actorFail "intGe: type error"
+
+primBoolNot :: [Value] -> ActorM Value
+primBoolNot [VBool b] = return (VBool (not b))
+primBoolNot _ = actorFail "boolNot: type error"
+
 primIntEq :: [Value] -> ActorM Value
 primIntEq [VInt a, VInt b] = return (VBool (a == b))
 primIntEq _ = actorFail "intEq: type error"
@@ -600,6 +660,10 @@ primIntEq _ = actorFail "intEq: type error"
 primStrConcat :: [Value] -> ActorM Value
 primStrConcat [VStr a, VStr b] = return (VStr (a ++ b))
 primStrConcat _ = actorFail "strConcat: type error"
+
+primStrEq :: [Value] -> ActorM Value
+primStrEq [VStr a, VStr b] = return (VBool (a == b))
+primStrEq _ = actorFail "strEq: type error"
 
 primTypeEq :: [Value] -> ActorM Value
 primTypeEq [VType a, VType b] = return (VBool (a == b))
@@ -631,6 +695,45 @@ primWithIso [VTagged "Just" [VTagged "Pair" [fwd, bkwd]], val] = do
   return VUnit
 primWithIso [VTagged "Nothing" [], _] = actorFail "withIso: iso not found"
 primWithIso _ = actorFail "withIso: bad arguments"
+
+-- =============================================================================
+-- LIST PRIMITIVES
+-- Operate on both VList (literal syntax [1,2,3]) and VTagged Cons/Nil chains.
+-- listToCons converts a VList literal to a Cons/Nil chain for pattern matching.
+-- =============================================================================
+
+-- Convert VList to a Cons/Nil chain.  Cons/Nil values pass through unchanged.
+primListToCons :: [Value] -> ActorM Value
+primListToCons [VList vs] = return (toCons vs)
+  where
+    toCons []       = VTagged "Nil" []
+    toCons (v : rest) = VTagged "Cons" [v, toCons rest]
+primListToCons [v@(VTagged "Nil" [])]  = return v
+primListToCons [v@(VTagged "Cons" _)]  = return v
+primListToCons _ = actorFail "listToCons: expected a List"
+
+primListHead :: [Value] -> ActorM Value
+primListHead [VList (v : _)]            = return v
+primListHead [VTagged "Cons" (v : _)]   = return v
+primListHead [VList []]                 = actorFail "listHead: empty list"
+primListHead [VTagged "Nil" _]          = actorFail "listHead: empty list"
+primListHead _ = actorFail "listHead: expected a List"
+
+primListTail :: [Value] -> ActorM Value
+primListTail [VList (_ : vs)]           = return (VList vs)
+primListTail [VTagged "Cons" [_, t]]    = return t
+primListTail [VList []]                 = actorFail "listTail: empty list"
+primListTail [VTagged "Nil" _]          = actorFail "listTail: empty list"
+primListTail _ = actorFail "listTail: expected a List"
+
+primListLen :: [Value] -> ActorM Value
+primListLen [VList vs]  = return (VInt (length vs))
+primListLen [v]         = return (VInt (conLen v))
+  where
+    conLen (VTagged "Nil" [])       = 0
+    conLen (VTagged "Cons" [_, t])  = 1 + conLen t
+    conLen _                        = 0
+primListLen _ = actorFail "listLen: expected a List"
 
 -- =============================================================================
 -- VIRTUAL UNIX FILE API PRIMITIVES

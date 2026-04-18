@@ -1,0 +1,47 @@
+-- test-match-edge-cases.fplang
+-- Tests match exhaustion, wildcard, literal matching, nested match.
+
+-- Wildcard catch-all
+let classify = fn(n) =>
+  match(n) {
+    0 => "zero"
+  | 1 => "one"
+  | _ => "many"
+  }
+println(classify(0))
+println(classify(1))
+println(classify(42))
+
+-- Nested match
+let pairKind = fn(p) =>
+  match(p) {
+    Pair(x, y) =>
+      match(x) {
+        0 => "zero-first"
+      | _ => if intGt(x, y) then "x>y" else "x<=y"
+      }
+  }
+println(pairKind(Tag Pair(0, 5)))    -- zero-first
+println(pairKind(Tag Pair(7, 3)))    -- x>y
+println(pairKind(Tag Pair(2, 9)))    -- x<=y
+
+-- Literal bool match
+let boolLabel = fn(b) =>
+  match(b) {
+    true  => "yes"
+  | false => "no"
+  }
+println(boolLabel(true))
+println(boolLabel(false))
+
+-- Negative int literal match
+let signOf = fn(n) =>
+  match(n) {
+    0  => "zero"
+  | -1 => "neg-one"
+  | _  => if intLt(n, 0) then "negative" else "positive"
+  }
+println(signOf(0))
+println(signOf(-1))
+println(signOf(5))
+println(signOf(-9))

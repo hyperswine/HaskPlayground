@@ -235,21 +235,26 @@ parseIsoDecl = do
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- ATOMS   (self-delimiting, safe as function arguments)
+-- After the base atom is parsed, chainCalls handles any trailing (args)
+-- so that expressions like f(x)(y) or tagPayload(b)(v) work correctly.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 parseAtom :: Parser Expr
-parseAtom = choice [parseLit, parseBlock, Self <$ kw "self", TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"), FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"), Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"), Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"), GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"), parseLookupIso, parseTagExpr, parseVarOrApp, parseParens]
+parseAtom = chainCalls parseAtomBase
+
+parseAtomBase :: Parser Expr
+parseAtomBase = choice [parseLit, parseBlock, Self <$ kw "self", TypeOf <$> (kw "type" *> sym "(" *> parseExpr <* sym ")"), FnOf <$> (kw "function" *> sym "(" *> parseExpr <* sym ")"), Alloc <$> (kw "alloc" *> sym "(" *> parseExpr <* sym ")"), Dealloc <$> (kw "dealloc" *> sym "(" *> parseExpr <* sym ")"), GetRef <$> (kw "getref" *> sym "(" *> parseExpr <* sym ")"), parseLookupIso, parseTagExpr, parseVarOrApp, parseParens]
 
 -- { stmt \n stmt \n stmt }  or  { stmt; stmt; stmt }
+-- chainLets is applied so that `let` bindings are visible to later
+-- statements in the same block, just as at the top-level program.
 parseBlock :: Parser Expr
 parseBlock = do
   sym "{"
   scn
   exprs <- sepEndBy1 parseExpr sep
   scn *> sym "}"
-  return $ case exprs of
-    [e] -> e
-    es -> Seq es
+  return (chainLets exprs)
   where
     sep = sc *> (void (char ';') <|> void (char '\n')) *> scn
 
@@ -269,18 +274,25 @@ parseTagExpr = do
   args <- option [] (sym "(" *> sepBy1 parseExpr (sym ",") <* sym ")")
   return (Tag tag args)
 
--- name  or  name(e, ...)
+-- name or name(e, ...)  — bare variable; call-chains are handled by
+-- chainCalls in parseAtom.
 parseVarOrApp :: Parser Expr
-parseVarOrApp = do
-  name <- lowerIdent
-  args <- optional (sym "(" *> sepBy parseExpr (sym ",") <* sym ")")
-  return $ case args of
-    Nothing -> Var name
-    Just as -> App (Var name) as
+parseVarOrApp = Var <$> lowerIdent
 
 -- (expr)  grouping
 parseParens :: Parser Expr
 parseParens = sym "(" *> parseExpr <* sym ")"
+
+-- After any atom, repeatedly consume "(args)" to form chained calls:
+--   f(x)(y)  →  App (App (Var "f") [x]) [y]
+--   tagPayload(b)(5)  →  App (App ...) [5]
+-- Each extra application is wrapped in `try` so a bare '(' that belongs
+-- to the surrounding grammar is never consumed.
+chainCalls :: Parser Expr -> Parser Expr
+chainCalls p = do
+  base <- p
+  chains <- many (try (sym "(" *> sepBy parseExpr (sym ",") <* sym ")"))
+  return $ foldl App base chains
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- PROGRAM

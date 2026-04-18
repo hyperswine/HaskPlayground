@@ -1,0 +1,36 @@
+-- test-higher-order.fplang
+-- Tests closures over closures, functions as values, partial application
+-- via manual currying (since fplang has no auto-curry).
+
+-- Function returning a function
+let adder = fn(n) => fn(x) => intAdd(x, n)
+let add5 = adder(5)
+let add10 = adder(10)
+println(strConcat("add5(3)  = ", intToStr(add5(3))))
+println(strConcat("add10(3) = ", intToStr(add10(3))))
+
+-- Compose two functions
+let compose = fn(f, g) => fn(x) => f(g(x))
+let double = fn(x) => intMul(x, 2)
+let inc    = fn(x) => intAdd(x, 1)
+let doubleInc = compose(double, inc)   -- double(inc(x))
+let incDouble = compose(inc, double)   -- inc(double(x))
+println(strConcat("doubleInc(4) = ", intToStr(doubleInc(4))))  -- 10
+println(strConcat("incDouble(4) = ", intToStr(incDouble(4))))  -- 9
+
+-- Function stored in a tagged value and extracted
+let boxFn = Tag Boxed(fn(x) => intMul(x, 3))
+let callBoxed = fn(b, v) => tagPayload(b)(v)
+println(strConcat("boxed fn (4) = ", intToStr(callBoxed(boxFn, 4))))  -- 12
+
+-- Fix returning a closure
+let makeCounter = fix makeCounter(n) => fn() => {
+  let cur = n
+  makeCounter(intAdd(n, 1))
+}
+-- calling makeCounter(0) gives a fn() that returns makeCounter(1), etc.
+-- we can't do stateful counters without alloc, so just test the closure chain
+let step0 = makeCounter(0)
+let step1 = step0()
+let step2 = step1()
+println("closure chain: ok (no crash)")

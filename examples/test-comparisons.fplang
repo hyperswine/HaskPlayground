@@ -1,0 +1,20 @@
+-- test-comparisons.fplang
+-- Tests intLt, intLe, intGt, intGe, intNeg, intDiv, intMod, boolNot, strEq
+
+println(strConcat("3 < 5  = ", showVal(intLt(3, 5))))
+println(strConcat("5 < 3  = ", showVal(intLt(5, 3))))
+println(strConcat("3 <= 3 = ", showVal(intLe(3, 3))))
+println(strConcat("3 <= 4 = ", showVal(intLe(3, 4))))
+println(strConcat("5 > 2  = ", showVal(intGt(5, 2))))
+println(strConcat("2 > 5  = ", showVal(intGt(2, 5))))
+println(strConcat("4 >= 4 = ", showVal(intGe(4, 4))))
+println(strConcat("4 >= 5 = ", showVal(intGe(4, 5))))
+println(strConcat("neg 7  = ", intToStr(intNeg(7))))
+println(strConcat("neg -3 = ", intToStr(intNeg(-3))))
+println(strConcat("10/3   = ", intToStr(intDiv(10, 3))))
+println(strConcat("10 mod 3 = ", intToStr(intMod(10, 3))))
+println(strConcat("intAbs(-5) = ", intToStr(intAbs(-5))))
+println(strConcat("not true  = ", showVal(boolNot(true))))
+println(strConcat("not false = ", showVal(boolNot(false))))
+println(strConcat("strEq aa aa = ", showVal(strEq("aa", "aa"))))
+println(strConcat("strEq aa bb = ", showVal(strEq("aa", "bb"))))
