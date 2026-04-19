@@ -32,20 +32,15 @@ library
       DirectLang
       EncDecClash
       ExActors
-      FParser
-      FPDevices
       FPFS
       FPFSActor
-      FPInterpreter
       FPL1
       FPL1Main
       FPL1Runner
-      FPRunner
       Gameloop
       HuffmanClash
       Lib
       MyHardware
-      NProlog
       Processor
       RVAsm
       RVLang
