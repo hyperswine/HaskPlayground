@@ -5,4 +5,4 @@ import qualified NProlog
 import qualified FPRunner
 
 main :: IO ()
-main = FPRunner.main
+main = FPL1Runner.main

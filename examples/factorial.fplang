@@ -1,5 +1,0 @@
-let fact = fix(fn(fact) => fn(n) =>
-  if intEq(n, 0) then 1
-  else intMul(n, fact(intSub(n, 1))))
-
-println(strConcat("fact 10 = ", intToStr(fact(10))))

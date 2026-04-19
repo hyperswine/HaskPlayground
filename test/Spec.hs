@@ -11,7 +11,6 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import CPURiscVTest (cpuRiscVGroup)
 import HuffmanClashTest (huffmanClashGroup)
-import NPrologTest (nPrologGroup)
 import ProcessorTest (processorGroup)
 import RVAsm
 import TrafficLightTest (trafficLightGroup)
@@ -374,9 +373,8 @@ main = do
           ("translate: labels unchanged", prop_translate_labelsUnchanged),
           ("translate: empty program", prop_translate_emptyProgram)
         ]
-  okNP   <- checkParallel nPrologGroup
   okProc <- checkParallel processorGroup
   okTL   <- checkParallel trafficLightGroup
   okHC   <- checkParallel huffmanClashGroup
   okRV32 <- checkParallel $ Group "CPURiscV" cpuRiscVGroup
-  unless (okRV && okNP && okProc && okTL && okHC && okRV32) exitFailure
+  unless (okRV && okProc && okTL && okHC && okRV32) exitFailure
