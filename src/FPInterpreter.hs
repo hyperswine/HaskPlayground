@@ -585,6 +585,7 @@ primEnv = Map.fromList
   , ("strEq",      VPrim "strEq"      primStrEq)
   , ("typeEq",     VPrim "typeEq"     primTypeEq)
   , ("intToStr",   VPrim "intToStr"   primIntToStr)
+  , ("strToInt",   VPrim "strToInt"   primStrToInt)
   , ("showVal",    VPrim "showVal"    primShowVal)
   , ("tagPayload", VPrim "tagPayload" primTagPayload)
   , ("withIso",    VPrim "withIso"    primWithIso)
@@ -680,6 +681,12 @@ primTypeEq _ = actorFail "typeEq: type error"
 primIntToStr :: [Value] -> ActorM Value
 primIntToStr [VInt n] = return (VStr (show n))
 primIntToStr _ = actorFail "intToStr: expected Int"
+
+primStrToInt :: [Value] -> ActorM Value
+primStrToInt [VStr s] = case reads s of
+  [(n, "")] -> return (VInt n)
+  _         -> actorFail $ "strToInt: cannot parse as integer: " ++ show s
+primStrToInt _ = actorFail "strToInt: expected a String"
 
 primShowVal :: [Value] -> ActorM Value
 primShowVal [v] = return (VStr (show v))

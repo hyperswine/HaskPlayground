@@ -8,6 +8,7 @@ import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
+import System.IO (hSetBuffering, BufferMode(..), stdin, stdout)
 import FPInterpreter
 import FParser
 
@@ -425,12 +426,45 @@ nullHandlers = VFSHandlers
   , vhSeek  = \st _ -> return st
   }
 
+-- | /dev/keyboard
+--   Reads one line from stdin per fread call.
+--   fwrite is a no-op.  State carries VUnit (stateless).
+keyboardHandlers :: VFSHandlers
+keyboardHandlers = VFSHandlers
+  { vhOpen  = \_ -> return VUnit
+  , vhRead  = \st _ -> do
+      line <- ActorM $ \_ -> getLine
+      return (VStr line, st)
+  , vhWrite = \st _ -> return st
+  , vhClose = \_ -> return ()
+  , vhSeek  = \st _ -> return st
+  }
+
+-- | /dev/stdout
+--   fwrite prints the first argument with a newline.
+--   fread returns VUnit.  State is VUnit (stateless).
+stdoutHandlers :: VFSHandlers
+stdoutHandlers = VFSHandlers
+  { vhOpen  = \_ -> return VUnit
+  , vhRead  = \st _ -> return (VUnit, st)
+  , vhWrite = \st args -> do
+      ActorM $ \_ -> case args of
+        (VStr s : _) -> putStrLn s
+        (v      : _) -> putStrLn (show v)
+        []           -> return ()
+      return st
+  , vhClose = \_ -> return ()
+  , vhSeek  = \st _ -> return st
+  }
+
 -- | The demonstration VFS map used when running with --vfs
 demoVFS :: VFSMap
 demoVFS = Map.fromList
-  [ ("/dev/counter", counterHandlers)
-  , ("/dev/echo",    echoHandlers)
-  , ("/dev/null",    nullHandlers)
+  [ ("/dev/counter",  counterHandlers)
+  , ("/dev/echo",     echoHandlers)
+  , ("/dev/null",     nullHandlers)
+  , ("/dev/keyboard", keyboardHandlers)
+  , ("/dev/stdout",   stdoutHandlers)
   ]
 
 -- | Run a .fplang source file against the demo VFS
@@ -453,6 +487,8 @@ vfsMain paths = mapM_ runOne paths
 
 main :: IO ()
 main = do
+  hSetBuffering stdout LineBuffering
+  hSetBuffering stdin  LineBuffering
   args <- getArgs
   case args of
     ("--vfs" : paths) -> vfsMain paths
@@ -461,7 +497,7 @@ main = do
       case parseFile path src of
         Left err -> putStrLn ("Parse error:\n" ++ err) >> exitFailure
         Right ast -> do
-          _ <- runProgram primEnv emptyVFSMap ast
+          _ <- runProgram primEnv demoVFS ast
           return ()
     _ -> do
       putStrLn "Usage: fplang [--vfs file1.fplang ...] <file.fplang>"

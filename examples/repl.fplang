@@ -1,0 +1,95 @@
+-- repl.fplang
+--
+-- A simple REPL calculator that reads from /dev/keyboard and writes to
+-- /dev/stdout — two virtual devices registered in FPRunner.hs.
+--
+-- Each command is entered one token per line:
+--   cmd>   add | sub | mul | div | echo | help | quit
+--   a>     first integer argument
+--   b>     second integer argument (not needed for echo)
+--
+-- Example session:
+--   cmd> add
+--   a> 10
+--   b> 32
+--   = 42
+
+let kbd = fopen("/dev/keyboard")
+let out = fopen("/dev/stdout")
+
+let say = fn(msg) => fwrite(out, msg)
+
+let safeDiv = fn(a, b) =>
+  if intEq(b, 0) then {
+    say("Error: division by zero")
+    0
+  }
+  else intDiv(a, b)
+
+let repl = fix(fn(repl) =>
+  fn(dummy) => {
+    say("cmd> ")
+    let cmd = fread(kbd)
+    if strEq(cmd, "quit") then
+      say("Goodbye!")
+    else if strEq(cmd, "help") then {
+      say("Commands: echo  add  sub  mul  div  quit  help")
+      repl(0)
+    }
+    else if strEq(cmd, "echo") then {
+      say("a> ")
+      let a = fread(kbd)
+      say(strConcat("= ", a))
+      repl(0)
+    }
+    else if strEq(cmd, "add") then {
+      say("a> ")
+      let a = fread(kbd)
+      say("b> ")
+      let b = fread(kbd)
+      say(strConcat("= ", intToStr(intAdd(strToInt(a), strToInt(b)))))
+      repl(0)
+    }
+    else if strEq(cmd, "sub") then {
+      say("a> ")
+      let a = fread(kbd)
+      say("b> ")
+      let b = fread(kbd)
+      say(strConcat("= ", intToStr(intSub(strToInt(a), strToInt(b)))))
+      repl(0)
+    }
+    else if strEq(cmd, "mul") then {
+      say("a> ")
+      let a = fread(kbd)
+      say("b> ")
+      let b = fread(kbd)
+      say(strConcat("= ", intToStr(intMul(strToInt(a), strToInt(b)))))
+      repl(0)
+    }
+    else if strEq(cmd, "div") then {
+      say("a> ")
+      let a = fread(kbd)
+      say("b> ")
+      let b = fread(kbd)
+      say(strConcat("= ", intToStr(safeDiv(strToInt(a), strToInt(b)))))
+      repl(0)
+    }
+    else {
+      say(strConcat("Unknown command: ", cmd))
+      say("Type 'help' for a list of commands.")
+      repl(0)
+    }
+  }
+)
+
+say("╔══════════════════════════════╗")
+say("║   fplang REPL calculator     ║")
+say("╠══════════════════════════════╣")
+say("║  add  sub  mul  div  echo    ║")
+say("║  help  quit                  ║")
+say("╚══════════════════════════════╝")
+
+repl(0)
+
+fclose(kbd)
+fclose(out)
