@@ -5,10 +5,10 @@ module FPRunner where
 import Control.Concurrent (threadDelay)
 import Data.IORef
 import Data.List (intercalate)
-import qualified Data.Map.Strict as Map
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hSetBuffering, BufferMode(..), stdin, stdout)
+import FPDevices (defaultVFS)
 import FPInterpreter
 import FParser
 
@@ -373,107 +373,13 @@ testMain = do
 -- MAIN  (reads a .fplang file and runs it)
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- ── Virtual file handlers ────────────────────────────────────────────────────
-
--- | /dev/counter
---   open  → initial counter state (VInt 0)
---   read  → returns current value, then increments
---   seek  → resets counter to the Int argument (fseek(fd, n))
---   write → no-op
---   close → no-op
-counterHandlers :: VFSHandlers
-counterHandlers = VFSHandlers
-  { vhOpen  = \_ -> return (VInt 0)
-  , vhRead  = \st _ -> case st of
-      VInt n -> return (VInt n, VInt (n + 1))
-      _      -> return (VInt 0, VInt 1)
-  , vhWrite = \st _ -> return st
-  , vhClose = \_ -> return ()
-  , vhSeek  = \_ args -> case args of
-      (VInt n : _) -> return (VInt n)
-      _            -> return (VInt 0)
-  }
-
--- | /dev/echo
---   open  → initial state: VUnit (nothing written yet)
---   read  → returns current stored value
---   write → first extra arg becomes the new stored value
---   seek  → resets to VUnit
---   close → no-op
-echoHandlers :: VFSHandlers
-echoHandlers = VFSHandlers
-  { vhOpen  = \_ -> return VUnit
-  , vhRead  = \st _ -> return (st, st)
-  , vhWrite = \_ args -> case args of
-      (v : _) -> return v
-      []      -> return VUnit
-  , vhClose = \_ -> return ()
-  , vhSeek  = \_ _ -> return VUnit
-  }
-
--- | /dev/null
---   open  → VUnit
---   read  → always VUnit
---   write → discards
---   close → no-op
---   seek  → no-op
-nullHandlers :: VFSHandlers
-nullHandlers = VFSHandlers
-  { vhOpen  = \_ -> return VUnit
-  , vhRead  = \st _ -> return (VUnit, st)
-  , vhWrite = \st _ -> return st
-  , vhClose = \_ -> return ()
-  , vhSeek  = \st _ -> return st
-  }
-
--- | /dev/keyboard
---   Reads one line from stdin per fread call.
---   fwrite is a no-op.  State carries VUnit (stateless).
-keyboardHandlers :: VFSHandlers
-keyboardHandlers = VFSHandlers
-  { vhOpen  = \_ -> return VUnit
-  , vhRead  = \st _ -> do
-      line <- ActorM $ \_ -> getLine
-      return (VStr line, st)
-  , vhWrite = \st _ -> return st
-  , vhClose = \_ -> return ()
-  , vhSeek  = \st _ -> return st
-  }
-
--- | /dev/stdout
---   fwrite prints the first argument with a newline.
---   fread returns VUnit.  State is VUnit (stateless).
-stdoutHandlers :: VFSHandlers
-stdoutHandlers = VFSHandlers
-  { vhOpen  = \_ -> return VUnit
-  , vhRead  = \st _ -> return (VUnit, st)
-  , vhWrite = \st args -> do
-      ActorM $ \_ -> case args of
-        (VStr s : _) -> putStrLn s
-        (v      : _) -> putStrLn (show v)
-        []           -> return ()
-      return st
-  , vhClose = \_ -> return ()
-  , vhSeek  = \st _ -> return st
-  }
-
--- | The demonstration VFS map used when running with --vfs
-demoVFS :: VFSMap
-demoVFS = Map.fromList
-  [ ("/dev/counter",  counterHandlers)
-  , ("/dev/echo",     echoHandlers)
-  , ("/dev/null",     nullHandlers)
-  , ("/dev/keyboard", keyboardHandlers)
-  , ("/dev/stdout",   stdoutHandlers)
-  ]
-
--- | Run a .fplang source file against the demo VFS
+-- | Run a .fplang source file against the default VFS
 runSrcWithVFS :: String -> String -> IO ()
 runSrcWithVFS name src =
   case parseFile name src of
     Left err -> putStrLn $ "Parse error:\n" ++ err
     Right ast -> do
-      _ <- runProgram primEnv demoVFS ast
+      _ <- runProgram primEnv defaultVFS ast
       return ()
 
 -- | Run several VFS example files in sequence
@@ -497,7 +403,7 @@ main = do
       case parseFile path src of
         Left err -> putStrLn ("Parse error:\n" ++ err) >> exitFailure
         Right ast -> do
-          _ <- runProgram primEnv demoVFS ast
+          _ <- runProgram primEnv defaultVFS ast
           return ()
     _ -> do
       putStrLn "Usage: fplang [--vfs file1.fplang ...] <file.fplang>"

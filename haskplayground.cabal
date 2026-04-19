@@ -33,6 +33,7 @@ library
       EncDecClash
       ExActors
       FParser
+      FPDevices
       FPFS
       FPFSActor
       FPInterpreter
