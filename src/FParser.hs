@@ -281,7 +281,7 @@ parseParens = sym "(" *> parseExpr <* sym ")"
 chainCalls :: Parser Expr -> Parser Expr
 chainCalls p = do
   base <- p
-  chains <- many (try (sym "(" *> sepBy parseExpr (sym ",") <* sym ")"))
+  chains <- many (try (sym "(" *> scn *> sepBy parseExpr (sym "," *> scn) <* scn <* sym ")"))
   return $ foldl App base chains
 
 -- ─────────────────────────────────────────────────────────────────────────────
