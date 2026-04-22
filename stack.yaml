@@ -3,7 +3,19 @@ snapshot: nightly-2024-09-30
 packages:
 - .
 
-extra-deps: []
+# extra-deps:
+# - h-raylib-5.6.0.0
+
+# flags:
+#   h-raylib:
+#     platform-nixos: true
+
+# extra-lib-dirs:
+# - /opt/homebrew/opt/raylib/lib
+
+# extra-include-dirs:
+# - /opt/homebrew/opt/raylib/include
+# - /Users/jasonqin/Documents/GitHub/raygui/src
 
 allow-newer: true
 

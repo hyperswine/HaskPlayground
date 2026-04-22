@@ -3,6 +3,10 @@
 # For use with spike + pk (RISC-V Proxy Kernel)
 # Linux ABI syscalls
 
+# fixes: highlight string literals
+# fix auto format for comments to the same column, not the next column
+# support all necessary instructions
+
 .section .rodata
 prompt_msg:
 .string "Enter n for fib(n): "
@@ -132,18 +136,18 @@ parse_number:
   t1 = 0                          # Accumulated result
 
 parse_loop:
-  t2 = load unsigned byte t0[0]   # Load character
+  t2 = load unsigned byte t0[0]   # Load character from memory (since its a pointer)
 
     # Check for newline or null terminator
-  t3 = set-equal-zero t2
+  t3 = set-equal-zero t2 # use set here, could probably just branch directly on t2
   branch not-equal t3 zero parse_done
 
   t3 = add t2 -10                 # Check for '\n'
   t3 = set-equal-zero t3
-  branch not-equal t3 zero parse_done
+  branch not-equal t3 zero parse_done # if t3 == 0 then done, cause t2 == '\n'
 
     # Check if digit (0-9)
-  t3 = add t2 -48                 # '0' = 48
+  t3 = add t2 -48                 # '0' = 48. So just subtract
   t4 = set-less-than-unsigned t3 10
   branch equal t4 zero parse_done  # Not a digit, done
 
@@ -198,7 +202,7 @@ print_digit_loop:
 
     # Get digit: digit = num % 10
   t4 = 10                         # Divisor
-  t1 = remainder-unsigned t0 t4
+  t1 = remainder-unsigned t0 t4 # modulo
 
     # Convert to ASCII
   t1 = add t1 48                  # '0' = 48
