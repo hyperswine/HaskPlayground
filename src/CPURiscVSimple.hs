@@ -39,26 +39,16 @@
 --   0001111  (FENCE  – treated as NOP)
 --
 -- ── Pipeline ─────────────────────────────────────────────────────────────
---   5-stage: IF → ID → EX → MEM → WB
---   In-order scalar pipeline.
---   Hazard handling:
---     • Load-use stall  – 1 bubble inserted between MEM and EX when the
---       load result is needed by the immediately-following instruction.
---     • Full forwarding – EX/MEM → EX and MEM/WB → EX bypass paths cover
---       all non-load RAW hazards without stalls.
---     • Branch resolution in EX (cycle after decode).  A 2-bit saturating
---       counter Branch History Table (BHT, 64 entries, PC-indexed) predicts
---       taken/not-taken.  On misprediction the two speculative instructions
---       in IF and ID are flushed (2-cycle penalty instead of always-flush).
---       JAL is always predicted taken (target known in ID).
---       JALR always flushes (target unknown until EX).
+--   3-stage: IF → ID/EX → MEM/WB
+--   Simple in-order, stall-on-load (one bubble after a load before a use).
+--   Forwarding from WB to EX for non-load results.
 --
 -- ── Memory ───────────────────────────────────────────────────────────────
 --   Separate 32-bit instruction memory (1024 words, block RAM).
 --   Byte-addressed data memory (1 KiB, synchronous read/write).
 --   Data memory is word-granular internally; byte/halfword accesses are
 --   handled by masking in software (sub-word reads sign-/zero-extend).
-module CPURiscV where
+module CPURiscVSimple where
 
 import Clash.Prelude hiding (take)
 import qualified Prelude as P
@@ -245,45 +235,6 @@ data BranchOp
   | BrGeu -- conditional branches
   | BrJal -- unconditional (JAL / JALR always jump)
   deriving (Generic, NFDataX, Show, Eq)
-
--- ===========================================================================
--- 2-bit saturating branch predictor (BHT)
--- ===========================================================================
-
--- | 2-bit saturating counter state.
---   StronglyNotTaken=0, WeaklyNotTaken=1, WeaklyTaken=2, StronglyTaken=3
-data BhtCounter = SNT | WNT | WT | ST
-  deriving (Generic, NFDataX, Show, Eq)
-
--- | Advance a 2-bit counter toward Taken.
-bhtStrengthenTaken :: BhtCounter -> BhtCounter
-bhtStrengthenTaken SNT = WNT
-bhtStrengthenTaken WNT = WT
-bhtStrengthenTaken WT  = ST
-bhtStrengthenTaken ST  = ST
-
--- | Advance a 2-bit counter toward NotTaken.
-bhtStrengthenNotTaken :: BhtCounter -> BhtCounter
-bhtStrengthenNotTaken ST  = WT
-bhtStrengthenNotTaken WT  = WNT
-bhtStrengthenNotTaken WNT = SNT
-bhtStrengthenNotTaken SNT = SNT
-
--- | Read the prediction from a counter: Taken when ≥ WT.
-bhtPredTaken :: BhtCounter -> Bool
-bhtPredTaken WT = True
-bhtPredTaken ST = True
-bhtPredTaken _  = False
-
--- | BHT: 64 entries indexed by PC bits [7:2].
-type BHT = Vec 64 BhtCounter
-
-initBHT :: BHT
-initBHT = repeat WNT
-
--- | Index into the BHT using bits [7:2] of a byte address.
-bhtIdx :: PC -> Unsigned 6
-bhtIdx pc = truncateB (pc `shiftR` 2)
 
 -- | Decoded micro-op passed through the pipeline. uWbEn: whether to write rd at all. uAuipc: AUIPC: add PC to upper-imm before ALU
 data MicroOp = MicroOp {uAluOp :: AluOp, uAluSrc2 :: AluSrc2, uWbSrc :: WbSrc, uWbEn :: Bool, uRd :: RegIdx, uRs1 :: RegIdx, uRs2 :: RegIdx, uImm :: Signed 32, uMemOp :: MemOp, uBranchOp :: BranchOp, uAuipc :: Bool} deriving (Generic, NFDataX, Show)
@@ -541,370 +492,169 @@ memCtrlStore mc memOp byteAddr storeVal oldWord
 -- IF/ID pipeline register
 -- ---------------------------------------------------------------------------
 
--- | Carries the fetched instruction and the PC of that instruction.
---   Also records the branch prediction made during IF so EX can compare.
-data IfIdReg = IfIdReg
-  { ifidValid    :: Bool
-  , ifidPC       :: PC
-  , ifidInstr    :: Word32
-  , ifidPredPC   :: PC    -- ^ predicted next-PC used to fetch the cycle after this one
-  , ifidPredTaken :: Bool  -- ^ was a branch predicted taken in IF?
-  } deriving (Generic, NFDataX, Show)
+data IfIdReg = IfIdReg {ifidValid :: Bool, ifidPC :: PC, ifidInstr :: Word32} deriving (Generic, NFDataX, Show)
 
-emptyIfId :: IfIdReg
-emptyIfId = IfIdReg False 0 0 0 False
+emptyIfId = IfIdReg False 0 0
 
 -- ---------------------------------------------------------------------------
 -- ID/EX pipeline register
+-- Note: we merge decode + register-read into one combined ID/EX stage.
 -- ---------------------------------------------------------------------------
 
--- | Carries the decoded micro-op and the register values read in ID.
-data IdExReg = IdExReg
-  { idexValid     :: Bool
-  , idexPC        :: PC
-  , idexUop       :: MicroOp
-  , idexRs1Val    :: Word32
-  , idexRs2Val    :: Word32
-  , idexPredPC    :: PC    -- ^ prediction forwarded from IF/ID
-  , idexPredTaken :: Bool  -- ^ prediction forwarded from IF/ID
-  } deriving (Generic, NFDataX, Show)
+data IdExReg = IdExReg {idexValid :: Bool, idexPC :: PC, idexUop :: MicroOp, idexRs1Val :: Word32, idexRs2Val :: Word32} deriving (Generic, NFDataX, Show)
 
-emptyIdEx :: IdExReg
-emptyIdEx = IdExReg False 0 nopMicroOp 0 0 0 False
+emptyIdEx = IdExReg False 0 nopMicroOp 0 0
 
 -- ---------------------------------------------------------------------------
--- EX/MEM pipeline register
+-- EX/MEM/WB pipeline register (single combined stage)
 -- ---------------------------------------------------------------------------
 
--- | Carries the ALU result and all information needed by MEM and WB.
-data ExMemReg = ExMemReg
-  { exmemValid  :: Bool
-  , exmemPC     :: PC
-  , exmemRd     :: RegIdx
-  , exmemWbEn   :: Bool
-  , exmemWbSrc  :: WbSrc
-  , exmemAluOut :: Word32
-  , exmemRs2Val :: Word32  -- ^ store data
-  , exmemMemOp  :: MemOp
-  } deriving (Generic, NFDataX, Show)
+-- AluOut: ALU result / effective address. Rs2Val: original rs2 (for stores)
+data ExWbReg = ExWbReg {exwbValid :: Bool, exwbPC :: PC, exwbRd :: RegIdx, exwbWbEn :: Bool, exwbWbSrc :: WbSrc, exwbAluOut :: Word32, exwbRs2Val :: Word32, exwbMemOp :: MemOp} deriving (Generic, NFDataX, Show)
 
-emptyExMem :: ExMemReg
-emptyExMem = ExMemReg False 0 0 False WbAlu 0 0 MemNone
-
--- ---------------------------------------------------------------------------
--- MEM/WB pipeline register
--- ---------------------------------------------------------------------------
-
--- | Carries the memory result (or ALU result) ready for write-back.
-data MemWbReg = MemWbReg
-  { memwbValid  :: Bool
-  , memwbRd     :: RegIdx
-  , memwbWbEn   :: Bool
-  , memwbWbSrc  :: WbSrc
-  , memwbAluOut :: Word32  -- ^ ALU result (also used as load address for WbMem)
-  , memwbMemVal :: Word32  -- ^ value read from data memory
-  , memwbPc4    :: Word32  -- ^ PC+4 for link (JAL/JALR)
-  } deriving (Generic, NFDataX, Show)
-
-emptyMemWb :: MemWbReg
-emptyMemWb = MemWbReg False 0 False WbAlu 0 0 0
+emptyExWb = ExWbReg False 0 0 False WbAlu 0 0 MemNone
 
 -- ---------------------------------------------------------------------------
 -- Overall CPU state
 -- ---------------------------------------------------------------------------
 
-data CpuStateRV = CpuStateRV
-  { rvPC    :: PC
-  , rvRegs  :: RegFile
-  , rvIfId  :: IfIdReg
-  , rvIdEx  :: IdExReg
-  , rvExMem :: ExMemReg
-  , rvMemWb :: MemWbReg
-  , rvBHT   :: BHT
-  , rvHalt  :: Bool
-  } deriving (Generic, NFDataX, Show)
+data CpuStateRV = CpuStateRV {rvPC :: PC, rvRegs :: RegFile, rvIfId :: IfIdReg, rvIdEx :: IdExReg, rvExWb :: ExWbReg, rvHalt :: Bool} deriving (Generic, NFDataX, Show)
 
-initCpuStateRV :: CpuStateRV
-initCpuStateRV = CpuStateRV
-  { rvPC    = 0
-  , rvRegs  = repeat 0
-  , rvIfId  = emptyIfId
-  , rvIdEx  = emptyIdEx
-  , rvExMem = emptyExMem
-  , rvMemWb = emptyMemWb
-  , rvBHT   = initBHT
-  , rvHalt  = False
-  }
+initCpuStateRV = CpuStateRV {rvPC = 0, rvRegs = repeat 0, rvIfId = emptyIfId, rvIdEx = emptyIdEx, rvExWb = emptyExWb, rvHalt = False}
 
 -- ===========================================================================
 -- CPU step function
 -- ===========================================================================
 
--- | One-cycle step of the 5-stage RV32I pipeline.
---
---   Stages: IF → ID → EX → MEM → WB
+-- | One-cycle step of the RV32I pipeline.
 --
 --   Inputs:
---     instrWord    – instruction word fetched from instruction memory at rvPC
---                    (combinatorial / 1-cycle BRAM, registered externally)
---     dataBramWord – aligned word pre-fetched from the data BRAM.
---                    The address is the EX/MEM AluOut from the *previous*
---                    cycle (i.e. this word is available at the start of MEM).
+--     instrWord    – instruction from instruction memory at rvPC
+--     dataBramWord – word pre-fetched from the data blockRam
+--                    (the aligned word at the current MEM/WB effective address).
+--                    For synthesis this comes from a blockRam with 1-cycle
+--                    latency; for simulation it is read combinatorially.
 --     memCtrl      – peripheral state (UART only; data RAM is external)
 --     en           – clock enable
 --
 --   Outputs:
---     (newState, newMemCtrl, dataWrCmd, nextFetchPC, wbRd, wbVal, wbValid)
---     dataWrCmd  – optional BRAM write produced by stores.
---     nextFetchPC – the address the caller should supply instrWord for next cycle.
-stepCpuRV :: CpuStateRV
-           -> (Word32, Word32, MemCtrl, Bool)
-           -> (CpuStateRV, MemCtrl, Maybe (Unsigned 10, Word32), PC, RegIdx, Word32, Bool)
+--     (newState, newMemCtrl, dataWrCmd, newPC, wbRd, wbVal, wbValid)
+--     dataWrCmd – optional write to the data blockRam produced by stores.
+stepCpuRV :: CpuStateRV -> (Word32, Word32, MemCtrl, Bool) -> (CpuStateRV, MemCtrl, Maybe (Unsigned 10, Word32), PC, RegIdx, Word32, Bool)
 stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
-  | rvHalt  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
-  | not en  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
+  | rvHalt = (s, memCtrl, Nothing, rvPC, 0, 0, False)
+  | not en = (s, memCtrl, Nothing, rvPC, 0, 0, False)
   | otherwise =
+      -- ── Stage 3: MEM / WB ────────────────────────────────────────────
+      let exwb = rvExWb
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 5 – WB  (combinatorial; register write happens at end of cycle)
-  -- ────────────────────────────────────────────────────────────────────────
-  let mwb = rvMemWb
+          -- Data memory access for loads/stores
+          (memCtrl', dataWrCmd, wbVal) =
+            if exwbValid exwb
+              then
+                let addr = unpack (exwbAluOut exwb) :: Addr
+                    storeV = exwbRs2Val exwb
+                    mop = exwbMemOp exwb
+                 in case mop of
+                      -- loads: use the pre-fetched word from the data blockRam
+                      MemLb -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                      MemLbu -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                      MemLh -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                      MemLhu -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                      MemLw -> (memCtrl, Nothing, memCtrlLoad memCtrl mop addr dataBramWord)
+                      -- stores: return updated peripheral state + BRAM write command
+                      MemSb -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                      MemSh -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                      MemSw -> let (mc', wc) = memCtrlStore memCtrl mop addr storeV dataBramWord in (mc', wc, 0)
+                      MemNone -> (memCtrl, Nothing, exwbAluOut exwb)
+              else (memCtrl, Nothing, 0)
 
-      wbResult = case memwbWbSrc mwb of
-        WbAlu -> memwbAluOut mwb
-        WbPc4 -> memwbPc4    mwb
-        WbMem -> memwbMemVal mwb
+          -- Choose write-back value
+          wbResult = case exwbWbSrc exwb of
+            WbAlu -> exwbAluOut exwb
+            WbPc4 -> pack (exwbPC exwb + 4)
+            WbMem -> wbVal
 
-      wbEn  = memwbValid mwb && memwbWbEn mwb && memwbRd mwb /= 0
-      regs1 = if wbEn then replace (memwbRd mwb) wbResult rvRegs else rvRegs
+          -- Write to register file; x0 is always zero
+          wbEn = exwbValid exwb && exwbWbEn exwb && exwbRd exwb /= 0
+          regs1 = if wbEn then replace (exwbRd exwb) wbResult rvRegs else rvRegs
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 4 – MEM
-  -- ────────────────────────────────────────────────────────────────────────
-      exmem = rvExMem
+          -- ── Stage 2: EX ──────────────────────────────────────────────
+          idex = rvIdEx
 
-      memAddr  = unpack (exmemAluOut exmem) :: Addr
-      storeVal = exmemRs2Val exmem
-      mop      = exmemMemOp  exmem
+          -- Forward WB→EX: if the EX/WB stage writes a register that ID/EX reads
+          fwdRs1 = if wbEn && exwbRd exwb == uRs1 (idexUop idex) then wbResult else idexRs1Val idex
+          fwdRs2 = if wbEn && exwbRd exwb == uRs2 (idexUop idex) then wbResult else idexRs2Val idex
 
-      (memCtrl', dataWrCmd, memReadVal) =
-        if exmemValid exmem
-          then case mop of
-            MemLb  -> (memCtrl, Nothing, memCtrlLoad memCtrl mop memAddr dataBramWord)
-            MemLbu -> (memCtrl, Nothing, memCtrlLoad memCtrl mop memAddr dataBramWord)
-            MemLh  -> (memCtrl, Nothing, memCtrlLoad memCtrl mop memAddr dataBramWord)
-            MemLhu -> (memCtrl, Nothing, memCtrlLoad memCtrl mop memAddr dataBramWord)
-            MemLw  -> (memCtrl, Nothing, memCtrlLoad memCtrl mop memAddr dataBramWord)
-            MemSb  -> let (mc', wc) = memCtrlStore memCtrl mop memAddr storeVal dataBramWord
-                       in (mc', wc, 0)
-            MemSh  -> let (mc', wc) = memCtrlStore memCtrl mop memAddr storeVal dataBramWord
-                       in (mc', wc, 0)
-            MemSw  -> let (mc', wc) = memCtrlStore memCtrl mop memAddr storeVal dataBramWord
-                       in (mc', wc, 0)
-            MemNone -> (memCtrl, Nothing, exmemAluOut exmem)
-          else (memCtrl, Nothing, 0)
+          uop = idexUop idex
 
-      memwb' = if exmemValid exmem
-                 then MemWbReg
-                        { memwbValid  = True
-                        , memwbRd     = exmemRd     exmem
-                        , memwbWbEn   = exmemWbEn   exmem
-                        , memwbWbSrc  = exmemWbSrc  exmem
-                        , memwbAluOut = exmemAluOut  exmem
-                        , memwbMemVal = memReadVal
-                        , memwbPc4    = pack (exmemPC exmem + 4)
-                        }
-                 else emptyMemWb
+          -- ALU operand B: register or immediate
+          aluB = case uAluSrc2 uop of
+            Src2Reg -> fwdRs2
+            Src2Imm -> pack (uImm uop)
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 3 – EX
-  -- ────────────────────────────────────────────────────────────────────────
-      idex = rvIdEx
-      uop  = idexUop idex
+          -- AUIPC: ALU input A = PC instead of rs1
+          aluA = if uAuipc uop then pack (idexPC idex) else fwdRs1
 
-      -- ── Forwarding network ──────────────────────────────────────────
-      -- EX/MEM → EX forward (covers all non-load results one cycle old)
-      fwdFromExMem rd val en' reg =
-        if en' && exmemWbEn exmem && exmemRd exmem /= 0
-             && exmemRd exmem == reg
-             && exmemWbSrc exmem /= WbMem   -- load result not yet available
-          then val
-          else en'  `seq` rd  -- use incoming value
+          aluResult = alu (uAluOp uop) aluA aluB
 
-      -- Use a cleaner two-mux approach:
-      --   Priority: EX/MEM forward > MEM/WB forward > register file value
-      fwdRs1 =
-        let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
-                          && exmemRd exmem == uRs1 uop
-                          && exmemWbSrc exmem /= WbMem
-            fromMemWb = wbEn && memwbRd mwb /= 0
-                          && memwbRd mwb == uRs1 uop
-        in if fromExMem then exmemAluOut exmem
-           else if fromMemWb then wbResult
-           else idexRs1Val idex
+          -- Branch / jump target computation
+          brTaken = evalBranch (uBranchOp uop) fwdRs1 fwdRs2
 
-      fwdRs2 =
-        let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
-                          && exmemRd exmem == uRs2 uop
-                          && exmemWbSrc exmem /= WbMem
-            fromMemWb = wbEn && memwbRd mwb /= 0
-                          && memwbRd mwb == uRs2 uop
-        in if fromExMem then exmemAluOut exmem
-           else if fromMemWb then wbResult
-           else idexRs2Val idex
+          brTarget = case uBranchOp uop of
+            BrJal ->
+              -- JAL: PC + imm; JALR: (rs1 + imm) & ~1
+              if opcode (ifidInstr rvIfId) == opJALR
+                -- JALR target is ALU result (rs1+imm) with bit 0 cleared
+                then unpack (aluResult .&. complement 1) :: PC
+                else unpack (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
+            _ ->
+              unpack (pack (fromIntegral (idexPC idex) + fromIntegral (uImm uop) :: Signed 32)) :: PC
 
-      -- ── ALU ─────────────────────────────────────────────────────────
-      aluB = case uAluSrc2 uop of
-               Src2Reg -> fwdRs2
-               Src2Imm -> pack (uImm uop)
+          squash = idexValid idex && (brTaken || uBranchOp uop == BrJal)
 
-      aluA = if uAuipc uop then pack (idexPC idex) else fwdRs1
+          exwb' = if idexValid idex then ExWbReg {exwbValid = True, exwbPC = idexPC idex, exwbRd = uRd uop, exwbWbEn = uWbEn uop, exwbWbSrc = uWbSrc uop, exwbAluOut = aluResult, exwbRs2Val = fwdRs2, exwbMemOp = uMemOp uop} else emptyExWb
 
-      aluResult = alu (uAluOp uop) aluA aluB
+          -- ── Load-use hazard detection ─────────────────────────────────
 
-      -- ── Branch resolution ───────────────────────────────────────────
-      brActualTaken = evalBranch (uBranchOp uop) fwdRs1 fwdRs2
+          -- If the ID/EX stage is a load and its rd matches one of the IF/ID stage's source registers, we must stall one cycle.
+          isLoad op = case op of
+            MemLb -> True
+            MemLbu -> True
+            MemLh -> True
+            MemLhu -> True
+            MemLw -> True
+            _ -> False
 
-      -- Compute the real target (needed for misprediction recovery and JALR)
-      brTarget = case uBranchOp uop of
-        BrJal ->
-          -- JALR: use ALU result (rs1 + imm) with bit-0 cleared
-          -- JAL:  PC + imm
-          if opcode (ifidInstr rvIfId) == opJALR
-            then unpack (aluResult .&. complement 1) :: PC
-            else unpack (pack (fromIntegral (idexPC idex)
-                              + fromIntegral (uImm uop) :: Signed 32)) :: PC
-        _ ->
-          unpack (pack (fromIntegral (idexPC idex)
-                       + fromIntegral (uImm uop) :: Signed 32)) :: PC
+          loadUseHazard = idexValid idex && isLoad (uMemOp uop) && uWbEn uop && uRd uop /= 0 && let decRs1 = rs1Of (ifidInstr rvIfId); decRs2 = rs2Of (ifidInstr rvIfId) in uRd uop == decRs1 || uRd uop == decRs2
 
-      -- The PC we predicted in IF for this instruction
-      predWasTaken = idexPredTaken idex
-      predPC       = idexPredPC   idex
+          -- ── Stage 1: ID / register read ──────────────────────────────
+          ifid = rvIfId
 
-      -- Actual next-PC from the EX point of view
-      actualNextPC = if brActualTaken then brTarget else idexPC idex + 4
+          -- Decode the instruction sitting in IF/ID
+          uop' = decode (ifidInstr ifid)
 
-      -- Misprediction: prediction disagrees with actual outcome
-      mispredicted =
-        idexValid idex
-          && uBranchOp uop /= BrNone
-          && predPC /= actualNextPC
+          -- Read registers (using the updated register file from WB)
+          rs1v = regs1 !! uRs1 uop'
+          rs2v = regs1 !! uRs2 uop'
 
-      -- Update BHT with actual outcome (only for conditional branches + JAL)
-      bhtUpdateIdx = bhtIdx (idexPC idex)
-      bhtOld       = rvBHT !! bhtUpdateIdx
-      bhtNew       = if brActualTaken then bhtStrengthenTaken    bhtOld
-                                      else bhtStrengthenNotTaken bhtOld
-      bht' = if idexValid idex && uBranchOp uop /= BrNone
-               then replace bhtUpdateIdx bhtNew rvBHT
-               else rvBHT
+          idex' = if squash || not (ifidValid ifid) || loadUseHazard then emptyIdEx else IdExReg {idexValid = True, idexPC = ifidPC ifid, idexUop = uop', idexRs1Val = rs1v, idexRs2Val = rs2v}
 
-      exmem' = if idexValid idex
-                 then ExMemReg
-                        { exmemValid  = True
-                        , exmemPC     = idexPC  idex
-                        , exmemRd     = uRd     uop
-                        , exmemWbEn   = uWbEn   uop
-                        , exmemWbSrc  = uWbSrc  uop
-                        , exmemAluOut = aluResult
-                        , exmemRs2Val = fwdRs2
-                        , exmemMemOp  = uMemOp  uop
-                        }
-                 else emptyExMem
+          -- ── Stage 0: IF (advance PC) ──────────────────────────────────
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Load-use hazard detection (EX sees a load, ID needs the result)
-  -- ────────────────────────────────────────────────────────────────────────
-      isLoad op = case op of
-        MemLb -> True; MemLbu -> True; MemLh -> True
-        MemLhu -> True; MemLw -> True; _ -> False
+          -- When stalling (load-use): hold PC and IF/ID, insert bubble into ID/EX
+          nextPC
+            | loadUseHazard = rvPC
+            | squash = brTarget
+            | otherwise = rvPC + 4
 
-      -- The instruction currently in ID is in IF/ID
-      ifidDecRs1 = rs1Of (ifidInstr rvIfId)
-      ifidDecRs2 = rs2Of (ifidInstr rvIfId)
+          ifid'
+            | loadUseHazard = ifid
+            | squash = emptyIfId
+            | otherwise = IfIdReg {ifidValid = True, ifidPC = rvPC, ifidInstr = instrWord}
 
-      loadUseHazard =
-        idexValid idex
-          && isLoad (uMemOp uop)
-          && uWbEn uop
-          && uRd uop /= 0
-          && (uRd uop == ifidDecRs1 || uRd uop == ifidDecRs2)
-
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 2 – ID  (decode + register read)
-  -- ────────────────────────────────────────────────────────────────────────
-      ifid  = rvIfId
-      uop'  = decode (ifidInstr ifid)
-      rs1v  = regs1 !! uRs1 uop'
-      rs2v  = regs1 !! uRs2 uop'
-
-      -- On flush (misprediction or load-use stall) inject a bubble
-      idex' =
-        if mispredicted || not (ifidValid ifid) || loadUseHazard
-          then emptyIdEx
-          else IdExReg
-                 { idexValid     = True
-                 , idexPC        = ifidPC       ifid
-                 , idexUop       = uop'
-                 , idexRs1Val    = rs1v
-                 , idexRs2Val    = rs2v
-                 , idexPredPC    = ifidPredPC   ifid
-                 , idexPredTaken = ifidPredTaken ifid
-                 }
-
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 1 – IF  (PC selection + branch prediction)
-  -- ────────────────────────────────────────────────────────────────────────
-
-      -- BHT lookup for the *current* fetch PC
-      bhtPred = bhtPredTaken (bht' !! bhtIdx rvPC)
-
-      -- Quick peek at the instruction to detect JAL in IF
-      -- (opcode only – target can be computed without a full decode)
-      fetchOp = opcode instrWord
-
-      -- Static prediction helper: predict taken for JAL; use BHT for branches
-      (ifPredTaken, ifPredTarget) =
-        if fetchOp == opJAL
-          then (True, unpack (pack (fromIntegral rvPC
-                                   + fromIntegral (immJ instrWord) :: Signed 32)) :: PC)
-          else if fetchOp == opBRANCH && bhtPred
-                 then ( True
-                      , unpack (pack (fromIntegral rvPC
-                                     + fromIntegral (immB instrWord) :: Signed 32)) :: PC
-                      )
-                 else (False, rvPC + 4)
-
-      nextPC
-        | loadUseHazard = rvPC                 -- stall: re-fetch same PC
-        | mispredicted  = actualNextPC          -- flush: jump to correct PC
-        | otherwise     = ifPredTarget          -- normal: predicted next-PC
-
-      ifid' =
-        if loadUseHazard
-          then ifid                             -- stall: hold IF/ID
-          else if mispredicted
-                 then emptyIfId                 -- flush IF/ID
-                 else IfIdReg
-                        { ifidValid     = True
-                        , ifidPC        = rvPC
-                        , ifidInstr     = instrWord
-                        , ifidPredPC    = ifPredTarget
-                        , ifidPredTaken = ifPredTaken
-                        }
-
-      s' = s { rvPC    = nextPC
-             , rvRegs  = regs1
-             , rvIfId  = ifid'
-             , rvIdEx  = idex'
-             , rvExMem = exmem'
-             , rvMemWb = memwb'
-             , rvBHT   = bht'
-             , rvHalt  = False
-             }
-
-   in (s', memCtrl', dataWrCmd, nextPC, memwbRd mwb, wbResult, wbEn)
+          s' = s {rvPC = nextPC, rvRegs = regs1, rvIfId = ifid', rvIdEx = idex', rvExWb = exwb', rvHalt = False}
+       in (s', memCtrl', dataWrCmd, nextPC, exwbRd exwb, wbResult, wbEn)
 
 -- ===========================================================================
 -- Simple simulation helper (no UART)
@@ -916,28 +666,26 @@ data SimState = SimState {simCpu :: CpuStateRV, simData :: MemCtrl, simRam :: Ve
 initSimState :: SimState
 initSimState = SimState initCpuStateRV initMemCtrl (repeat 0)
 
--- | Pre-fetch the aligned word the MEM stage will read this cycle.
---   The address is driven by the EX/MEM register (result from the previous EX stage).
+-- | Pre-fetch the aligned word the MEM/WB stage will read this cycle. In hardware this is provided by the data blockRam (1-cycle latency, address driven from the previous cycle's ExWb output).
 simDataWord :: SimState -> Word32
 simDataWord st =
-  let addr = truncateB (unpack (exmemAluOut (rvExMem (simCpu st))) `shiftR` 2) :: Unsigned 10
+  let addr = truncateB (unpack (exwbAluOut (rvExWb (simCpu st))) `shiftR` 2) :: Unsigned 10
    in simRam st !! addr
 
--- | Run the CPU for n cycles on a fixed instruction memory image.
---   Returns a list of (pc, wbRd, wbVal, wbEn) per cycle.
+-- | Run the CPU for n cycles on a fixed instruction memory image. Returns a list of (pc, wbRd, wbVal, wbEn) per cycle.
 simulateRV :: InstrMem -> Int -> [(PC, RegIdx, Word32, Bool)]
 simulateRV iMem n = P.take n $ go initSimState
   where
     go st =
       let cpu = simCpu st
-          mc  = simData st
+          mc = simData st
           pcW = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
-          instr  = iMem !! pcW
-          dword  = simDataWord st
+          instr = iMem !! pcW
+          dword = simDataWord st
           (cpu', mc', wc, pc, rd, val, wbEn) = stepCpuRV cpu (instr, dword, mc, True)
           ram' = case wc of
             Just (idx, w) -> replace idx w (simRam st)
-            Nothing       -> simRam st
+            Nothing -> simRam st
           st' = st {simCpu = cpu', simData = mc', simRam = ram'}
        in (pc, rd, val, wbEn) : go st'
 
