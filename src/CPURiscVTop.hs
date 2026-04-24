@@ -32,7 +32,7 @@
 --   0x58 'X' Reset CPU (stays in Idle).  FPGA replies 0x4B 'K'.
 --
 -- ── Pins (Tang Nano 20K) ──────────────────────────────────────────────────
---   clk          pin 4   – 27 MHz oscillator
+--   clk          pin 4   – 27 MHz oscillator → PLL → 80 MHz
 --   uart_rx_pin  pin 70  – host → FPGA
 --   uart_tx_pin  pin 69  – FPGA → host
 --   led[5:0]     pins 15-20 – last byte sent to UART_TX (active-low)
@@ -44,12 +44,12 @@ import Clash.Prelude hiding (take)
 import qualified Prelude as P
 
 -- ===========================================================================
--- Clock domain – Tang Nano 20K has a 27 MHz oscillator
+-- Clock domain – 81 MHz (27 MHz oscillator via on-chip PLL × 3, ÷8)
 -- ===========================================================================
 
-createDomain vSystem {vName = "Dom27", vPeriod = 37037}
+createDomain vSystem {vName = "Dom80", vPeriod = 12500}
 
-type ClkFreqRV = 27_000_000
+type ClkFreqRV = 81_000_000
 
 type BaudRateRV = 115_200
 
@@ -288,8 +288,8 @@ sysStepRV SysStateRV {..} (rxPin, bramOut, dataBramOut) =
   ( Synthesize {t_name = "top", t_inputs = [PortName "clk", PortName "uart_rx_pin"], t_output = PortProduct "" [PortName "uart_tx_pin", PortName "led"]}
   )
   #-}
--- Signal Dom27 Bit = uart_rx_pin, Signal Dom27 (Bit, BitVector 6) = (uart_tx_pin, led[5:0])
-topEntityRV :: Clock Dom27 -> Signal Dom27 Bit -> Signal Dom27 (Bit, BitVector 6)
+-- Signal Dom80 Bit = uart_rx_pin, Signal Dom80 (Bit, BitVector 6) = (uart_tx_pin, led[5:0])
+topEntityRV :: Clock Dom80 -> Signal Dom80 Bit -> Signal Dom80 (Bit, BitVector 6)
 topEntityRV clk rxPin =
   withClockResetEnable clk resetGen enableGen
     $ let fullOut     = mealy sysStepRV initSysStateRV (bundle (rxPin, instrBramOut, dataBramOut))
