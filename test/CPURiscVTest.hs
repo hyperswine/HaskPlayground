@@ -32,9 +32,7 @@ import qualified Prelude as P
 -- Simulation helpers
 -- ===========================================================================
 
--- | Run the CPU until the PC remains stationary for 4 consecutive cycles
---   (no instruction changes it), or until a cycle budget is exhausted.
---   Returns the final register file and memory-controller state.
+-- | Run the CPU until the PC remains stationary for 4 consecutive cycles (no instruction changes it), or until a cycle budget is exhausted. Returns the final register file and memory-controller state.
 runUntilDone :: InstrMem -> Int -> (RegFile, MemCtrl)
 runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
   where
@@ -47,7 +45,7 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
               ram      = simRam st
               pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
               instr    = iMem !! pcW
-              dataAddr = truncateB (unpack (exwbAluOut (rvExWb cpu)) `shiftR` 2) :: Unsigned 10
+              dataAddr = truncateB (unpack (exmemAluOut (rvExMem cpu)) `shiftR` 2) :: Unsigned 10
               dataWord = ram !! dataAddr
               (cpu', mc', wc, pc, _, _, _) = stepCpuRV cpu (instr, dataWord, mc, True)
               ram'  = case wc of
@@ -233,8 +231,7 @@ prop_srli = property $ do
 -- | SRAI: arithmetic right shift, sign bit propagated
 prop_srai :: Property
 prop_srai = property $ do
-  -- Load -8 (= 0xFFFF_FFF8) into x1 via LUI+ADDI, then shift right by 2
-  -- -8 >> 2 (arithmetic) = -2 = 0xFFFF_FFFE
+  -- Load -8 (= 0xFFFF_FFF8) into x1 via LUI+ADDI, then shift right by 2. -8 >> 2 (arithmetic) = -2 = 0xFFFF_FFFE
   let mem =
         buildMem
           [ (0, iADDI 1 0 (-8)), -- x1 = 0xFFFF_FFF8 (sign-extended -8)
@@ -715,8 +712,7 @@ prop_uart_pop_clears_valid = property $ do
 -- | Writing to UART_TX while UART is already valid overwrites the old byte.
 prop_uart_overwrite :: Property
 prop_uart_overwrite = property $ do
-  -- Write 0x41 then 0x42; only 0x42 will be in the valid latch at the end
-  -- (the pipeline retires one instruction at a time so the second SW wins).
+  -- Write 0x41 then 0x42; only 0x42 will be in the valid latch at the end (the pipeline retires one instruction at a time so the second SW wins).
   let mem =
         buildMem
           [ (0, iLUI 1 0x10), -- x1 = UART_TX base
@@ -806,5 +802,112 @@ cpuRiscVGroup =
     ("uart status ready", prop_uart_status_always_ready),
     ("uart pop clears valid", prop_uart_pop_clears_valid),
     ("uart overwrite", prop_uart_overwrite),
-    ("uart loop last byte", prop_uart_loop_last_byte)
+    ("uart loop last byte", prop_uart_loop_last_byte),
+    -- Integration tests (full program simulations)
+    ("count.S: uart output 0-9 newline", prop_count_s_uart),
+    ("sum 1..10: uart byte = 55",        prop_sum_s_uart)
   ]
+
+-- ===========================================================================
+-- Integration tests: full program simulations
+-- ===========================================================================
+
+-- | Run the CPU collecting every UART byte as it is emitted, draining the UART latch after each step so back-to-back writes are all captured. Stops when the PC has been stationary for 4 consecutive cycles or the cycle budget is exhausted.
+runCollectUart :: InstrMem -> Int -> [BitVector 8]
+runCollectUart iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 []
+  where
+    go _ 0 _ _ acc = P.reverse acc
+    go st n lastPC sameCount acc
+      | sameCount >= 4 = P.reverse acc
+      | otherwise =
+          let cpu      = simCpu st
+              mc       = simData st
+              ram      = simRam st
+              pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
+              instr    = iMem !! pcW
+              dataAddr = truncateB (unpack (exmemAluOut (rvExMem cpu)) `shiftR` 2) :: Unsigned 10
+              dataWord = ram !! dataAddr
+              (cpu', mc1, wc, pc, _, _, _) = stepCpuRV cpu (instr, dataWord, mc, True)
+              ram'     = case wc of
+                           Just (idx, w) -> replace idx w ram
+                           Nothing       -> ram
+              (mc2, mByte) = uartPop mc1
+              acc'     = case mByte of { Just b -> b : acc; Nothing -> acc }
+              st'      = st { simCpu = cpu', simData = mc2, simRam = ram' }
+              same     = if pc == lastPC then sameCount + 1 else 0
+           in go st' (n - 1) pc same acc'
+
+-- ---------------------------------------------------------------------------
+-- count.S (hand-assembled)
+-- ---------------------------------------------------------------------------
+--
+-- Register map:  s0=x8 (UART_TX addr), t0=x5 (current char), t1=x6 ('9')
+--
+-- Layout:
+--   word 0  (byte  0):  LUI  s0,  0x10        s0 = 0x00010000
+--   word 1  (byte  4):  ADDI t0,  x0,  48     t0 = '0'
+--   word 2  (byte  8):  ADDI t1,  x0,  57     t1 = '9'
+--   word 3  (byte 12):  SB   t0,  0(s0)       .Lloop – UART_TX ← t0
+--   word 4  (byte 16):  BEQ  t0,  t1, +12     if t0=='9' goto .Ldone (byte 28)
+--   word 5  (byte 20):  ADDI t0,  t0,  1      t0 += 1
+--   word 6  (byte 24):  JAL  x0, -12          j .Lloop  (byte 12)
+--   word 7  (byte 28):  ADDI a0,  x0,  10     .Ldone – a0 = '\n'
+--   word 8  (byte 32):  SB   a0,  0(s0)       UART_TX ← '\n'
+--   word 9  (byte 36):  JAL  x0,   0          .Lhalt – spin
+
+countSProg :: InstrMem
+countSProg = buildMem
+  [ (0, iLUI 8 0x10)           -- s0 = 0x00010000 (UART_TX)
+  , (1, iADDI 5 0 48)          -- t0 = '0'
+  , (2, iADDI 6 0 57)          -- t1 = '9'
+  , (3, iSB 8 5 0)             -- .Lloop: UART_TX ← t0
+  , (4, iBEQ 5 6 12)           -- if t0 == '9' goto .Ldone (offset +12 from byte 16)
+  , (5, iADDI 5 5 1)           -- t0++
+  , (6, iJAL 0 (-12))          -- j .Lloop (offset -12 from byte 24 → byte 12)
+  , (7, iADDI 10 0 10)         -- .Ldone: a0 = '\n'
+  , (8, iSB 8 10 0)            -- UART_TX ← '\n'
+  , (9, iJAL 0 0)              -- .Lhalt: spin
+  ]
+
+-- | count.S simulation: the full UART output must be "0123456789\n".
+prop_count_s_uart :: Property
+prop_count_s_uart = property $ do
+  let bytes    = runCollectUart countSProg 300
+      expected = P.map (fromIntegral . fromEnum) "0123456789\n" :: [BitVector 8]
+  bytes === expected
+
+-- ---------------------------------------------------------------------------
+-- Minimal sum 1..10 → UART (inline, no subroutine)
+-- ---------------------------------------------------------------------------
+--
+-- Register map:  x1=i, x2=acc, x3=limit, x4=UART_TX
+--
+-- Layout:
+--   word 0  (byte  0):  ADDI x1, x0, 1       i = 1
+--   word 1  (byte  4):  ADDI x2, x0, 0       acc = 0
+--   word 2  (byte  8):  ADD  x2, x2, x1      .Lloop: acc += i
+--   word 3  (byte 12):  ADDI x1, x1, 1       i++
+--   word 4  (byte 16):  ADDI x3, x0, 11      limit = 11
+--   word 5  (byte 20):  BNE  x1, x3, -12     if i != 11 goto .Lloop (byte 8)
+--   word 6  (byte 24):  LUI  x4, 0x10        x4 = UART_TX
+--   word 7  (byte 28):  SB   x4, x2, 0       UART_TX ← acc (raw byte, = 55)
+--   word 8  (byte 32):  JAL  x0, 0           spin
+
+sumSProg :: InstrMem
+sumSProg = buildMem
+  [ (0, iADDI 1 0 1)           -- i = 1
+  , (1, iADDI 2 0 0)           -- acc = 0
+  , (2, iADD 2 2 1)            -- .Lloop: acc += i
+  , (3, iADDI 1 1 1)           -- i++
+  , (4, iADDI 3 0 11)          -- limit = 11
+  , (5, iBNE 1 3 (-12))        -- if i != 11 goto .Lloop (offset -12 from byte 20)
+  , (6, iLUI 4 0x10)           -- x4 = UART_TX
+  , (7, iSB 4 2 0)             -- UART_TX ← acc = 55
+  , (8, iJAL 0 0)              -- spin
+  ]
+
+-- | sum 1..10 simulation: the single emitted UART byte must be 55 (= 0x37).
+prop_sum_s_uart :: Property
+prop_sum_s_uart = property $ do
+  let bytes = runCollectUart sumSProg 200
+  bytes === [55]

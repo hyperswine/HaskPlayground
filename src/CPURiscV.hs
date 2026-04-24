@@ -723,16 +723,7 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
       uop  = idexUop idex
 
       -- ── Forwarding network ──────────────────────────────────────────
-      -- EX/MEM → EX forward (covers all non-load results one cycle old)
-      fwdFromExMem rd val en' reg =
-        if en' && exmemWbEn exmem && exmemRd exmem /= 0
-             && exmemRd exmem == reg
-             && exmemWbSrc exmem /= WbMem   -- load result not yet available
-          then val
-          else en'  `seq` rd  -- use incoming value
-
-      -- Use a cleaner two-mux approach:
-      --   Priority: EX/MEM forward > MEM/WB forward > register file value
+      -- Priority: EX/MEM forward > MEM/WB forward > register file value
       fwdRs1 =
         let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
                           && exmemRd exmem == uRs1 uop
@@ -773,14 +764,13 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
           if opcode (ifidInstr rvIfId) == opJALR
             then unpack (aluResult .&. complement 1) :: PC
             else unpack (pack (fromIntegral (idexPC idex)
-                              + fromIntegral (uImm uop) :: Signed 32)) :: PC
+                              + uImm uop :: Signed 32)) :: PC
         _ ->
           unpack (pack (fromIntegral (idexPC idex)
-                       + fromIntegral (uImm uop) :: Signed 32)) :: PC
+                       + uImm uop :: Signed 32)) :: PC
 
       -- The PC we predicted in IF for this instruction
-      predWasTaken = idexPredTaken idex
-      predPC       = idexPredPC   idex
+      predPC = idexPredPC idex
 
       -- Actual next-PC from the EX point of view
       actualNextPC = if brActualTaken then brTarget else idexPC idex + 4
@@ -868,11 +858,11 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
       (ifPredTaken, ifPredTarget) =
         if fetchOp == opJAL
           then (True, unpack (pack (fromIntegral rvPC
-                                   + fromIntegral (immJ instrWord) :: Signed 32)) :: PC)
+                                   + immJ instrWord :: Signed 32)) :: PC)
           else if fetchOp == opBRANCH && bhtPred
                  then ( True
                       , unpack (pack (fromIntegral rvPC
-                                     + fromIntegral (immB instrWord) :: Signed 32)) :: PC
+                                     + immB instrWord :: Signed 32)) :: PC
                       )
                  else (False, rvPC + 4)
 

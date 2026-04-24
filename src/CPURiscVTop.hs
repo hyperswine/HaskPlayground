@@ -271,10 +271,10 @@ sysStepRV SysStateRV {..} (rxPin, bramOut, dataBramOut) =
       -- ── Instruction BRAM word address for next fetch ─────────────────
       instrRdAddr = truncateB (rvPC cpu2 `shiftR` 2) :: Unsigned 10
 
-      -- ── Data BRAM read address: pre-fetch for next cycle's MEM/WB ────
-      --   Driven by the updated ExWb effective address so that the BRAM
-      --   output is ready exactly when the MEM/WB stage needs it.
-      dataRdAddr = truncateB (unpack (exwbAluOut (rvExWb cpu2)) `shiftR` 2) :: Unsigned 10
+      -- ── Data BRAM read address: pre-fetch for next cycle's MEM ──────
+      --   Driven by the EX/MEM register's ALU result (effective address)
+      --   so that the BRAM output is ready when the MEM stage needs it.
+      dataRdAddr = truncateB (unpack (exmemAluOut (rvExMem cpu2)) `shiftR` 2) :: Unsigned 10
 
       sys' = SysStateRV top3 cpu2 mc2 fifo4 rx' tx'
    in (sys', ((txPin tx', led), instrRdAddr, instrWrCmd, dataRdAddr, dataWrCmd))
