@@ -48,6 +48,7 @@ library
       SMT
       TrafficLight
       VListFP
+      WindowSystem
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
