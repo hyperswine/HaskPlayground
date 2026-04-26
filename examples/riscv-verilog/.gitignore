@@ -1,3 +1,4 @@
 *.fs
 config_pnr.json
 config.json
+.venv

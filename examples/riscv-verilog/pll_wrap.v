@@ -8,8 +8,8 @@
  * Gowin rPLL (Apycula/gowin_pack formula):
  *   FOUT = FCLKIN × (FBDIV_SEL + 1) / (IDIV_SEL + 1)
  *        = 27    × 2               / 1               = 54 MHz
- *   VCO  = FOUT × ODIV_SEL   (must be 500–1250 MHz)
- *        = 54   × 10                                 = 540 MHz ✓
+ *   VCO  = FOUT × ODIV_SEL   (must be 500–1250 MHz; valid: 2/4/8/16/32/48/64/80/96/112/128)
+ *        = 54   × 16                                 = 864 MHz ✓
  *   (ODIV_SEL tunes the VCO frequency; it does NOT divide the output)
  *
  * Synthesis top module: pll_top  (set in config.lushay.json)
@@ -31,7 +31,7 @@ module pll_top (
         .FCLKIN     ("27"),   // input frequency string (MHz)
         .IDIV_SEL   (0),      // IDIV  = IDIV_SEL  + 1 = 1
         .FBDIV_SEL  (1),      // FBDIV = FBDIV_SEL + 1 = 2  → FOUT = 27*2 = 54 MHz
-        .ODIV_SEL   (10),     // VCO   = FOUT * ODIV_SEL    = 54*10 = 540 MHz (in range)
+        .ODIV_SEL   (16),     // VCO   = FOUT * ODIV_SEL    = 54*16 = 864 MHz (valid, in range)
         .PSDA_SEL   ("0000"),
         .DYN_DA_EN  ("false"),
         .DUTYDA_SEL ("1000"),
