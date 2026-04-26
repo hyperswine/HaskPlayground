@@ -1,18 +1,18 @@
 /* pll_wrap.v – PLL wrapper for the Clash-generated CPURiscV top entity.
  *
- * Takes the Tang Nano 20K's 27 MHz oscillator, multiplies it to ~81 MHz
+ * Takes the Tang Nano 20K's 27 MHz oscillator, multiplies it to 54 MHz
  * using the on-chip rPLL, and feeds it into the Clash-generated `top`
  * module.  The wrapper exposes the same external ports as `top` so the
  * existing .cst pin-constraint file works unchanged.
  *
- * PLL frequency calculation (nextpnr-gowin formula):
- *   FVCO  = FCLKIN × (FBDIV_SEL + 2) / (IDIV_SEL + 1)
- *         = 27 × 24 / 1 = 648 MHz   (within 400–1000 MHz VCO range ✓)
- *   FOUT  = FVCO / ODIV_SEL
- *         = 648 / 8 = 81 MHz
+ * Gowin rPLL (Apycula/gowin_pack formula):
+ *   FOUT = FCLKIN × (FBDIV_SEL + 1) / (IDIV_SEL + 1)
+ *        = 27    × 2               / 1               = 54 MHz
+ *   VCO  = FOUT × ODIV_SEL   (must be 500–1250 MHz)
+ *        = 54   × 10                                 = 540 MHz ✓
+ *   (ODIV_SEL tunes the VCO frequency; it does NOT divide the output)
  *
  * Synthesis top module: pll_top  (set in config.lushay.json)
- * SDC constraint:       12.346 ns (= 1 / 81 MHz), see top.sdc
  */
 `default_nettype none
 
@@ -23,31 +23,31 @@ module pll_top (
     output wire [5:0]  led
 );
 
-    // ── PLL: 27 MHz → 81 MHz ────────────────────────────────────────────
-    wire clk_81;
+    // ── PLL: 27 MHz → 54 MHz ────────────────────────────────────────────
+    wire clk_54;
     wire pll_lock;
 
     rPLL #(
         .FCLKIN     ("27"),   // input frequency string (MHz)
-        .IDIV_SEL   (0),      // input  divider  = IDIV_SEL + 1 = 1
-        .FBDIV_SEL  (22),     // VCO multiplier  = FBDIV_SEL + 2 = 24  → 648 MHz VCO
-        .ODIV_SEL   (8),      // output divider  = 8             → 81 MHz
+        .IDIV_SEL   (0),      // IDIV  = IDIV_SEL  + 1 = 1
+        .FBDIV_SEL  (1),      // FBDIV = FBDIV_SEL + 1 = 2  → FOUT = 27*2 = 54 MHz
+        .ODIV_SEL   (10),     // VCO   = FOUT * ODIV_SEL    = 54*10 = 540 MHz (in range)
         .PSDA_SEL   ("0000"),
-        .DYN_DA_EN  (1'b0),
+        .DYN_DA_EN  ("false"),
         .DUTYDA_SEL ("1000"),
-        .CLKOUT_FT_DIR  (1'b1),
-        .CLKOUT_DYN_DA  (1'b0)
+        .CLKOUT_FT_DIR (1'b1)
     ) pll_inst (
         .CLKIN   (clk),
-        .CLKOUT  (clk_81),
+        .CLKOUT  (clk_54),
         .LOCK    (pll_lock),
         // unused / tied-off ports
         .CLKFB   (1'b0),
         .FBDSEL  (6'd0),
         .IDSEL   (6'd0),
         .ODSEL   (6'd0),
-        .DUTYDA  (8'd0),
+        .DUTYDA  (4'd0),
         .PSDA    (4'd0),
+        .FDLY    (4'd0),
         .RESET   (1'b0),
         .RESET_P (1'b0)
     );
@@ -58,7 +58,7 @@ module pll_top (
     // a reset because the Clash domain uses initial-value-based reset that
     // is guaranteed by the FPGA fabric's power-on state.
     top cpu_core (
-        .clk         (clk_81),
+        .clk         (clk_54),
         .uart_rx_pin (uart_rx_pin),
         .uart_tx_pin (uart_tx_pin),
         .led         (led)

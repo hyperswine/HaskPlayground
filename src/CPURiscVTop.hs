@@ -44,12 +44,12 @@ import Clash.Prelude hiding (take)
 import qualified Prelude as P
 
 -- ===========================================================================
--- Clock domain – 81 MHz (27 MHz oscillator via on-chip PLL × 3, ÷8)
+-- Clock domain – 54 MHz (27 MHz oscillator via on-chip PLL × 2, ÷10)
 -- ===========================================================================
 
-createDomain vSystem {vName = "Dom80", vPeriod = 12500}
+createDomain vSystem {vName = "Dom80", vPeriod = 18519}
 
-type ClkFreqRV = 81_000_000
+type ClkFreqRV = 54_000_000
 
 type BaudRateRV = 115_200
 
