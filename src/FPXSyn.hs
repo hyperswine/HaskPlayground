@@ -1961,9 +1961,12 @@ data Frame = Frame
 buildFrame :: [Name] -> [Name] -> Frame
 buildFrame args locals =
   let names   = args ++ locals
-      offsets = Map.fromList (zip names (map (\i -> -(i+1)*8) [0..]))
-      -- negative offsets from fp: fp-8, fp-16, ...
-      size    = align16 (8 * (length names + 2))  -- +2 for ra, s0
+      n       = length names
+      -- Slots start at fp-24 (fp-8=ra, fp-16=s0 are reserved for prologue)
+      offsets = Map.fromList (zip names (map (\i -> -(i+3)*8) [0..]))
+      -- Frame must fit: ra(fp-8), s0(fp-16), n locals starting at fp-24.
+      -- Deepest slot is fp-(n+2)*8.  Align to 16 bytes.
+      size    = align16 (8 * (n + 3))
   in Frame offsets size args
   where
     align16 n = ((n + 15) `div` 16) * 16
@@ -2231,13 +2234,19 @@ cgCallExpr tags frame fn args dest =
       nargs = length args
   in
   case fn of
-    -- Known 2-arg primitive — load arg1 into a0, arg2 into a1
-    -- Load arg2 first (may use a0 as scratch), then arg1 into a0
+    -- Known 2-arg primitive — spill both args to avoid clobbering a1
     CVar [op] | Just prim <- Map.lookup op primOps, nargs == 2 ->
-      cgAtomLoad tags frame (args !! 1) "a1" `cgBind` \a1 ->
-      cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \a0 ->
-      cgReturn $ a1 ++ a0 ++
-        [ "    call  " ++ prim
+      cgBody tags frame (args !! 0) "a0" `cgBind` \a0 ->
+      cgBody tags frame (args !! 1) "a0" `cgBind` \a1 ->
+      cgReturn $
+        [ "    addi  sp, sp, -16  # prim2 spill" ]
+        ++ a0 ++ [ "    sd    a0, 0(sp)" ]
+        ++ a1 ++ [ "    sd    a0, 8(sp)" ]
+        ++
+        [ "    ld    a0, 0(sp)"
+        , "    ld    a1, 8(sp)"
+        , "    addi  sp, sp, 16"
+        , "    call  " ++ prim
         , mv dest "a0"
         ]
 
@@ -2253,12 +2262,19 @@ cgCallExpr tags frame fn args dest =
     CVar ["List","Nil"] ->
       cgReturn [ "    call  rt_list_nil", mv dest "a0" ]
 
-    -- List.Cons — 2 args
+    -- List.Cons — 2 args, spill to avoid a1 clobber
     CVar ["List","Cons"] | nargs == 2 ->
-      cgAtomLoad tags frame (args !! 1) "a1" `cgBind` \a1 ->
-      cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \a0 ->
-      cgReturn $ a1 ++ a0 ++
-        [ "    call  rt_list_cons", mv dest "a0" ]
+      cgBody tags frame (args !! 0) "a0" `cgBind` \a0 ->
+      cgBody tags frame (args !! 1) "a0" `cgBind` \a1 ->
+      cgReturn $
+        [ "    addi  sp, sp, -16  # cons spill" ]
+        ++ a0 ++ [ "    sd    a0, 0(sp)" ]
+        ++ a1 ++ [ "    sd    a0, 8(sp)" ]
+        ++
+        [ "    ld    a0, 0(sp)"
+        , "    ld    a1, 8(sp)"
+        , "    addi  sp, sp, 16"
+        , "    call  rt_list_cons", mv dest "a0" ]
 
     -- Other List function — load all args and call stub
     CVar q | isListFn q ->
@@ -2349,24 +2365,60 @@ mv dest src = if dest == src then "    # result in " ++ src
 -- Load a list of args into a0..aN, evaluating in order.
 -- We must be careful: later args might clobber registers used by earlier ones.
 -- Strategy: evaluate all into temp stack slots, then load into arg regs.
+-- Load argument list into a0..a{n-1} safely.
+-- Strategy: compute each arg into a0 and spill to a temporary stack slot,
+-- then load all slots into the target registers.  This avoids a caller-saved
+-- register (e.g. a1) being clobbered by a subsequent rt_box_int call.
 cgLoadArgsList :: Map.Map String Int -> Frame -> [CoreExpr] -> CG [Asm]
-cgLoadArgsList tags frame args = loadRev (length args - 1) (reverse args)
+cgLoadArgsList tags frame args =
+  let n = length args
+      slotSz = align16_8 (n * 8)
+      -- Compute arg i into a0, store to sp+i*8
+      computeOne i a =
+        cgBody tags frame a "a0" `cgBind` \aAsm ->
+        cgReturn $ aAsm ++ [ "    sd    a0, " ++ show (i*8) ++ "(sp)" ]
+      computes = map (\(i,a) -> computeOne i a) (zip [0..] args)
+      flatComputes = foldl (\acc m -> acc `cgBind` \xs -> m `cgBind` \ys -> cgReturn (xs++ys)) (cgReturn []) computes
+      -- After computing, load each slot into the right register
+      loads = [ "    ld    a" ++ show i ++ ", " ++ show (i*8) ++ "(sp)" | i <- [0..n-1] ]
+  in if n == 0
+     then cgReturn []
+     else if n == 1
+     -- Single arg: just compute directly into a0, no spill needed
+     then cgBody tags frame (head args) "a0"
+     else
+       flatComputes `cgBind` \computeAsms ->
+       cgReturn $
+         [ "    addi  sp, sp, -" ++ show slotSz ++ "  # arg spill (" ++ show n ++ " args)" ]
+         ++ computeAsms
+         ++ loads
+         ++ [ "    addi  sp, sp, " ++ show slotSz ++ "   # restore sp" ]
   where
-    loadRev _ []     = cgReturn []
-    loadRev i (a:as) =
-      cgAtomLoad tags frame a ("a" ++ show i) `cgBind` \aAsm ->
-      loadRev (i-1) as `cgBind` \rest ->
-      cgReturn (aAsm ++ rest)
+    align16_8 n = ((n + 15) `div` 16) * 16
 
 -- Load captured args into a2, a3, ... (for rt_make_closure partial-application calls).
+-- Uses the same spill strategy to avoid clobbering already-set registers.
 cgLoadCapturedArgs :: Map.Map String Int -> Frame -> [CoreExpr] -> CG [Asm]
-cgLoadCapturedArgs tags frame args = go 0 args
+cgLoadCapturedArgs tags frame args =
+  let n = length args
+      slotSz = align16_8c (n * 8)
+      computeOne i a =
+        cgBody tags frame a "a0" `cgBind` \aAsm ->
+        cgReturn $ aAsm ++ [ "    sd    a0, " ++ show (i*8) ++ "(sp)" ]
+      computes = map (\(i,a) -> computeOne i a) (zip [0..] args)
+      flatComputes = foldl (\acc m -> acc `cgBind` \xs -> m `cgBind` \ys -> cgReturn (xs++ys)) (cgReturn []) computes
+      loads = [ "    ld    a" ++ show (i+2) ++ ", " ++ show (i*8) ++ "(sp)" | i <- [0..n-1] ]
+  in if n == 0
+     then cgReturn []
+     else
+       flatComputes `cgBind` \computeAsms ->
+       cgReturn $
+         [ "    addi  sp, sp, -" ++ show slotSz ++ "  # captured spill" ]
+         ++ computeAsms
+         ++ loads
+         ++ [ "    addi  sp, sp, " ++ show slotSz ]
   where
-    go _ []     = cgReturn []
-    go i (a:as) =
-      cgAtomLoad tags frame a ("a" ++ show (i + 2)) `cgBind` \aAsm ->
-      go (i+1) as `cgBind` \rest ->
-      cgReturn (aAsm ++ rest)
+    align16_8c n = ((n + 15) `div` 16) * 16
 
 -- Load a single atom into a register.
 -- For literals, we box into a0 then move — but if dest != a0 we must

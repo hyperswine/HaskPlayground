@@ -9,32 +9,32 @@
     .globl calc
     .type  calc, @function
 calc:
-    # prologue: frame=16 bytes
-    addi  sp, sp, -16
-    sd    ra, 8(sp)
-    sd    s0, 0(sp)
-    addi  s0, sp, 16
+    # prologue: frame=32 bytes
+    addi  sp, sp, -32
+    sd    ra, 24(sp)
+    sd    s0, 16(sp)
+    addi  s0, sp, 32
     la    a0, calc_Dlam0  # global calc$lam0
     # epilogue
-    ld    ra, 8(sp)
-    ld    s0, 0(sp)
-    addi  sp, sp, 16
+    ld    ra, 24(sp)
+    ld    s0, 16(sp)
+    addi  sp, sp, 32
     ret
     .size calc, .-calc
 
     .globl safediv
     .type  safediv, @function
 safediv:
-    # prologue: frame=16 bytes
-    addi  sp, sp, -16
-    sd    ra, 8(sp)
-    sd    s0, 0(sp)
-    addi  s0, sp, 16
+    # prologue: frame=32 bytes
+    addi  sp, sp, -32
+    sd    ra, 24(sp)
+    sd    s0, 16(sp)
+    addi  s0, sp, 32
     la    a0, safediv_Dlam2  # global safediv$lam2
     # epilogue
-    ld    ra, 8(sp)
-    ld    s0, 0(sp)
-    addi  sp, sp, 16
+    ld    ra, 24(sp)
+    ld    s0, 16(sp)
+    addi  sp, sp, 32
     ret
     .size safediv, .-safediv
 
@@ -48,10 +48,11 @@ __eval_0:
     addi  s0, sp, 32
     li    a0, 5
     call  rt_box_int
+    # -> a0
     call  calc_Dlam0
     # result in a0
-    sd    a0, -8(s0)  # $anf0
-    ld    a0, -8(s0)  # $anf0
+    sd    a0, -24(s0)  # $anf0
+    ld    a0, -24(s0)  # $anf0
     # epilogue
     ld    ra, 24(sp)
     ld    s0, 16(sp)
@@ -67,20 +68,22 @@ __eval_1:
     sd    ra, 24(sp)
     sd    s0, 16(sp)
     addi  s0, sp, 32
-    # box int 4 into a1
-    addi  sp, sp, -16
-    sd    a0, 0(sp)          # save a0
-    li    a0, 4
-    call  rt_box_int
-    mv    a1, a0
-    ld    a0, 0(sp)          # restore a0
-    addi  sp, sp, 16
+    addi  sp, sp, -16  # prim2 spill
     li    a0, 3
     call  rt_box_int
+    # -> a0
+    sd    a0, 0(sp)
+    li    a0, 4
+    call  rt_box_int
+    # -> a0
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
+    addi  sp, sp, 16
     call  rt_prim_add_int
     # result in a0
-    sd    a0, -8(s0)  # $anf2
-    ld    a0, -8(s0)  # $anf2
+    sd    a0, -24(s0)  # $anf2
+    ld    a0, -24(s0)  # $anf2
     # epilogue
     ld    ra, 24(sp)
     ld    s0, 16(sp)
@@ -91,19 +94,21 @@ __eval_1:
     .globl __eval_2
     .type  __eval_2, @function
 __eval_2:
-    # prologue: frame=32 bytes
-    addi  sp, sp, -32
-    sd    ra, 24(sp)
-    sd    s0, 16(sp)
-    addi  s0, sp, 32
+    # prologue: frame=48 bytes
+    addi  sp, sp, -48
+    sd    ra, 40(sp)
+    sd    s0, 32(sp)
+    addi  s0, sp, 48
     li    a0, 10
     call  rt_box_int
+    # -> a0
     call  safediv_Dlam2
     # result in a0
-    sd    a0, -8(s0)  # $anf3
-    ld    t0, -8(s0)  # $anf3
+    sd    a0, -24(s0)  # $anf3
+    ld    t0, -24(s0)  # $anf3
     li    a0, 3
     call  rt_box_int
+    # -> a0
     # indirect call
     lw    t1, 0(t0)          # load object tag
     li    t2, 5              # TAG_CLOSURE
@@ -115,31 +120,33 @@ _Licall0_clos:
     jalr  ra, t1, 0          # t0=closure, a0=new_arg
 _Licall0_done:
     # result in a0
-    sd    a0, -16(s0)  # $anf4
-    ld    a0, -16(s0)  # $anf4
+    sd    a0, -32(s0)  # $anf4
+    ld    a0, -32(s0)  # $anf4
     # epilogue
-    ld    ra, 24(sp)
-    ld    s0, 16(sp)
-    addi  sp, sp, 32
+    ld    ra, 40(sp)
+    ld    s0, 32(sp)
+    addi  sp, sp, 48
     ret
     .size __eval_2, .-__eval_2
 
     .globl __eval_3
     .type  __eval_3, @function
 __eval_3:
-    # prologue: frame=32 bytes
-    addi  sp, sp, -32
-    sd    ra, 24(sp)
-    sd    s0, 16(sp)
-    addi  s0, sp, 32
+    # prologue: frame=48 bytes
+    addi  sp, sp, -48
+    sd    ra, 40(sp)
+    sd    s0, 32(sp)
+    addi  s0, sp, 48
     li    a0, 7
     call  rt_box_int
+    # -> a0
     call  safediv_Dlam2
     # result in a0
-    sd    a0, -8(s0)  # $anf5
-    ld    t0, -8(s0)  # $anf5
+    sd    a0, -24(s0)  # $anf5
+    ld    t0, -24(s0)  # $anf5
     li    a0, 0
     call  rt_box_int
+    # -> a0
     # indirect call
     lw    t1, 0(t0)          # load object tag
     li    t2, 5              # TAG_CLOSURE
@@ -151,69 +158,72 @@ _Licall1_clos:
     jalr  ra, t1, 0          # t0=closure, a0=new_arg
 _Licall1_done:
     # result in a0
-    sd    a0, -16(s0)  # $anf6
-    ld    a0, -16(s0)  # $anf6
+    sd    a0, -32(s0)  # $anf6
+    ld    a0, -32(s0)  # $anf6
     # epilogue
-    ld    ra, 24(sp)
-    ld    s0, 16(sp)
-    addi  sp, sp, 32
+    ld    ra, 40(sp)
+    ld    s0, 32(sp)
+    addi  sp, sp, 48
     ret
     .size __eval_3, .-__eval_3
 
     .globl calc_Dlam0
     .type  calc_Dlam0, @function
 calc_Dlam0:
-    # prologue: frame=64 bytes
-    addi  sp, sp, -64
-    sd    ra, 56(sp)
-    sd    s0, 48(sp)
-    addi  s0, sp, 64
-    sd    a0, -8(s0)  # $a00
-    # box int 1 into a1
-    addi  sp, sp, -16
-    sd    a0, 0(sp)          # save a0
+    # prologue: frame=80 bytes
+    addi  sp, sp, -80
+    sd    ra, 72(sp)
+    sd    s0, 64(sp)
+    addi  s0, sp, 80
+    sd    a0, -24(s0)  # $a00
+    addi  sp, sp, -16  # prim2 spill
+    ld    a0, -24(s0)  # $a00
+    sd    a0, 0(sp)
     li    a0, 1
     call  rt_box_int
-    mv    a1, a0
-    ld    a0, 0(sp)          # restore a0
+    # -> a0
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
     addi  sp, sp, 16
-    ld    a0, -8(s0)  # $a00
     call  rt_prim_add_int
     # result in a0
-    sd    a0, -16(s0)  # $anf8
-    ld    a0, -16(s0)  # $anf8
-    sd    a0, -24(s0)  # a
-    # box int 2 into a1
-    addi  sp, sp, -16
-    sd    a0, 0(sp)          # save a0
+    sd    a0, -32(s0)  # $anf8
+    ld    a0, -32(s0)  # $anf8
+    sd    a0, -40(s0)  # a
+    addi  sp, sp, -16  # prim2 spill
+    ld    a0, -40(s0)  # a
+    sd    a0, 0(sp)
     li    a0, 2
     call  rt_box_int
-    mv    a1, a0
-    ld    a0, 0(sp)          # restore a0
+    # -> a0
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
     addi  sp, sp, 16
-    ld    a0, -24(s0)  # a
     call  rt_prim_mul_int
     # result in a0
-    sd    a0, -32(s0)  # $anf10
-    ld    a0, -32(s0)  # $anf10
-    sd    a0, -40(s0)  # b
-    # box int 1 into a1
-    addi  sp, sp, -16
-    sd    a0, 0(sp)          # save a0
+    sd    a0, -48(s0)  # $anf10
+    ld    a0, -48(s0)  # $anf10
+    sd    a0, -56(s0)  # b
+    addi  sp, sp, -16  # prim2 spill
+    ld    a0, -56(s0)  # b
+    sd    a0, 0(sp)
     li    a0, 1
     call  rt_box_int
-    mv    a1, a0
-    ld    a0, 0(sp)          # restore a0
+    # -> a0
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
     addi  sp, sp, 16
-    ld    a0, -40(s0)  # b
     call  rt_prim_sub_int
     # result in a0
-    sd    a0, -48(s0)  # $anf12
-    ld    a0, -48(s0)  # $anf12
+    sd    a0, -64(s0)  # $anf12
+    ld    a0, -64(s0)  # $anf12
     # epilogue
-    ld    ra, 56(sp)
-    ld    s0, 48(sp)
-    addi  sp, sp, 64
+    ld    ra, 72(sp)
+    ld    s0, 64(sp)
+    addi  sp, sp, 80
     ret
     .size calc_Dlam0, .-calc_Dlam0
 
@@ -225,23 +235,24 @@ safediv_Dlam1:
     sd    ra, 56(sp)
     sd    s0, 48(sp)
     addi  s0, sp, 64
-    sd    a0, -8(s0)  # $a01
-    sd    a1, -16(s0)  # $a12
-    # box int 0 into a1
-    addi  sp, sp, -16
-    sd    a0, 0(sp)          # save a0
+    sd    a0, -24(s0)  # $a01
+    sd    a1, -32(s0)  # $a12
+    addi  sp, sp, -16  # prim2 spill
+    ld    a0, -32(s0)  # $a12
+    sd    a0, 0(sp)
     li    a0, 0
     call  rt_box_int
-    mv    a1, a0
-    ld    a0, 0(sp)          # restore a0
+    # -> a0
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
     addi  sp, sp, 16
-    ld    a0, -16(s0)  # $a12
     call  rt_prim_eq
     # result in a0
-    sd    a0, -24(s0)  # $anf14
-    ld    a0, -24(s0)  # $anf14
-    sd    a0, -32(s0)  # $if3
-    ld    t0, -32(s0)  # $if3
+    sd    a0, -40(s0)  # $anf14
+    ld    a0, -40(s0)  # $anf14
+    sd    a0, -48(s0)  # $if3
+    ld    t0, -48(s0)  # $if3
     lw    t1, 0(t0)   # load tag
     li    t2, 1
     bne   t1, t2, _Larm3
@@ -253,12 +264,18 @@ _Larm3:
     lw    t1, 0(t0)   # load tag
     li    t2, 0
     bne   t1, t2, _Larm4
-    ld    a1, -16(s0)  # $a12
-    ld    a0, -8(s0)  # $a01
+    addi  sp, sp, -16  # prim2 spill
+    ld    a0, -24(s0)  # $a01
+    sd    a0, 0(sp)
+    ld    a0, -32(s0)  # $a12
+    sd    a0, 8(sp)
+    ld    a0, 0(sp)
+    ld    a1, 8(sp)
+    addi  sp, sp, 16
     call  rt_prim_div_int
     # result in a0
-    sd    a0, -40(s0)  # $anf16
-    ld    a0, -40(s0)  # $anf16
+    sd    a0, -56(s0)  # $anf16
+    ld    a0, -56(s0)  # $anf16
     j     _Lcend2
 _Larm4:
 _Lcend2:
@@ -280,23 +297,27 @@ safediv_Dlam1_centry:
     .globl safediv_Dlam2
     .type  safediv_Dlam2, @function
 safediv_Dlam2:
-    # prologue: frame=32 bytes
-    addi  sp, sp, -32
-    sd    ra, 24(sp)
-    sd    s0, 16(sp)
-    addi  s0, sp, 32
-    sd    a0, -8(s0)  # $a01
-    ld    a2, -8(s0)  # $a01
+    # prologue: frame=48 bytes
+    addi  sp, sp, -48
+    sd    ra, 40(sp)
+    sd    s0, 32(sp)
+    addi  s0, sp, 48
+    sd    a0, -24(s0)  # $a01
+    addi  sp, sp, -16  # captured spill
+    ld    a0, -24(s0)  # $a01
+    sd    a0, 0(sp)
+    ld    a2, 0(sp)
+    addi  sp, sp, 16
     la    a0, safediv_Dlam1_centry
     li    a1, 1
     call  rt_make_closure
     # result in a0
-    sd    a0, -16(s0)  # $anf17
-    ld    a0, -16(s0)  # $anf17
+    sd    a0, -32(s0)  # $anf17
+    ld    a0, -32(s0)  # $anf17
     # epilogue
-    ld    ra, 24(sp)
-    ld    s0, 16(sp)
-    addi  sp, sp, 32
+    ld    ra, 40(sp)
+    ld    s0, 32(sp)
+    addi  sp, sp, 48
     ret
     .size safediv_Dlam2, .-safediv_Dlam2
 
