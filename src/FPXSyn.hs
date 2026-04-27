@@ -8,7 +8,7 @@ module FPXSyn where
 
 import Data.Void
 import Data.Char (isAlphaNum, isAlpha, isUpper, isLower, isDigit)
-import Data.List (intercalate, nub, (\\))
+import Data.List (intercalate, nub, (\\), foldl')
 import Data.Maybe (fromMaybe)
 import Control.Monad (void, when, foldM)
 import qualified Control.Monad.State as S
@@ -1715,6 +1715,796 @@ ppTypedDecl (TDIso a b (e1,e2))  =
 ppTypedDecl (TDEval te ty)       =
   "> " ++ ppTE 0 te ++ "\n  : " ++ ppTy ty
 
+-- ============================================================
+-- PASS 4b: Saturation
+-- Collapse curried known-arity calls back into fully-applied form.
+-- After ANF, (f x y) becomes (let a = f x in a y).
+-- For known primitives, constructors, and top-level functions
+-- we want to emit a single call with all args loaded at once.
+--
+-- This pass walks the let-chain and recognises patterns like:
+--   let a = f x        -- f is a known 2-arg prim / fn
+--   let b = a y        -- a is the partial result
+-- and rewrites to a single SatCall node that codegen handles directly.
+--
+-- We use a small extension to CoreExpr for saturated calls.
+-- Rather than extend the ADT, we represent them as a special
+-- CApp chain that the codegen recognises by inspecting arity.
+-- The saturation pass just ensures the args are collected so codegen
+-- can emit a single call instruction.
+--
+-- Implementation: track which let-bound names are "partial applications"
+-- of known functions, and when a subsequent let completes them, emit
+-- directly. This is done at codegen time by looking through the let chain.
+-- ============================================================
+
+-- Known arities for primitives and builtins
+knownArity :: Name -> Maybe Int
+knownArity n = Map.lookup n arityTable
+
+arityTable :: Map.Map Name Int
+arityTable = Map.fromList $
+  -- 2-arg primitives
+  [ (op, 2) | op <- ["+","-","*","/","+.","-.","+.","*.","/.","==","/=","<",">","<=",">=","&&","||","++"] ] ++
+  -- 1-arg primitives
+  [ (op, 1) | op <- ["negate"] ] ++
+  -- List constructors
+  [ ("List.Cons", 2), ("List.Nil", 0) ] ++
+  -- Tuple constructors
+  [ ("Tuple." ++ show n, n) | n <- [2..8] ]
+
+-- Saturation pass: rewrite the let-chain to group partial applications.
+-- We tag partial-application bindings in a Map so codegen can see through them.
+-- Returns: (expression with inlined partials where profitable, partial-app map)
+-- A "partial app map" maps a let-bound name to (fn, [args so far]).
+type PartialMap = Map.Map Name (CoreExpr, [CoreExpr])
+
+saturateExpr :: SymTable -> PartialMap -> CoreExpr -> CoreExpr
+saturateExpr sym pm (CLet n rhs body) =
+  let rhs' = saturateExpr sym pm rhs
+      pm'  = updatePartials sym pm n rhs'
+  in CLet n rhs' (saturateExpr sym pm' body)
+saturateExpr sym pm (CCase e arms) =
+  CCase (saturateExpr sym pm e)
+    [(p, saturateExpr sym pm b) | (p,b) <- arms]
+saturateExpr sym pm (CLam n body) =
+  CLam n (saturateExpr sym Map.empty body)
+saturateExpr sym pm (CApp f x) =
+  CApp (saturateExpr sym pm f) (saturateExpr sym pm x)
+saturateExpr _ _ e = e
+
+-- When we bind `n = rhs`, check if rhs is a partial application
+-- of something with known arity so we can track it.
+updatePartials :: SymTable -> PartialMap -> Name -> CoreExpr -> PartialMap
+updatePartials sym pm n rhs =
+  case collectAppsS rhs of
+    (CVar [fn], args) ->
+      let arity = case Map.lookup fn arityTable of
+                    Just a  -> Just a
+                    Nothing -> case Map.lookup fn sym of
+                                 Just fi -> Just (fiArity fi)
+                                 Nothing -> Nothing
+      in case arity of
+           Just a | length args < a ->
+             Map.insert n (CVar [fn], args) pm
+           _ -> pm
+    (CVar q, args) | isListFnS q ->
+      -- List functions: treat as known arity 2 for map/filter, 3 for fold
+      let a = listFnArity q
+      in if length args < a then Map.insert n (CVar q, args) pm
+         else pm
+    _ -> pm
+  where
+    -- Resolve through the partial map: if rhs is `CVar partial_name`, look it up
+    collectAppsS (CApp f x) =
+      let (fn, args) = collectAppsS f
+          x' = case x of
+                 CVar [vn] -> case Map.lookup vn pm of
+                                Just _  -> x  -- partial itself, not an arg
+                                Nothing -> x
+                 _ -> x
+      in (fn, args ++ [x'])
+    collectAppsS e = (e, [])
+
+isListFnS :: QName -> Bool
+isListFnS ("List":_) = True
+isListFnS _          = False
+
+listFnArity :: QName -> Int
+listFnArity ["List","map"]    = 2
+listFnArity ["List","filter"] = 2
+listFnArity ["List","fold"]   = 3
+listFnArity ["List","foldl"]  = 3
+listFnArity ["List","foldr"]  = 3
+listFnArity ["List","zip"]    = 2
+listFnArity ["List","zipWith"]= 3
+listFnArity ["List","take"]   = 2
+listFnArity ["List","drop"]   = 2
+listFnArity ["List","Cons"]   = 2
+listFnArity _                 = 2
+
+saturateDecl :: SymTable -> CoreDecl -> CoreDecl
+saturateDecl sym (CDDef n e) = CDDef n (saturateExpr sym Map.empty e)
+saturateDecl sym (CDEval e)  = CDEval (saturateExpr sym Map.empty e)
+saturateDecl _   d           = d
+
+saturateModule :: SymTable -> CoreModule -> CoreModule
+saturateModule sym = map (saturateDecl sym)
+
+-- ============================================================
+-- PASS 5: RISC-V Code Generation
+-- ============================================================
+
+-- Symbol table: function names to labels + arities
+data FunInfo = FunInfo
+  { fiLabel :: String
+  , fiArity :: Int
+  } deriving (Show)
+
+type SymTable = Map.Map Name FunInfo
+
+countArity :: CoreExpr -> Int
+countArity (CLam _ body) = 1 + countArity body
+countArity _             = 0
+
+-- Mangle a name to a valid assembly label
+mangle :: Name -> String
+mangle = concatMap mangleChar
+  where
+    mangleChar c
+      | (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') = [c]
+      | c == '_'  = "_"
+      | c == '\'' = "_q"
+      | c == '$'  = "_D"
+      | c == '.'  = "_d"
+      | otherwise = "_x" ++ show (fromEnum c) ++ "_"
+
+buildSymTable :: CoreModule -> SymTable
+buildSymTable decls = Map.fromList
+  [ (n, FunInfo (mangle n) (countArity e))
+  | CDDef n e <- decls ]
+
+-- Assembly line
+type Asm = String
+
+-- CG state
+data CGState = CGState
+  { cgCounter  :: Int
+  , cgStrings  :: [(String, String)]
+  , cgSymTable :: SymTable
+  }
+
+type CG a = CGState -> (a, CGState)
+
+cgReturn :: a -> CG a
+cgReturn x s = (x, s)
+
+cgBind :: CG a -> (a -> CG b) -> CG b
+cgBind m f s = let (a, s') = m s in f a s'
+
+cgGet :: CG CGState
+cgGet s = (s, s)
+
+cgModify :: (CGState -> CGState) -> CG ()
+cgModify f s = ((), f s)
+
+freshLabel :: String -> CG String
+freshLabel hint s =
+  let n = cgCounter s
+  in ("_L" ++ hint ++ show n, s { cgCounter = n + 1 })
+
+internString :: String -> CG String
+internString str s =
+  case lookup str (cgStrings s) of
+    Just lbl -> (lbl, s)
+    Nothing  ->
+      let lbl = ".Lstr" ++ show (length (cgStrings s))
+      in (lbl, s { cgStrings = cgStrings s ++ [(lbl, str)] })
+
+runCG :: SymTable -> CG a -> (a, CGState)
+runCG sym m = m (CGState 0 [] sym)
+
+-- Frame: maps local names to stack offsets from fp (s0)
+data Frame = Frame
+  { frLocals :: Map.Map Name Int
+  , frSize   :: Int
+  , frArgs   :: [Name]
+  }
+
+buildFrame :: [Name] -> [Name] -> Frame
+buildFrame args locals =
+  let names   = args ++ locals
+      offsets = Map.fromList (zip names (map (\i -> -(i+1)*8) [0..]))
+      -- negative offsets from fp: fp-8, fp-16, ...
+      size    = align16 (8 * (length names + 2))  -- +2 for ra, s0
+  in Frame offsets size args
+  where
+    align16 n = ((n + 15) `div` 16) * 16
+
+collectLocals :: CoreExpr -> [Name]
+collectLocals (CLet n _ body) = n : collectLocals body
+collectLocals (CCase e arms)  = collectLocals e ++
+  concatMap (\(p,b) -> cgPatBound p ++ collectLocals b) arms
+collectLocals (CApp f x)      = collectLocals f ++ collectLocals x
+collectLocals _               = []
+
+cgPatBound :: CorePat -> [Name]
+cgPatBound (CPVar n)    = [n]
+cgPatBound (CPCon _ ns) = ns
+cgPatBound (CPTuple ns) = ns
+cgPatBound _            = []
+
+-- Constructor tag table
+builtinTags :: Map.Map String Int
+builtinTags = Map.fromList
+  [ ("List.Nil",  0), ("List.Cons", 1)
+  , ("True", 1),      ("False", 0)
+  ]
+
+buildTagTable :: CoreModule -> Map.Map String Int
+buildTagTable decls = foldl' addData builtinTags decls
+  where
+    addData tbl (CDData _ _ cons) =
+      foldl' (\t (i,(n,_)) -> Map.insert n i t) tbl (zip [0..] cons)
+    addData tbl _ = tbl
+
+-- ---- Top-level entry point ----
+
+generateModule :: CoreModule -> String
+generateModule decls =
+  let sym  = buildSymTable decls
+      tags = buildTagTable decls
+      (sections, st) = runCG sym (cgModule tags decls)
+  in unlines $ asmHeader ++ sections ++ dataSection (cgStrings st) ++ runtimeStubs
+
+asmHeader :: [Asm]
+asmHeader =
+  [ "# FP-RISC generated RISC-V assembly (RV64GC)"
+  , "# Every value is a heap pointer in a0..a7."
+  , "# Primitives unbox, compute, rebox."
+  , ""
+  , "    .option nopic"
+  , "    .text"
+  , ""
+  ]
+
+dataSection :: [(String, String)] -> [Asm]
+dataSection [] = []
+dataSection strs =
+  "" : "    .section .rodata" :
+  concatMap (\(lbl, s) ->
+    [ lbl ++ ":"
+    , "    .quad " ++ show (length s)
+    , "    .string " ++ show s
+    ]) strs
+
+cgModule :: Map.Map String Int -> CoreModule -> CG [Asm]
+cgModule tags [] = cgReturn []
+cgModule tags (d:ds) =
+  cgDecl tags d `cgBind` \a ->
+  cgModule tags ds `cgBind` \b ->
+  cgReturn (a ++ b)
+
+cgDecl :: Map.Map String Int -> CoreDecl -> CG [Asm]
+cgDecl tags (CDDef name expr) = cgFunction tags name expr
+cgDecl tags (CDEval expr)     =
+  cgGet `cgBind` \st ->
+  let n = cgCounter st in
+  cgModify (\s -> s { cgCounter = n + 1 }) `cgBind` \_ ->
+  cgFunction tags ("__eval_" ++ show n) expr
+cgDecl _ _ = cgReturn []
+
+cgFunction :: Map.Map String Int -> Name -> CoreExpr -> CG [Asm]
+cgFunction tags name expr =
+  let args   = lambdaArgs expr
+      body   = lambdaBody expr
+      locals = nub (collectLocals body)
+      frame  = buildFrame args locals
+      lbl    = mangle name
+  in
+  cgBody tags frame body "a0" `cgBind` \bodyAsm ->
+  cgReturn $
+    [ "", "    .globl " ++ lbl
+    , "    .type  " ++ lbl ++ ", @function"
+    , lbl ++ ":"
+    , "    # prologue: frame=" ++ show (frSize frame) ++ " bytes"
+    , "    addi  sp, sp, -" ++ show (frSize frame)
+    , "    sd    ra, " ++ show (frSize frame - 8) ++ "(sp)"
+    , "    sd    s0, " ++ show (frSize frame - 16) ++ "(sp)"
+    , "    addi  s0, sp, " ++ show (frSize frame)
+    ]
+    ++ saveArgs frame args
+    ++ bodyAsm
+    ++
+    [ "    # epilogue"
+    , "    ld    ra, " ++ show (frSize frame - 8) ++ "(sp)"
+    , "    ld    s0, " ++ show (frSize frame - 16) ++ "(sp)"
+    , "    addi  sp, sp, " ++ show (frSize frame)
+    , "    ret"
+    , "    .size " ++ lbl ++ ", .-" ++ lbl
+    ]
+
+lambdaArgs :: CoreExpr -> [Name]
+lambdaArgs (CLam n body) = n : lambdaArgs body
+lambdaArgs _             = []
+
+lambdaBody :: CoreExpr -> CoreExpr
+lambdaBody (CLam _ body) = lambdaBody body
+lambdaBody e             = e
+
+-- Save incoming a0..a7 to stack
+saveArgs :: Frame -> [Name] -> [Asm]
+saveArgs frame args =
+  concat
+    [ case Map.lookup name (frLocals frame) of
+        Just off -> [ "    sd    a" ++ show i ++ ", " ++ show off ++ "(s0)  # " ++ name ]
+        Nothing  -> [ "    # no slot for arg " ++ name ]
+    | (i, name) <- zip [0..] args
+    ]
+
+loadVar :: Frame -> Name -> String -> [Asm]
+loadVar frame name reg =
+  case Map.lookup name (frLocals frame) of
+    Just off -> [ "    ld    " ++ reg ++ ", " ++ show off ++ "(s0)  # " ++ name ]
+    Nothing  -> [ "    la    " ++ reg ++ ", " ++ mangle name ++ "  # global " ++ name ]
+
+storeVar :: Frame -> Name -> String -> [Asm]
+storeVar frame name reg =
+  case Map.lookup name (frLocals frame) of
+    Just off -> [ "    sd    " ++ reg ++ ", " ++ show off ++ "(s0)  # " ++ name ]
+    Nothing  -> [ "    # WARNING: no frame slot for " ++ name ]
+
+-- ---- Expression codegen ----
+
+-- Detect: rhs = CApp (known-fn) arg1 (1 arg when fn needs >=2)
+-- Then check if body starts with: let m = CApp (CVar n) arg2
+-- If so, generate the full 2-arg call directly into m, skip n.
+tryFusePartial :: Map.Map String Int -> Frame -> Name -> CoreExpr -> CoreExpr -> String
+               -> Maybe (CG [Asm])
+tryFusePartial tags frame n rhs (CLet m (CApp (CVar [n']) arg2) body2) dest
+  | n' == n
+  , Just (fn, [arg1]) <- isPartialKnown rhs
+  = Just $
+      -- Load arg2 into a1 FIRST (may box through a0),
+      -- then load arg1 into a0 (pure ld, won't clobber a1)
+      cgAtomLoad tags frame arg2 "a1" `cgBind` \a1 ->
+      cgAtomLoad tags frame arg1 "a0" `cgBind` \a0 ->
+      let callAsm = case fn of
+            Left prim    -> [ "    call  " ++ prim ]
+            Right "cons" -> [ "    call  rt_list_cons" ]
+            Right direct -> [ "    call  " ++ direct ]
+      in cgBody tags frame body2 dest `cgBind` \bodyAsm ->
+         cgReturn $ a1 ++ a0 ++ callAsm ++
+           storeVar frame m "a0" ++
+           bodyAsm
+tryFusePartial _ _ _ _ _ _ = Nothing
+
+-- Recognise a 1-of-2-arg partial application.
+isPartialKnown :: CoreExpr -> Maybe (Either String String, [CoreExpr])
+isPartialKnown (CApp (CVar [op]) arg)
+  | Just prim <- Map.lookup op primOps
+  = Just (Left prim, [arg])
+isPartialKnown (CApp (CVar ["List","Cons"]) arg)
+  = Just (Right "cons", [arg])
+isPartialKnown (CApp (CVar q) arg)
+  | isListFn q
+  = Just (Right (listStubName q 2), [arg])
+isPartialKnown _ = Nothing
+
+cgBody :: Map.Map String Int -> Frame -> CoreExpr -> String -> CG [Asm]
+
+cgBody _ frame (CVar [n]) dest =
+  cgReturn $ loadVar frame n dest
+
+cgBody _ _ (CVar q) dest =
+  cgReturn [ "    la    " ++ dest ++ ", " ++ mangle (intercalate "." q) ]
+
+cgBody _ _ (CLit (CLInt n)) dest =
+  cgReturn
+    [ "    li    a0, " ++ show n
+    , "    call  rt_box_int"
+    , if dest /= "a0" then "    mv    " ++ dest ++ ", a0" else "    # -> a0"
+    ]
+
+cgBody _ _ (CLit (CLFloat f)) dest =
+  cgReturn
+    [ "    # float " ++ show f
+    , "    call  rt_box_float  # TODO: pass float via fa0"
+    , if dest /= "a0" then "    mv    " ++ dest ++ ", a0" else "    # -> a0"
+    ]
+
+cgBody _ _ (CLit (CLString s)) dest =
+  internString s `cgBind` \lbl ->
+  cgReturn
+    [ "    la    a0, " ++ lbl
+    , "    call  rt_box_string_static"
+    , if dest /= "a0" then "    mv    " ++ dest ++ ", a0" else "    # -> a0"
+    ]
+
+cgBody tags frame (CLet n rhs body) dest =
+  case tryFusePartial tags frame n rhs body dest of
+    Just fused -> fused
+    Nothing ->
+      cgBody tags frame rhs "a0" `cgBind` \rhsAsm ->
+      let store = storeVar frame n "a0"
+      in cgBody tags frame body dest `cgBind` \bodyAsm ->
+         cgReturn $ rhsAsm ++ store ++ bodyAsm
+
+cgBody tags frame (CCase scrut arms) dest =
+  cgBody tags frame scrut "t0" `cgBind` \scrutAsm ->
+  freshLabel "cend" `cgBind` \lEnd ->
+  cgArms tags frame arms dest lEnd `cgBind` \armsAsm ->
+  cgReturn $ scrutAsm ++ armsAsm ++ [ lEnd ++ ":" ]
+
+cgBody tags frame app dest | not (isAtomE app) =
+  let (fn, args) = collectApps app
+  in cgCallExpr tags frame fn args dest
+
+cgBody _ _ e dest =
+  cgReturn [ "    # unhandled: " ++ show e ]
+
+isAtomE :: CoreExpr -> Bool
+isAtomE (CVar _) = True
+isAtomE (CLit _) = True
+isAtomE _        = False
+
+collectApps :: CoreExpr -> (CoreExpr, [CoreExpr])
+collectApps = go []
+  where
+    go acc (CApp f x) = go (x:acc) f
+    go acc e          = (e, acc)
+
+-- Generate a function call / constructor application
+-- fn is the head, args is the full arg list (already collected by collectApps)
+cgCallExpr :: Map.Map String Int -> Frame -> CoreExpr -> [CoreExpr] -> String -> CG [Asm]
+cgCallExpr tags frame fn args dest =
+  cgGet `cgBind` \st ->
+  let sym   = cgSymTable st
+      nargs = length args
+  in
+  case fn of
+    -- Known 2-arg primitive — load arg1 into a0, arg2 into a1
+    -- Load arg2 first (may use a0 as scratch), then arg1 into a0
+    CVar [op] | Just prim <- Map.lookup op primOps, nargs == 2 ->
+      cgAtomLoad tags frame (args !! 1) "a1" `cgBind` \a1 ->
+      cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \a0 ->
+      cgReturn $ a1 ++ a0 ++
+        [ "    call  " ++ prim
+        , mv dest "a0"
+        ]
+
+    -- Known 1-arg primitive
+    CVar [op] | Just prim <- Map.lookup op primOps, nargs == 1 ->
+      cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \a0 ->
+      cgReturn $ a0 ++
+        [ "    call  " ++ prim
+        , mv dest "a0"
+        ]
+
+    -- List.Nil — no args, call rt_list_nil
+    CVar ["List","Nil"] ->
+      cgReturn [ "    call  rt_list_nil", mv dest "a0" ]
+
+    -- List.Cons — 2 args
+    CVar ["List","Cons"] | nargs == 2 ->
+      cgAtomLoad tags frame (args !! 1) "a1" `cgBind` \a1 ->
+      cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \a0 ->
+      cgReturn $ a1 ++ a0 ++
+        [ "    call  rt_list_cons", mv dest "a0" ]
+
+    -- Other List function — load all args and call stub
+    CVar q | isListFn q ->
+      cgLoadArgsList tags frame args `cgBind` \argAsms ->
+      cgReturn $ argAsms ++
+        [ "    call  " ++ listStubName q nargs, mv dest "a0" ]
+
+    -- Known constructor — fully saturated
+    CVar q | isConstructor q ->
+      let tag = fromMaybe 99 (Map.lookup (intercalate "." q) tags)
+      in cgLoadArgsList tags frame args `cgBind` \argAsms ->
+         cgReturn $ argAsms ++ allocCon tag nargs dest
+
+    -- Tuple.N — N args
+    CVar ["Tuple", ns] ->
+      let n = read ns :: Int
+      in cgLoadArgsList tags frame args `cgBind` \argAsms ->
+         cgReturn $ argAsms ++
+           [ "    li    a" ++ show n ++ ", " ++ show n
+           , "    call  rt_alloc_tuple"
+           , mv dest "a0"
+           ]
+
+    -- Known top-level function — direct call, no closure dispatch
+    CVar [fname] | Map.member fname sym ->
+      cgLoadArgsList tags frame args `cgBind` \argAsms ->
+      cgReturn $ argAsms ++
+        [ "    call  " ++ mangle fname, mv dest "a0" ]
+    -- Partial application lookup: if fn is CVar that resolves to a
+    -- known partial in the frame, we should have already inlined it.
+    -- Fall through to general indirect call.
+    _ ->
+      cgAtomLoad tags frame fn "t0" `cgBind` \fnAsm ->
+      cgLoadArgsList tags frame args `cgBind` \argAsms ->
+      freshLabel "icall" `cgBind` \icallLbl ->
+      cgReturn $ fnAsm ++ argAsms ++
+        [ "    # indirect call"
+        , "    lw    t1, 0(t0)          # load object tag"
+        , "    li    t2, 5              # TAG_CLOSURE"
+        , "    beq   t1, t2, " ++ icallLbl ++ "_clos"
+        , "    jalr  ra, t0, 0          # plain function pointer"
+        , "    j     " ++ icallLbl ++ "_done"
+        , icallLbl ++ "_clos:"
+        , "    ld    t0, 16(t0)         # fn_ptr from closure header"
+        , "    jalr  ra, t0, 0"
+        , icallLbl ++ "_done:"
+        , mv dest "a0"
+        ]
+
+-- Helper: emit mv only when needed
+mv :: String -> String -> String
+mv dest src = if dest == src then "    # result in " ++ src
+              else "    mv    " ++ dest ++ ", " ++ src
+
+-- Load a list of args into a0..aN, evaluating in order.
+-- We must be careful: later args might clobber registers used by earlier ones.
+-- Strategy: evaluate all into temp stack slots, then load into arg regs.
+cgLoadArgsList :: Map.Map String Int -> Frame -> [CoreExpr] -> CG [Asm]
+cgLoadArgsList tags frame args = loadRev (length args - 1) (reverse args)
+  where
+    loadRev _ []     = cgReturn []
+    loadRev i (a:as) =
+      cgAtomLoad tags frame a ("a" ++ show i) `cgBind` \aAsm ->
+      loadRev (i-1) as `cgBind` \rest ->
+      cgReturn (aAsm ++ rest)
+
+-- Load a single atom into a register.
+-- For literals, we box into a0 then move — but if dest != a0 we must
+-- be careful not to clobber a0 if it already holds something useful.
+-- Since we load args in order (a0 first, then a1 etc.), loading into a1
+-- will go through a0 and we must save a0 first.
+cgAtomLoad :: Map.Map String Int -> Frame -> CoreExpr -> String -> CG [Asm]
+cgAtomLoad _ frame (CVar [n]) reg = cgReturn $ loadVar frame n reg
+cgAtomLoad _ _     (CVar q)   reg =
+  cgReturn [ "    la    " ++ reg ++ ", " ++ mangle (intercalate "." q) ]
+-- Literal into a non-a0 register: save a0, box lit, move, restore a0
+cgAtomLoad _ _ (CLit (CLInt n)) "a0" =
+  cgReturn [ "    li    a0, " ++ show n, "    call  rt_box_int" ]
+cgAtomLoad _ _ (CLit (CLInt n)) reg =
+  cgReturn
+    [ "    # box int " ++ show n ++ " into " ++ reg
+    , "    addi  sp, sp, -16"
+    , "    sd    a0, 0(sp)          # save a0"
+    , "    li    a0, " ++ show n
+    , "    call  rt_box_int"
+    , "    mv    " ++ reg ++ ", a0"
+    , "    ld    a0, 0(sp)          # restore a0"
+    , "    addi  sp, sp, 16"
+    ]
+cgAtomLoad _ _ (CLit (CLFloat f)) "a0" =
+  cgReturn [ "    # box float " ++ show f, "    call  rt_box_float" ]
+cgAtomLoad _ _ (CLit (CLFloat f)) reg =
+  cgReturn
+    [ "    addi  sp, sp, -16"
+    , "    sd    a0, 0(sp)"
+    , "    # box float " ++ show f
+    , "    call  rt_box_float"
+    , "    mv    " ++ reg ++ ", a0"
+    , "    ld    a0, 0(sp)"
+    , "    addi  sp, sp, 16"
+    ]
+cgAtomLoad tags frame e reg = cgBody tags frame e reg
+
+-- Case arms
+cgArms :: Map.Map String Int -> Frame -> [(CorePat, CoreExpr)] -> String -> String -> CG [Asm]
+cgArms _ _ [] _ _ = cgReturn []
+cgArms tags frame ((pat, body):rest) dest lEnd =
+  freshLabel "arm" `cgBind` \lNext ->
+  cgBody tags frame body dest `cgBind` \bodyAsm ->
+  cgArms tags frame rest dest lEnd `cgBind` \restAsm ->
+  cgReturn $
+    cgPatMatch tags frame pat "t0" lNext ++
+    bodyAsm ++
+    [ "    j     " ++ lEnd
+    , lNext ++ ":"
+    ] ++ restAsm
+
+-- Pattern matching: test "t0", branch to lNext if no match, bind vars on match
+cgPatMatch :: Map.Map String Int -> Frame -> CorePat -> String -> String -> [Asm]
+
+cgPatMatch _ frame (CPVar n) scrutReg _ =
+  storeVar frame n scrutReg
+
+cgPatMatch _ _ CPWild _ _ = []
+
+cgPatMatch _ frame (CPLit (CLInt n)) scrutReg lNext =
+  [ "    ld    t1, 8(" ++ scrutReg ++ ")   # unbox Int"
+  , "    li    t2, " ++ show n
+  , "    bne   t1, t2, " ++ lNext
+  ]
+
+cgPatMatch _ frame (CPLit (CLFloat _)) scrutReg lNext =
+  [ "    # float pattern match (TODO: unbox and compare)"
+  , "    j     " ++ lNext  -- stub: always fall through
+  ]
+
+cgPatMatch _ frame (CPLit (CLString _)) scrutReg lNext =
+  [ "    # string pattern match (TODO: call rt_prim_eq)"
+  , "    j     " ++ lNext  -- stub
+  ]
+
+cgPatMatch tags frame (CPCon q fieldNames) scrutReg lNext =
+  let tag = fromMaybe 99 (Map.lookup (intercalate "." q) tags)
+  in
+  [ "    lw    t1, 0(" ++ scrutReg ++ ")   # load tag"
+  , "    li    t2, " ++ show tag
+  , "    bne   t1, t2, " ++ lNext
+  ]
+  -- Bind fields: Con header is [tag:u32|refcnt:u32|con_id:u32|pad:u32|field0|field1...]
+  -- fields start at offset 16
+  ++ concat
+    [ [ "    ld    t3, " ++ show (16 + 8*i) ++ "(" ++ scrutReg ++ ")   # field " ++ fn ]
+      ++ storeVar frame fn "t3"
+    | (i, fn) <- zip [0..] fieldNames
+    ]
+
+cgPatMatch _ frame (CPTuple fieldNames) scrutReg lNext =
+  [ "    lw    t1, 0(" ++ scrutReg ++ ")   # load tag"
+  , "    li    t2, 4                        # TAG_TUPLE"
+  , "    bne   t1, t2, " ++ lNext
+  ]
+  -- Tuple layout: [tag:u32|refcnt:u32|field0|field1...]  fields at offset 8
+  ++ concat
+    [ [ "    ld    t3, " ++ show (8 + 8*i) ++ "(" ++ scrutReg ++ ")   # tuple[" ++ show i ++ "]" ]
+      ++ storeVar frame fn "t3"
+    | (i, fn) <- zip [0..] fieldNames
+    ]
+
+cgPatMatch _ _ _ _ lNext =
+  [ "    j     " ++ lNext  -- unhandled pattern, skip arm
+  ]
+
+-- ---- Allocation ----
+
+allocCon :: Int -> Int -> String -> [Asm]
+allocCon tag nFields dest =
+  -- Convention: a0=tag, a1=nfields, then a2..aN have field pointers
+  -- We shift current args: they are already in a0..a(N-1),
+  -- so we move them up to a2..a(N+1), then set a0=tag, a1=nfields
+  [ "    # alloc constructor tag=" ++ show tag ++ " nfields=" ++ show nFields ]
+  ++ [ "    mv    a" ++ show (nFields+1-i) ++ ", a" ++ show (nFields-i)
+     | i <- [1..nFields] ]
+  ++
+  [ "    li    a0, " ++ show tag
+  , "    li    a1, " ++ show nFields
+  , "    call  rt_alloc_con"
+  , if dest /= "a0" then "    mv    " ++ dest ++ ", a0" else ""
+  ]
+
+-- ---- Primitives and stubs ----
+
+primOps :: Map.Map String String
+primOps = Map.fromList
+  [ ("+",  "rt_prim_add_int"),  ("-",  "rt_prim_sub_int")
+  , ("*",  "rt_prim_mul_int"),  ("/",  "rt_prim_div_int")
+  , ("+.", "rt_prim_add_float"),("-.", "rt_prim_sub_float")
+  , ("*.", "rt_prim_mul_float"),("/.", "rt_prim_div_float")
+  , ("==", "rt_prim_eq"),       ("/=", "rt_prim_neq")
+  , ("<",  "rt_prim_lt"),       (">",  "rt_prim_gt")
+  , ("<=", "rt_prim_le"),       (">=", "rt_prim_ge")
+  , ("&&", "rt_prim_and"),      ("||", "rt_prim_or")
+  , ("++", "rt_prim_str_concat"),("negate","rt_prim_negate_int")
+  ]
+
+isListFn :: QName -> Bool
+isListFn ("List":_) = True
+isListFn _          = False
+
+isConstructor :: QName -> Bool
+isConstructor q = case last q of { (c:_) -> c >= 'A' && c <= 'Z'; _ -> False }
+
+listStubName :: QName -> Int -> String
+listStubName q _ = "rt_list_" ++ map toLower' (intercalate "_" (tail q))
+  where toLower' c = if c >= 'A' && c <= 'Z' then toEnum (fromEnum c + 32) else c
+
+runtimeStubs :: [Asm]
+runtimeStubs =
+  [ "", "# ---- Runtime extern declarations ----"
+  , "    .extern rt_alloc"
+  , "    .extern rt_alloc_con"
+  , "    .extern rt_alloc_tuple"
+  , "    .extern rt_rc_inc"
+  , "    .extern rt_rc_dec"
+  , "    .extern rt_box_int"
+  , "    .extern rt_box_float"
+  , "    .extern rt_box_string_static"
+  , "    .extern rt_prim_add_int"
+  , "    .extern rt_prim_sub_int"
+  , "    .extern rt_prim_mul_int"
+  , "    .extern rt_prim_div_int"
+  , "    .extern rt_prim_add_float"
+  , "    .extern rt_prim_sub_float"
+  , "    .extern rt_prim_mul_float"
+  , "    .extern rt_prim_div_float"
+  , "    .extern rt_prim_eq"
+  , "    .extern rt_prim_neq"
+  , "    .extern rt_prim_lt"
+  , "    .extern rt_prim_gt"
+  , "    .extern rt_prim_le"
+  , "    .extern rt_prim_ge"
+  , "    .extern rt_prim_and"
+  , "    .extern rt_prim_or"
+  , "    .extern rt_prim_str_concat"
+  , "    .extern rt_prim_negate_int"
+  , "    # List tier 1 (Cons cells)"
+  , "    .extern rt_list_cons"
+  , "    .extern rt_list_nil"
+  , "    .extern rt_list_map"
+  , "    .extern rt_list_filter"
+  , "    .extern rt_list_fold"
+  , "    .extern rt_list_foldl"
+  , "    .extern rt_list_foldr"
+  , "    .extern rt_list_head"
+  , "    .extern rt_list_tail"
+  , "    .extern rt_list_length"
+  , "    .extern rt_list_append"
+  , "    .extern rt_list_reverse"
+  , "    .extern rt_list_zip"
+  , "    .extern rt_list_zip_with"
+  , "    .extern rt_list_any"
+  , "    .extern rt_list_all"
+  , "    .extern rt_list_concat"
+  , "    # List tier 2 (SoA)"
+  , "    .extern rt_list_soa_create"
+  , "    .extern rt_list_soa_get"
+  , "    .extern rt_list_soa_set"
+  , "    .extern rt_list_soa_map"
+  , "    .extern rt_list_soa_map_all"
+  , "    .extern rt_list_soa_filter"
+  , "    .extern rt_list_soa_fold"
+  , "    .extern rt_list_soa_to_cons"
+  , "    .extern rt_list_cons_to_soa"
+  , "    # List tier 3 (streams / fusion)"
+  , "    .extern rt_stream_from_list"
+  , "    .extern rt_stream_map"
+  , "    .extern rt_stream_filter"
+  , "    .extern rt_stream_fold"
+  , "    .extern rt_stream_zip_with"
+  , "    .extern rt_stream_take"
+  , "    .extern rt_stream_force"
+  , "    # SIMD (RVV numeric SoA)"
+  , "    .extern rt_simd_map_add_int"
+  , "    .extern rt_simd_map_mul_int"
+  , "    .extern rt_simd_map_add_float"
+  , "    .extern rt_simd_map_mul_float"
+  , "    .extern rt_simd_fold_sum_int"
+  , "    .extern rt_simd_fold_sum_float"
+  , "    .extern rt_simd_zip_add_int"
+  , "    .extern rt_simd_zip_mul_float"
+  , "    .extern rt_simd_dot_product"
+  , "    # Closures"
+  , "    .extern rt_make_closure"
+  , "    .extern rt_apply_closure"
+  , "    .extern rt_apply_closure_n"
+  ]
+
+-- Runtime C header comment
+runtimeHeaderComment :: [Asm]
+runtimeHeaderComment =
+  [ ""
+  , "# ============================================================"
+  , "# C RUNTIME INTERFACE SUMMARY (implement in runtime.c)"
+  , "# All values are void* (heap pointers). Object layout:"
+  , "#   [tag:u32 | refcnt:u32 | payload...]"
+  , "# Tags: 0=Int 1=Float 2=String 3=Con 4=Tuple 5=Closure"
+  , "#        6=SoA 7=Stream"
+  , "# List tiers:"
+  , "#   Tier1 = Cons cells  (rt_list_*)"
+  , "#   Tier2 = SoA arrays  (rt_list_soa_*)  — SIMD-friendly"
+  , "#   Tier3 = Streams     (rt_stream_*)    — zero-copy fusion"
+  , "#   SIMD  = RVV ops on numeric SoA (rt_simd_*)"
+  , "# ============================================================"
+  ]
+
 banner :: String -> IO ()
 banner s = do
   putStrLn ""
@@ -1762,3 +2552,10 @@ main = do
       let core3 = anfModule core2
       banner "6. After ANF"
       mapM_ (\d -> putStrLn $ ppCoreDecl d) core3
+
+      -- Codegen
+      let sym   = buildSymTable core3
+      let core4 = saturateModule sym core3
+      banner "7. RISC-V Assembly"
+      let asm = generateModule core4
+      putStrLn asm
