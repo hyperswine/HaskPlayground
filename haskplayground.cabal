@@ -35,6 +35,7 @@ library
       ExActors
       FPFS
       FPFSActor
+      FPipeline
       FPL1
       FPL1Main
       FPL1Runner
