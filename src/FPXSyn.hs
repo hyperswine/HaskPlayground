@@ -16,6 +16,7 @@ import qualified Data.Map.Strict as Map
 import qualified System.Environment
 import qualified System.IO.Error
 import qualified System.IO
+import qualified System.Exit
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -1914,9 +1915,10 @@ type Asm = String
 
 -- CG state
 data CGState = CGState
-  { cgCounter  :: Int
-  , cgStrings  :: [(String, String)]
-  , cgSymTable :: SymTable
+  { cgCounter     :: Int
+  , cgEvalCounter :: Int     -- separate counter for __eval_N naming
+  , cgStrings     :: [(String, String)]
+  , cgSymTable    :: SymTable
   }
 
 type CG a = CGState -> (a, CGState)
@@ -1947,7 +1949,7 @@ internString str s =
       in (lbl, s { cgStrings = cgStrings s ++ [(lbl, str)] })
 
 runCG :: SymTable -> CG a -> (a, CGState)
-runCG sym m = m (CGState 0 [] sym)
+runCG sym m = m (CGState 0 0 [] sym)
 
 -- Frame: maps local names to stack offsets from fp (s0)
 data Frame = Frame
@@ -2034,8 +2036,8 @@ cgDecl :: Map.Map String Int -> CoreDecl -> CG [Asm]
 cgDecl tags (CDDef name expr) = cgFunction tags name expr
 cgDecl tags (CDEval expr)     =
   cgGet `cgBind` \st ->
-  let n = cgCounter st in
-  cgModify (\s -> s { cgCounter = n + 1 }) `cgBind` \_ ->
+  let n = cgEvalCounter st in
+  cgModify (\s -> s { cgEvalCounter = n + 1 }) `cgBind` \_ ->
   cgFunction tags ("__eval_" ++ show n) expr
 cgDecl _ _ = cgReturn []
 
@@ -2046,28 +2048,49 @@ cgFunction tags name expr =
       locals = nub (collectLocals body)
       frame  = buildFrame args locals
       lbl    = mangle name
+      arity  = length args
   in
   cgBody tags frame body "a0" `cgBind` \bodyAsm ->
-  cgReturn $
-    [ "", "    .globl " ++ lbl
-    , "    .type  " ++ lbl ++ ", @function"
-    , lbl ++ ":"
-    , "    # prologue: frame=" ++ show (frSize frame) ++ " bytes"
-    , "    addi  sp, sp, -" ++ show (frSize frame)
-    , "    sd    ra, " ++ show (frSize frame - 8) ++ "(sp)"
-    , "    sd    s0, " ++ show (frSize frame - 16) ++ "(sp)"
-    , "    addi  s0, sp, " ++ show (frSize frame)
-    ]
-    ++ saveArgs frame args
-    ++ bodyAsm
-    ++
-    [ "    # epilogue"
-    , "    ld    ra, " ++ show (frSize frame - 8) ++ "(sp)"
-    , "    ld    s0, " ++ show (frSize frame - 16) ++ "(sp)"
-    , "    addi  sp, sp, " ++ show (frSize frame)
-    , "    ret"
-    , "    .size " ++ lbl ++ ", .-" ++ lbl
-    ]
+  let mainFn =
+        [ "", "    .globl " ++ lbl
+        , "    .type  " ++ lbl ++ ", @function"
+        , lbl ++ ":"
+        , "    # prologue: frame=" ++ show (frSize frame) ++ " bytes"
+        , "    addi  sp, sp, -" ++ show (frSize frame)
+        , "    sd    ra, " ++ show (frSize frame - 8) ++ "(sp)"
+        , "    sd    s0, " ++ show (frSize frame - 16) ++ "(sp)"
+        , "    addi  s0, sp, " ++ show (frSize frame)
+        ]
+        ++ saveArgs frame args
+        ++ bodyAsm
+        ++
+        [ "    # epilogue"
+        , "    ld    ra, " ++ show (frSize frame - 8) ++ "(sp)"
+        , "    ld    s0, " ++ show (frSize frame - 16) ++ "(sp)"
+        , "    addi  sp, sp, " ++ show (frSize frame)
+        , "    ret"
+        , "    .size " ++ lbl ++ ", .-" ++ lbl
+        ]
+      -- Closure entry trampoline: called when closure is applied to a new arg.
+      -- Convention: t0 = closure ptr, a0 = new arg (the last argument)
+      --   shift a0 → a{arity-1}, load captured[0..arity-2] from closure.
+      -- Only generate for arity >= 2 (the cases that can be partially applied).
+      centry
+        | arity >= 2 =
+            let centryLbl = lbl ++ "_centry"
+                -- slot i of captured args is at offset 24 + i*8
+                -- (after tag:4 + refcnt:4 + n_captured:8 + fn_ptr:8 = 24)
+                shiftAsm = "    mv    a" ++ show (arity - 1) ++ ", a0"
+                loadAsms = [ "    ld    a" ++ show i ++ ", " ++ show (24 + i*8) ++ "(t0)"
+                           | i <- [0 .. arity - 2] ]
+            in  [ "", "    .globl " ++ centryLbl
+                , "    .type  " ++ centryLbl ++ ", @function"
+                , centryLbl ++ ":" ]
+                ++ [shiftAsm] ++ loadAsms
+                ++ [ "    j     " ++ lbl
+                   , "    .size " ++ centryLbl ++ ", .-" ++ centryLbl ]
+        | otherwise = []
+  in cgReturn (mainFn ++ centry)
 
 lambdaArgs :: CoreExpr -> [Name]
 lambdaArgs (CLam n body) = n : lambdaArgs body
@@ -2268,10 +2291,11 @@ cgCallExpr tags frame fn args dest =
               cgReturn $ argAsms ++
                 [ "    call  " ++ mangle fname, mv dest "a0" ]
          else if nargs < arity
-         then -- Partial application: create a closure capturing the given args
+         then -- Partial application: create a closure; store _centry as fn_ptr
+              -- so the callee can find captured args via t0 (closure ptr)
               cgLoadCapturedArgs tags frame args `cgBind` \captAsms ->
               cgReturn $ captAsms ++
-                [ "    la    a0, " ++ mangle fname
+                [ "    la    a0, " ++ mangle fname ++ "_centry"
                 , "    li    a1, " ++ show nargs
                 , "    call  rt_make_closure"
                 , mv dest "a0"
@@ -2293,8 +2317,8 @@ cgCallExpr tags frame fn args dest =
                 , "    jalr  ra, t0, 0        # plain function pointer"
                 , "    j     " ++ icallLbl ++ "_done"
                 , icallLbl ++ "_clos:"
-                , "    ld    t0, 16(t0)      # fn_ptr from closure header"
-                , "    jalr  ra, t0, 0"
+                , "    ld    t1, 16(t0)      # fn_ptr (_centry) from closure header"
+                , "    jalr  ra, t1, 0       # t0=closure, a0=new_arg"
                 , icallLbl ++ "_done:"
                 , mv dest "a0"
                 ]
@@ -2311,8 +2335,8 @@ cgCallExpr tags frame fn args dest =
         , "    jalr  ra, t0, 0          # plain function pointer"
         , "    j     " ++ icallLbl ++ "_done"
         , icallLbl ++ "_clos:"
-        , "    ld    t0, 16(t0)         # fn_ptr from closure header"
-        , "    jalr  ra, t0, 0"
+        , "    ld    t1, 16(t0)         # fn_ptr (_centry) from closure header"
+        , "    jalr  ra, t1, 0          # t0=closure, a0=new_arg"
         , icallLbl ++ "_done:"
         , mv dest "a0"
         ]
@@ -2661,6 +2685,14 @@ main :: IO ()
 main = do
   args <- System.Environment.getArgs
   case args of
+    -- Assembly-only mode: fpr_compiler --asm <file.fpr>
+    ("--asm" : srcFile : _) -> do
+      h   <- System.IO.openFile srcFile System.IO.ReadMode
+      System.IO.hSetEncoding h System.IO.utf8
+      src <- System.IO.hGetContents h
+      useMap <- readUseJson (srcFile ++ ".use.json")
+      compileToAsm srcFile src useMap
+
     -- File mode: fpr_compiler <file.fpr> [<file.use.json>]
     (srcFile : rest) -> do
       let useJsonFile = case rest of
@@ -2678,6 +2710,37 @@ main = do
       putStrLn "# Pass a .fpr file as argument to compile it."
       putStrLn ""
       runPipeline "<demo>" testSrc Map.empty
+
+-- | Compile a source file to RISC-V assembly, writing only the .s to stdout.
+--   Also emits a comment listing the __eval_N functions generated so the
+--   C test harness knows what to call.
+compileToAsm :: String -> String -> Map.Map String String -> IO ()
+compileToAsm srcName src useMap = do
+  case parse pModule srcName src of
+    Left err -> do
+      System.IO.hPutStrLn System.IO.stderr $ "PARSE ERROR:\n" ++ errorBundlePretty err
+      System.Exit.exitFailure
+    Right surfaceDecls0 -> do
+      let surfaceDecls = applyUseResolution useMap surfaceDecls0
+      let core0 = desugarModule surfaceDecls
+      let core1 = simplifyModule core0
+      let core2 = lambdaLiftModule core1
+      let core3 = anfModule core2
+      let core3i = inlineWrappers core3
+      let sym    = buildSymTable core3i
+      let core4  = saturateModule sym core3i
+      let asm    = generateModule core4
+      -- Emit eval function names as a comment for the C harness
+      let evalFns = collectEvalNames core4
+      putStrLn $ "# EVAL_FNS: " ++ unwords evalFns
+      putStr asm
+  where
+    collectEvalNames :: CoreModule -> [String]
+    collectEvalNames = go 0
+      where
+        go _ []                   = []
+        go i (CDEval {} : rest)   = ("__eval_" ++ show i) : go (i+1) rest
+        go i (_         : rest)   = go i rest
 
 runPipeline :: String -> String -> Map.Map String String -> IO ()
 runPipeline srcName src useMap = do

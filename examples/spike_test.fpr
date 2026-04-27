@@ -1,0 +1,20 @@
+# Simple FP-RISC program used to verify spike+pk execution.
+# All evals are pure integer arithmetic — no closures, no lists.
+
+# calc x = (x+1)*2 - 1
+calc x = let a = x + 1; b = a * 2; b - 1.
+
+# safe integer division
+safediv x y = if y == 0 then 0 else x / y.
+
+# > calc 5  should be (5+1)*2-1 = 11
+> calc 5.
+
+# > 3 + 4   should be 7
+> 3 + 4.
+
+# > safediv 10 3  should be 3
+> safediv 10 3.
+
+# > safediv 7 0  should be 0
+> safediv 7 0.
