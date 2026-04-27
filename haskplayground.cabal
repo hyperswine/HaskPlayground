@@ -39,6 +39,7 @@ library
       FPL1
       FPL1Main
       FPL1Runner
+      FPXSyn
       Gameloop
       HuffmanClash
       Lib

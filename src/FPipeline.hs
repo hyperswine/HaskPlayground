@@ -1,6 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Redundant return" #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module FPipeline where
 
