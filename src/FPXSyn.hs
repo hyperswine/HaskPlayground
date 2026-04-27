@@ -1763,17 +1763,27 @@ arityTable = Map.fromList $
 type PartialMap = Map.Map Name (CoreExpr, [CoreExpr])
 
 saturateExpr :: SymTable -> PartialMap -> CoreExpr -> CoreExpr
+-- If n was a partial application and inlining eliminated all uses, drop the let.
 saturateExpr sym pm (CLet n rhs body) =
-  let rhs' = saturateExpr sym pm rhs
-      pm'  = updatePartials sym pm n rhs'
-  in CLet n rhs' (saturateExpr sym pm' body)
+  let rhs'  = saturateExpr sym pm rhs
+      pm'   = updatePartials sym pm n rhs'
+      body' = saturateExpr sym pm' body
+  in if Map.member n pm' && not (occursIn n body')
+     then body'
+     else CLet n rhs' body'
 saturateExpr sym pm (CCase e arms) =
   CCase (saturateExpr sym pm e)
     [(p, saturateExpr sym pm b) | (p,b) <- arms]
 saturateExpr sym pm (CLam n body) =
   CLam n (saturateExpr sym Map.empty body)
+-- Expand partial: if f is a name bound to a known partial in pm, rebuild full application.
 saturateExpr sym pm (CApp f x) =
-  CApp (saturateExpr sym pm f) (saturateExpr sym pm x)
+  let f' = saturateExpr sym pm f
+      x' = saturateExpr sym pm x
+  in case f' of
+       CVar [n] | Just (fn, prevArgs) <- Map.lookup n pm ->
+         foldl CApp fn (prevArgs ++ [x'])
+       _ -> CApp f' x'
 saturateExpr _ _ e = e
 
 -- When we bind `n = rhs`, check if rhs is a partial application
@@ -1795,6 +1805,11 @@ updatePartials sym pm n rhs =
       -- List functions: treat as known arity 2 for map/filter, 3 for fold
       let a = listFnArity q
       in if length args < a then Map.insert n (CVar q, args) pm
+         else pm
+    (CVar q@["Tuple", ns], args) ->
+      -- Tuple constructors: Tuple.2 has arity 2, Tuple.3 has arity 3, etc.
+      let arity = read ns :: Int
+      in if length args < arity then Map.insert n (CVar q, args) pm
          else pm
     _ -> pm
   where
@@ -1833,6 +1848,33 @@ saturateDecl _   d           = d
 
 saturateModule :: SymTable -> CoreModule -> CoreModule
 saturateModule sym = map (saturateDecl sym)
+
+-- Inline wrapper definitions before saturation/codegen.
+-- A wrapper is a top-level binding of the form  f = g  (a bare variable).
+-- At every call site  f x  we replace it with  g x  so codegen sees the
+-- direct lambda target and can dispatch correctly (avoids treating the
+-- code-label returned by the wrapper as a heap closure).
+buildWrapperMap :: CoreModule -> Map.Map Name Name
+buildWrapperMap decls = Map.fromList
+  [ (n, target) | CDDef n (CVar [target]) <- decls ]
+
+inlineWrappers :: CoreModule -> CoreModule
+inlineWrappers decls = map go decls
+  where
+    wm = buildWrapperMap decls
+    go (CDDef n e)  = CDDef n (inlineE e)
+    go (CDEval e)   = CDEval (inlineE e)
+    go d            = d
+    inlineE (CApp f x) =
+      let f' = inlineE f
+          x' = inlineE x
+      in case f' of
+           CVar [n] | Just t <- Map.lookup n wm -> CApp (CVar [t]) x'
+           _                                    -> CApp f' x'
+    inlineE (CLet n r b)    = CLet n (inlineE r) (inlineE b)
+    inlineE (CCase e arms)  = CCase (inlineE e) [(p, inlineE b) | (p,b) <- arms]
+    inlineE (CLam n body)   = CLam n (inlineE body)
+    inlineE e               = e
 
 -- ============================================================
 -- PASS 5: RISC-V Code Generation
@@ -2217,14 +2259,46 @@ cgCallExpr tags frame fn args dest =
            , mv dest "a0"
            ]
 
-    -- Known top-level function — direct call, no closure dispatch
-    CVar [fname] | Map.member fname sym ->
-      cgLoadArgsList tags frame args `cgBind` \argAsms ->
-      cgReturn $ argAsms ++
-        [ "    call  " ++ mangle fname, mv dest "a0" ]
-    -- Partial application lookup: if fn is CVar that resolves to a
-    -- known partial in the frame, we should have already inlined it.
-    -- Fall through to general indirect call.
+    -- Known top-level function — check arity before emitting call
+    CVar [fname] | Just fi <- Map.lookup fname sym ->
+      let arity = fiArity fi
+      in if nargs == arity
+         then -- Fully saturated: direct call
+              cgLoadArgsList tags frame args `cgBind` \argAsms ->
+              cgReturn $ argAsms ++
+                [ "    call  " ++ mangle fname, mv dest "a0" ]
+         else if nargs < arity
+         then -- Partial application: create a closure capturing the given args
+              cgLoadCapturedArgs tags frame args `cgBind` \captAsms ->
+              cgReturn $ captAsms ++
+                [ "    la    a0, " ++ mangle fname
+                , "    li    a1, " ++ show nargs
+                , "    call  rt_make_closure"
+                , mv dest "a0"
+                ]
+         else -- nargs > arity: 0-arity thunk applied to an arg.
+              -- Evaluate thunk to get a function pointer, then apply it.
+              cgAtomLoad tags frame (args !! 0) "a0" `cgBind` \argAsm ->
+              freshLabel "icall" `cgBind` \icallLbl ->
+              cgReturn $
+                [ "    addi  sp, sp, -16" ] ++ argAsm ++
+                [ "    sd    a0, 0(sp)        # save arg"
+                , "    call  " ++ mangle fname ++ "              # eval thunk → fn ptr in a0"
+                , "    mv    t0, a0            # save fn ptr"
+                , "    ld    a0, 0(sp)        # restore arg"
+                , "    addi  sp, sp, 16"
+                , "    lw    t1, 0(t0)        # load object tag"
+                , "    li    t2, 5            # TAG_CLOSURE"
+                , "    beq   t1, t2, " ++ icallLbl ++ "_clos"
+                , "    jalr  ra, t0, 0        # plain function pointer"
+                , "    j     " ++ icallLbl ++ "_done"
+                , icallLbl ++ "_clos:"
+                , "    ld    t0, 16(t0)      # fn_ptr from closure header"
+                , "    jalr  ra, t0, 0"
+                , icallLbl ++ "_done:"
+                , mv dest "a0"
+                ]
+    -- Fall through to general indirect call for unknown or closure values.
     _ ->
       cgAtomLoad tags frame fn "t0" `cgBind` \fnAsm ->
       cgLoadArgsList tags frame args `cgBind` \argAsms ->
@@ -2258,6 +2332,16 @@ cgLoadArgsList tags frame args = loadRev (length args - 1) (reverse args)
     loadRev i (a:as) =
       cgAtomLoad tags frame a ("a" ++ show i) `cgBind` \aAsm ->
       loadRev (i-1) as `cgBind` \rest ->
+      cgReturn (aAsm ++ rest)
+
+-- Load captured args into a2, a3, ... (for rt_make_closure partial-application calls).
+cgLoadCapturedArgs :: Map.Map String Int -> Frame -> [CoreExpr] -> CG [Asm]
+cgLoadCapturedArgs tags frame args = go 0 args
+  where
+    go _ []     = cgReturn []
+    go i (a:as) =
+      cgAtomLoad tags frame a ("a" ++ show (i + 2)) `cgBind` \aAsm ->
+      go (i+1) as `cgBind` \rest ->
       cgReturn (aAsm ++ rest)
 
 -- Load a single atom into a register.
@@ -2638,8 +2722,9 @@ runPipeline srcName src useMap = do
       mapM_ (\d -> putStrLn $ ppCoreDecl d) core3
 
       -- Codegen
-      let sym   = buildSymTable core3
-      let core4 = saturateModule sym core3
+      let core3i = inlineWrappers core3
+      let sym   = buildSymTable core3i
+      let core4 = saturateModule sym core3i
       banner "7. RISC-V Assembly"
       let asm = generateModule core4
       putStrLn asm
