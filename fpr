@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# fpr — FP-RISC compiler + registry CLI wrapper
+#
+# Usage:
+#   fpr build <file.fpr>          compile (resolves all use deps)
+#   fpr init                      initialise project registry
+#   fpr status                    show changed modules
+#   fpr update [file.fpr ...]     bump versions for changed files
+#   fpr resolve <spec>            resolve a use-spec to a file path
+#   fpr link <file.fpr>           print use-resolution table as JSON
+#   fpr info                      print registry
+#   fpr clean                     clear compiled cache
+#
+# BUILD: calls fpr_registry.py link to resolve use specs, then invokes
+#        fpr_compiler (the compiled Haskell binary from Main.hs).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REGISTRY="$SCRIPT_DIR/fpr_registry.py"
+COMPILER="$SCRIPT_DIR/fpr_compiler"
+
+die()  { echo "fpr error: $*" >&2; exit 1; }
+note() { echo "  $*"; }
+
+need_registry() {
+    [[ -f fpr.reg ]] || die "No fpr.reg found. Run 'fpr init' first."
+}
+
+build_file() {
+    local src="$1"
+    [[ -f "$src" ]] || die "File not found: $src"
+    [[ "$src" == *.fpr ]] || die "Expected a .fpr file, got: $src"
+
+    # Resolve use declarations to snapshot paths
+    local link_json
+    link_json="$(python3 "$REGISTRY" link "$src" 2>/dev/null || echo '{}')"
+
+    note "resolved use declarations:"
+    echo "$link_json" | python3 -c "
+import json, sys
+deps = json.load(sys.stdin)
+if deps:
+    for name, path in deps.items():
+        print(f'      {name:20s} -> {path}')
+else:
+    print('      (none)')
+" 2>/dev/null || true
+
+    # Write sidecar .use.json for the compiler
+    local sidecar="${src%.fpr}.use.json"
+    echo "$link_json" > "$sidecar"
+
+    if [[ -x "$COMPILER" ]]; then
+        note "compiling $src"
+        "$COMPILER" "$src" "$sidecar"
+    else
+        note "compiler binary not found at $COMPILER"
+        note "to build: ghc -package megaparsec -o fpr_compiler Main.hs"
+    fi
+
+    rm -f "$sidecar"
+}
+
+case "${1:-}" in
+    # Registry commands — pass through to Python
+    init|status|resolve|link|info|clean)
+        exec python3 "$REGISTRY" "$@"
+        ;;
+    update)
+        shift
+        exec python3 "$REGISTRY" update "$@"
+        ;;
+    build)
+        shift
+        [[ $# -gt 0 ]] || die "Usage: fpr build <file.fpr>"
+        need_registry
+        for f in "$@"; do build_file "$f"; done
+        ;;
+    "")
+        echo "fpr — FP-RISC compiler and module registry"
+        echo ""
+        echo "  fpr build <file.fpr>         compile module"
+        echo "  fpr init                     initialise project registry"
+        echo "  fpr status                   show changed modules"
+        echo "  fpr update [file.fpr ...]    bump versions for changed files"
+        echo "  fpr resolve <name[@vN]>      resolve module to path"
+        echo "  fpr link <file.fpr>          print use-resolution table"
+        echo "  fpr info                     print registry"
+        echo "  fpr clean                    clear compiled cache"
+        ;;
+    *)
+        die "Unknown command: $1. Run 'fpr' for usage."
+        ;;
+esac

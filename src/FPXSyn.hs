@@ -13,6 +13,9 @@ import Data.Maybe (fromMaybe)
 import Control.Monad (void, when, foldM)
 import qualified Control.Monad.State as S
 import qualified Data.Map.Strict as Map
+import qualified System.Environment
+import qualified System.IO.Error
+import qualified System.IO
 
 import Text.Megaparsec
 import Text.Megaparsec.Char
@@ -2512,11 +2515,92 @@ banner s = do
   putStrLn $ "  " ++ s
   putStrLn $ replicate 64 '='
 
+-- ============================================================
+-- Registry integration: read use.json sidecar if present
+-- ============================================================
+
+-- Parse a use.json file: {"std": "/abs/path", "mymod": "/abs/path"}
+-- Returns a map from module name to resolved source path.
+readUseJson :: FilePath -> IO (Map.Map String String)
+readUseJson path = do
+  exists <- doesFileExist path
+  if not exists
+    then return Map.empty
+    else do
+      content <- readFile path
+      -- Simple JSON parsing without a library: expect {"k":"v",...}
+      return $ parseSimpleJsonMap content
+
+doesFileExist :: FilePath -> IO Bool
+doesFileExist p = do
+  r <- System.IO.Error.tryIOError (readFile p)
+  case r of
+    Left _  -> return False
+    Right _ -> return True
+
+-- Parse {"key": "value", ...} — simple, no nesting, no escapes
+parseSimpleJsonMap :: String -> Map.Map String String
+parseSimpleJsonMap s =
+  let stripped = filter (/= '\n') s
+      pairs    = extractPairs stripped
+  in Map.fromList pairs
+  where
+    extractPairs str =
+      case dropWhile (/= '"') str of
+        [] -> []
+        (_:rest) ->
+          let (k, rest1) = span (/= '"') rest
+          in case dropWhile (\c -> c `elem` (" \t:\"" :: String)) rest1 of
+               [] -> []
+               rest2 ->
+                 let (v, rest3) = span (/= '"') rest2
+                 in (k, v) : extractPairs (dropWhile (/= ',') rest3)
+
+-- Rewrite DUse paths using the resolved map.
+-- use "std@v1"  →  if "std" in map, rewrite spec to resolved path.
+-- The compiler then reads that file as the module source.
+applyUseResolution :: Map.Map String String -> [Decl] -> [Decl]
+applyUseResolution useMap = map rewrite
+  where
+    rewrite (DUse alias spec) =
+      let name = takeWhile (/= '@') spec
+      in case Map.lookup name useMap of
+           Just path -> DUse alias path  -- resolved to absolute snapshot path
+           Nothing   -> DUse alias spec  -- unresolved, keep as-is
+    rewrite d = d
+
+-- ============================================================
+-- Main: demo mode or file compile mode
+-- ============================================================
+
 main :: IO ()
 main = do
-  case parse pModule "<test>" testSrc of
+  args <- System.Environment.getArgs
+  case args of
+    -- File mode: fpr_compiler <file.fpr> [<file.use.json>]
+    (srcFile : rest) -> do
+      let useJsonFile = case rest of
+                          (j:_) -> j
+                          []    -> srcFile ++ ".use.json"  -- convention
+      h   <- System.IO.openFile srcFile System.IO.ReadMode
+      System.IO.hSetEncoding h System.IO.utf8
+      src <- System.IO.hGetContents h
+      useMap <- readUseJson useJsonFile
+      runPipeline srcFile src useMap
+
+    -- Demo mode: no args, run on built-in test source
+    [] -> do
+      putStrLn "# fpr compiler — demo mode (no file specified)"
+      putStrLn "# Pass a .fpr file as argument to compile it."
+      putStrLn ""
+      runPipeline "<demo>" testSrc Map.empty
+
+runPipeline :: String -> String -> Map.Map String String -> IO ()
+runPipeline srcName src useMap = do
+  case parse pModule srcName src of
     Left err -> putStrLn $ "PARSE ERROR:\n" ++ errorBundlePretty err
-    Right surfaceDecls -> do
+    Right surfaceDecls0 -> do
+      let surfaceDecls = applyUseResolution useMap surfaceDecls0
 
       -- Surface
       banner "1. Surface AST"
@@ -2543,7 +2627,7 @@ main = do
       putStrLn ""
       mapM_ (\d -> putStrLn $ ppTypedDecl d ++ "\n") typed
 
-      -- Lambda lift (on simplified core, not typed — typed would need separate lift)
+      -- Lambda lift
       let core2 = lambdaLiftModule core1
       banner "5. After Lambda Lifting"
       mapM_ (\d -> putStrLn $ ppCoreDecl d) core2
