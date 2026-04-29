@@ -17,47 +17,41 @@
 
 -- | RISC-V RV32I base integer instruction set CPU
 --
--- ── Instruction formats ──────────────────────────────────────────────────
---   R-type:  [31:25] funct7 | [24:20] rs2 | [19:15] rs1 | [14:12] funct3 | [11:7] rd | [6:0] opcode
---   I-type:  [31:20] imm[11:0]             | [19:15] rs1 | [14:12] funct3 | [11:7] rd | [6:0] opcode
---   S-type:  [31:25] imm[11:5]| [24:20] rs2| [19:15] rs1 | [14:12] funct3 |[11:7] imm[4:0]| [6:0] opcode
---   B-type:  [31:25] imm[12|10:5]|[24:20]rs2|[19:15]rs1 | [14:12] funct3 |[11:7] imm[4:1|11]| [6:0] opcode
---   U-type:  [31:12] imm[31:12]                                             | [11:7] rd | [6:0] opcode
---   J-type:  [31:12] imm[20|10:1|11|19:12]                                 | [11:7] rd | [6:0] opcode
+-- ── Optimisations vs v1 ──────────────────────────────────────────────────
 --
--- ── Opcodes (bits [6:0]) ─────────────────────────────────────────────────
---   0110011  R-type  (OP)         ADD SUB SLL SLT SLTU XOR SRL SRA OR AND
---   0010011  I-type  (OP-IMM)     ADDI SLTI SLTIU XORI ORI ANDI SLLI SRLI SRAI
---   0000011  I-type  (LOAD)       LB LH LW LBU LHU
---   0100011  S-type  (STORE)      SB SH SW
---   1100011  B-type  (BRANCH)     BEQ BNE BLT BGE BLTU BGEU
---   1101111  J-type  (JAL)
---   1100111  I-type  (JALR)
---   0110111  U-type  (LUI)
---   0010111  U-type  (AUIPC)
---   1110011  (SYSTEM – not implemented, treated as NOP)
---   0001111  (FENCE  – treated as NOP)
+--   CP1 – Two-level forwarding.
+--         The MEM/WB bypass is pre-applied at the END of the ID stage so
+--         the forwarded values are stored in IdExReg.  EX therefore only
+--         needs to check EX/MEM (one mux level), cutting the ALU-input
+--         combinatorial cone roughly in half.
+--
+--   CP2 – Registered BHT.
+--         IF reads rvBHT, the BHT committed at the end of the previous
+--         cycle.  The in-cycle update (bht') is only stored into s'; it
+--         does NOT feed back into IF in the same cycle.  This breaks the
+--         EX-branch-resolve → Vec-replace → BHT-lookup → ifPredTarget loop
+--         which was the single longest combinatorial path.
+--
+--   CP3 – Registered load-use hazard.
+--         stallNext' is computed at end of cycle N (ID/EX load instruction
+--         vs IF/ID register indices) and stored in rvStallNext.  Cycle N+1
+--         reads rvStallNext instead of recomputing the hazard from scratch,
+--         removing the decode-and-compare cone from the nextPC/idex' path.
+--
+--   CP4 – External blockRam register file.
+--         The register file is promoted from Vec 32 Word32 (32-way mux on
+--         every write) to an external synchronous blockRam managed by the
+--         top level.  stepCpuRV receives two pre-fetched read words
+--         (regRdA for rs1, regRdB for rs2) and emits a Maybe write command.
+--         ID pre-applies the WB bypass (already needed for CP1) so the
+--         single cycle of blockRam read latency is fully hidden.
 --
 -- ── Pipeline ─────────────────────────────────────────────────────────────
 --   5-stage: IF → ID → EX → MEM → WB
---   In-order scalar pipeline.
---   Hazard handling:
---     • Load-use stall  – 1 bubble inserted between MEM and EX when the
---       load result is needed by the immediately-following instruction.
---     • Full forwarding – EX/MEM → EX and MEM/WB → EX bypass paths cover
---       all non-load RAW hazards without stalls.
---     • Branch resolution in EX (cycle after decode).  A 2-bit saturating
---       counter Branch History Table (BHT, 64 entries, PC-indexed) predicts
---       taken/not-taken.  On misprediction the two speculative instructions
---       in IF and ID are flushed (2-cycle penalty instead of always-flush).
---       JAL is always predicted taken (target known in ID).
---       JALR always flushes (target unknown until EX).
+--   In-order scalar.
+--   Branch resolution in EX; 2-bit saturating BHT (64 entries, registered).
+--   JAL predicted taken in ID; JALR always flushes.
 --
--- ── Memory ───────────────────────────────────────────────────────────────
---   Separate 32-bit instruction memory (1024 words, block RAM).
---   Byte-addressed data memory (1 KiB, synchronous read/write).
---   Data memory is word-granular internally; byte/halfword accesses are
---   handled by masking in software (sub-word reads sign-/zero-extend).
 module CPURiscV where
 
 import Clash.Prelude hiding (take)
@@ -68,353 +62,241 @@ import qualified Prelude as P
 -- ===========================================================================
 
 type Word32 = BitVector 32
-
-type Addr = Unsigned 32
-
--- | 32 general-purpose registers (x0..x31).  x0 is always 0.
+type Addr   = Unsigned 32
 type RegFile = Vec 32 Word32
-
--- | PC is 32 bits, byte-addressed.
-type PC = Unsigned 32
-
--- | Register index (5 bits → 0..31).
-type RegIdx = Unsigned 5
-
--- | Instruction memory: 1024 × 32-bit words (4 KiB), word-addressed.
+type PC      = Unsigned 32
+type RegIdx  = Unsigned 5
 type InstrMem = Vec 1024 Word32
-
--- | Data memory: 1024 × 32-bit words (4 KiB), word-addressed.
-type DataMem = Vec 1024 Word32
-
--- | RAM pool backing the controller's RAM region (same layout as DataMem).
-type RamPool = Vec 1024 Word32
+type DataMem  = Vec 1024 Word32
+type RamPool  = Vec 1024 Word32
 
 -- ===========================================================================
 -- Memory controller
 -- ===========================================================================
---
--- Address map
--- ┌──────────────────────────────┬─────────────────────────────────────────┐
--- │ 0x0000_0000 – 0x0000_0FFF   │ Block RAM  (4 KiB, 1024 × 32-bit words) │
--- │ 0x0001_0000 – 0x0001_0003   │ UART_TX    (W: send byte; R: 0x00)      │
--- │ 0x0001_0004 – 0x0001_0007   │ UART_STATUS (R: bit 0 = tx_ready; W: -) │
--- └──────────────────────────────┴─────────────────────────────────────────┘
 
-ramTop :: Addr
-ramTop = 0x0000_0FFF
+ramTop       :: Addr; ramTop       = 0x0000_0FFF
+uartTxAddr   :: Addr; uartTxAddr   = 0x0001_0000
+uartStatAddr :: Addr; uartStatAddr = 0x0001_0004
 
-uartTxAddr :: Addr
-uartTxAddr = 0x0001_0000
-
-uartStatAddr :: Addr
-uartStatAddr = 0x0001_0004
-
--- | Minimal simulated UART: captures the last byte written to UART_TX. uartTxByte: last byte written to UART_TX. uartTxValid: True when a new byte is available
-data UartState = UartState {uartTxByte :: BitVector 8, uartTxValid :: Bool} deriving (Generic, NFDataX, Show)
+data UartState = UartState
+  { uartTxByte  :: BitVector 8
+  , uartTxValid :: Bool
+  } deriving (Generic, NFDataX, Show)
 
 initUartState :: UartState
 initUartState = UartState 0 False
 
--- | Memory-controller state: UART peripheral only. The 4 KiB data RAM is now a separate blockRam at the top level.
-data MemCtrl = MemCtrl {mcUart :: UartState} deriving (Generic, NFDataX, Show)
+data MemCtrl = MemCtrl { mcUart :: UartState }
+  deriving (Generic, NFDataX, Show)
 
 initMemCtrl :: MemCtrl
 initMemCtrl = MemCtrl initUartState
 
--- | Consume the pending UART TX byte (if any) and clear the valid flag.
 uartPop :: MemCtrl -> (MemCtrl, Maybe (BitVector 8))
 uartPop mc
-  | uartTxValid (mcUart mc) = (mc {mcUart = initUartState}, Just (uartTxByte (mcUart mc)))
-  | otherwise = (mc, Nothing)
+  | uartTxValid (mcUart mc) = (mc { mcUart = initUartState }, Just (uartTxByte (mcUart mc)))
+  | otherwise               = (mc, Nothing)
 
 -- ===========================================================================
 -- Instruction decode helpers
 -- ===========================================================================
 
--- | Extract the 7-bit opcode field.
-opcode :: Word32 -> BitVector 7
-opcode w = slice d6 d0 w
+opcode  :: Word32 -> BitVector 7; opcode  w = slice d6  d0  w
+rdOf    :: Word32 -> RegIdx;      rdOf    w = unpack (slice d11 d7  w)
+funct3Of :: Word32 -> BitVector 3; funct3Of w = slice d14 d12 w
+rs1Of   :: Word32 -> RegIdx;      rs1Of   w = unpack (slice d19 d15 w)
+rs2Of   :: Word32 -> RegIdx;      rs2Of   w = unpack (slice d24 d20 w)
+funct7Of :: Word32 -> BitVector 7; funct7Of w = slice d31 d25 w
 
--- | Extract rd (bits [11:7]).
-rdOf :: Word32 -> RegIdx
-rdOf w = unpack (slice d11 d7 w)
-
--- | Extract funct3 (bits [14:12]).
-funct3Of :: Word32 -> BitVector 3
-funct3Of w = slice d14 d12 w
-
--- | Extract rs1 (bits [19:15]).
-rs1Of :: Word32 -> RegIdx
-rs1Of w = unpack (slice d19 d15 w)
-
--- | Extract rs2 (bits [24:20]).
-rs2Of :: Word32 -> RegIdx
-rs2Of w = unpack (slice d24 d20 w)
-
--- | Extract funct7 (bits [31:25]).
-funct7Of :: Word32 -> BitVector 7
-funct7Of w = slice d31 d25 w
-
--- | Sign-extend a 12-bit value to 32 bits (I-type immediate).
 immI :: Word32 -> Signed 32
 immI w = signExtend (unpack (slice d31 d20 w) :: Signed 12)
 
--- | Sign-extend S-type immediate (bits [31:25] and [11:7]).
 immS :: Word32 -> Signed 32
-immS w =
-  let hi = slice d31 d25 w -- imm[11:5]
-      lo = slice d11 d7 w -- imm[4:0]
-      raw = hi ++# lo -- 12-bit signed
-   in signExtend (unpack raw :: Signed 12)
+immS w = signExtend (unpack (slice d31 d25 w ++# slice d11 d7 w) :: Signed 12)
 
--- | Sign-extend B-type immediate (bits encode imm[12|10:5|4:1|11]).
---   Result is a signed byte offset; bit 0 is always 0.
 immB :: Word32 -> Signed 32
-immB w =
-  let b12 = slice d31 d31 w
-      b11 = slice d7 d7 w
-      b10_5 = slice d30 d25 w
-      b4_1 = slice d11 d8 w
-      raw = b12 ++# b11 ++# b10_5 ++# b4_1 ++# (0 :: BitVector 1)
-   in signExtend (unpack raw :: Signed 13)
+immB w = signExtend (unpack ( slice d31 d31 w ++# slice d7  d7  w
+                           ++# slice d30 d25 w ++# slice d11 d8  w
+                           ++# (0 :: BitVector 1)) :: Signed 13)
 
--- | U-type immediate: bits[31:12] shifted to upper 20 bits, lower 12 zeroed.
 immU :: Word32 -> Signed 32
 immU w = unpack (slice d31 d12 w ++# (0 :: BitVector 12))
 
--- | J-type immediate: imm[20|10:1|11|19:12], bit 0 always 0.
 immJ :: Word32 -> Signed 32
-immJ w =
-  let b20 = slice d31 d31 w
-      b19_12 = slice d19 d12 w
-      b11 = slice d20 d20 w
-      b10_1 = slice d30 d21 w
-      raw = b20 ++# b19_12 ++# b11 ++# b10_1 ++# (0 :: BitVector 1)
-   in signExtend (unpack raw :: Signed 21)
+immJ w = signExtend (unpack ( slice d31 d31 w ++# slice d19 d12 w
+                           ++# slice d20 d20 w ++# slice d30 d21 w
+                           ++# (0 :: BitVector 1)) :: Signed 21)
 
 -- ===========================================================================
 -- Decoded instruction (micro-op)
 -- ===========================================================================
 
 data AluOp
-  = AluAdd
-  | AluSub
-  | AluAnd
-  | AluOr
-  | AluXor
-  | AluSll -- shift left logical
-  | AluSrl -- shift right logical
-  | AluSra -- shift right arithmetic
-  | AluSlt -- set-less-than (signed)
-  | AluSltu -- set-less-than (unsigned)
-  | AluLui -- pass immediate as result (for LUI/AUIPC/JAL/JALR)
+  = AluAdd | AluSub | AluAnd | AluOr  | AluXor
+  | AluSll | AluSrl | AluSra
+  | AluSlt | AluSltu
+  | AluLui
   deriving (Generic, NFDataX, Show, Eq)
 
--- | How to choose the ALU's second operand.
 data AluSrc2 = Src2Reg | Src2Imm
   deriving (Generic, NFDataX, Show, Eq)
 
--- | What to write to rd.
-data WbSrc
-  = WbAlu -- ALU result
-  | WbPc4 -- PC+4 (for JAL/JALR link)
-  | WbMem -- data memory load
+data WbSrc = WbAlu | WbPc4 | WbMem
   deriving (Generic, NFDataX, Show, Eq)
 
--- | Memory access kind.
 data MemOp
   = MemNone
-  | MemLb
-  | MemLh
-  | MemLw
-  | MemLbu
-  | MemLhu -- loads
-  | MemSb
-  | MemSh
-  | MemSw -- stores
+  | MemLb | MemLh | MemLw | MemLbu | MemLhu
+  | MemSb | MemSh | MemSw
   deriving (Generic, NFDataX, Show, Eq)
 
--- | Branch/jump condition.
 data BranchOp
   = BrNone
-  | BrEq
-  | BrNe
-  | BrLt
-  | BrGe
-  | BrLtu
-  | BrGeu -- conditional branches
-  | BrJal -- unconditional (JAL / JALR always jump)
+  | BrEq | BrNe | BrLt | BrGe | BrLtu | BrGeu
+  | BrJal
   deriving (Generic, NFDataX, Show, Eq)
 
+data MicroOp = MicroOp
+  { uAluOp    :: AluOp
+  , uAluSrc2  :: AluSrc2
+  , uWbSrc    :: WbSrc
+  , uWbEn     :: Bool
+  , uRd       :: RegIdx
+  , uRs1      :: RegIdx
+  , uRs2      :: RegIdx
+  , uImm      :: Signed 32
+  , uMemOp    :: MemOp
+  , uBranchOp :: BranchOp
+  , uAuipc    :: Bool
+  } deriving (Generic, NFDataX, Show)
+
 -- ===========================================================================
--- 2-bit saturating branch predictor (BHT)
+-- BHT (2-bit saturating, 64 entries)
 -- ===========================================================================
 
--- | 2-bit saturating counter state.
---   StronglyNotTaken=0, WeaklyNotTaken=1, WeaklyTaken=2, StronglyTaken=3
 data BhtCounter = SNT | WNT | WT | ST
   deriving (Generic, NFDataX, Show, Eq)
 
--- | Advance a 2-bit counter toward Taken.
-bhtStrengthenTaken :: BhtCounter -> BhtCounter
-bhtStrengthenTaken SNT = WNT
-bhtStrengthenTaken WNT = WT
-bhtStrengthenTaken WT  = ST
-bhtStrengthenTaken ST  = ST
+bhtStrengthenTaken    :: BhtCounter -> BhtCounter
+bhtStrengthenTaken    SNT = WNT; bhtStrengthenTaken    WNT = WT
+bhtStrengthenTaken    WT  = ST;  bhtStrengthenTaken    ST  = ST
 
--- | Advance a 2-bit counter toward NotTaken.
 bhtStrengthenNotTaken :: BhtCounter -> BhtCounter
-bhtStrengthenNotTaken ST  = WT
-bhtStrengthenNotTaken WT  = WNT
-bhtStrengthenNotTaken WNT = SNT
-bhtStrengthenNotTaken SNT = SNT
+bhtStrengthenNotTaken ST  = WT;  bhtStrengthenNotTaken WT  = WNT
+bhtStrengthenNotTaken WNT = SNT; bhtStrengthenNotTaken SNT = SNT
 
--- | Read the prediction from a counter: Taken when ≥ WT.
 bhtPredTaken :: BhtCounter -> Bool
-bhtPredTaken WT = True
-bhtPredTaken ST = True
-bhtPredTaken _  = False
+bhtPredTaken WT = True; bhtPredTaken ST = True; bhtPredTaken _ = False
 
--- | BHT: 64 entries indexed by PC bits [7:2].
 type BHT = Vec 64 BhtCounter
 
 initBHT :: BHT
 initBHT = repeat WNT
 
--- | Index into the BHT using bits [7:2] of a byte address.
 bhtIdx :: PC -> Unsigned 6
 bhtIdx pc = truncateB (pc `shiftR` 2)
-
--- | Decoded micro-op passed through the pipeline. uWbEn: whether to write rd at all. uAuipc: AUIPC: add PC to upper-imm before ALU
-data MicroOp = MicroOp {uAluOp :: AluOp, uAluSrc2 :: AluSrc2, uWbSrc :: WbSrc, uWbEn :: Bool, uRd :: RegIdx, uRs1 :: RegIdx, uRs2 :: RegIdx, uImm :: Signed 32, uMemOp :: MemOp, uBranchOp :: BranchOp, uAuipc :: Bool} deriving (Generic, NFDataX, Show)
 
 -- ===========================================================================
 -- Instruction decode
 -- ===========================================================================
 
--- Opcode constants
-opOP :: BitVector 7
-opOP = 0b0110011
+opOP :: BitVector 7; opOP = 0b0110011
+opOPIMM :: BitVector 7; opOPIMM = 0b0010011
+opLOAD :: BitVector 7; opLOAD = 0b0000011
+opSTORE :: BitVector 7; opSTORE = 0b0100011
+opBRANCH :: BitVector 7; opBRANCH = 0b1100011
+opJAL :: BitVector 7; opJAL = 0b1101111
+opJALR :: BitVector 7; opJALR = 0b1100111
+opLUI :: BitVector 7; opLUI = 0b0110111
+opAUIPC :: BitVector 7; opAUIPC = 0b0010111
 
-opOPIMM :: BitVector 7
-opOPIMM = 0b0010011
-
-opLOAD :: BitVector 7
-opLOAD = 0b0000011
-
-opSTORE :: BitVector 7
-opSTORE = 0b0100011
-
-opBRANCH :: BitVector 7
-opBRANCH = 0b1100011
-
-opJAL :: BitVector 7
-opJAL = 0b1101111
-
-opJALR :: BitVector 7
-opJALR = 0b1100111
-
-opLUI :: BitVector 7
-opLUI = 0b0110111
-
-opAUIPC :: BitVector 7
-opAUIPC = 0b0010111
-
-nopMicroOp = MicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = False, uRd = 0, uRs1 = 0, uRs2 = 0, uImm = 0, uMemOp = MemNone, uBranchOp = BrNone, uAuipc = False}
+nopMicroOp :: MicroOp
+nopMicroOp = MicroOp
+  { uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = False
+  , uRd = 0, uRs1 = 0, uRs2 = 0, uImm = 0
+  , uMemOp = MemNone, uBranchOp = BrNone, uAuipc = False }
 
 decode :: Word32 -> MicroOp
 decode instr =
-  let op = opcode instr
-      f3 = funct3Of instr
-      f7 = funct7Of instr
-      rd = rdOf instr
-      rs1 = rs1Of instr
-      rs2 = rs2Of instr
+  let op  = opcode   instr
+      f3  = funct3Of instr
+      f7  = funct7Of instr
+      rd  = rdOf     instr
+      rs1 = rs1Of    instr
+      rs2 = rs2Of    instr
    in case op of
-        -- ── R-type ───────────────────────────────────────────────────────────
-        _
-          | op == opOP ->
+        _ | op == opOP ->
               let aluOp = case (f3, f7) of
-                    (0b000, 0b0000000) -> AluAdd
-                    (0b000, 0b0100000) -> AluSub
-                    (0b001, _) -> AluSll
-                    (0b010, _) -> AluSlt
-                    (0b011, _) -> AluSltu
-                    (0b100, _) -> AluXor
-                    (0b101, 0b0000000) -> AluSrl
-                    (0b101, 0b0100000) -> AluSra
-                    (0b110, _) -> AluOr
-                    (0b111, _) -> AluAnd
-                    _ -> AluAdd
-               in nopMicroOp {uAluOp = aluOp, uAluSrc2 = Src2Reg, uWbSrc = WbAlu, uWbEn = True, uRd = rd, uRs1 = rs1, uRs2 = rs2}
-        -- ── I-type arithmetic ─────────────────────────────────────────────────
-        _
+                    (0b000, 0b0000000) -> AluAdd;  (0b000, 0b0100000) -> AluSub
+                    (0b001, _)         -> AluSll;  (0b010, _)         -> AluSlt
+                    (0b011, _)         -> AluSltu; (0b100, _)         -> AluXor
+                    (0b101, 0b0000000) -> AluSrl;  (0b101, 0b0100000) -> AluSra
+                    (0b110, _)         -> AluOr;   (0b111, _)         -> AluAnd
+                    _                  -> AluAdd
+               in nopMicroOp { uAluOp = aluOp, uAluSrc2 = Src2Reg
+                              , uWbSrc = WbAlu, uWbEn = True
+                              , uRd = rd, uRs1 = rs1, uRs2 = rs2 }
+
           | op == opOPIMM ->
               let shamt = unpack (slice d24 d20 instr) :: Unsigned 5
-                  -- For SLLI/SRLI/SRAI imm field carries the shift amount in [4:0]
                   aluOp = case f3 of
-                    0b000 -> AluAdd
-                    0b001 -> AluSll
-                    0b010 -> AluSlt
-                    0b011 -> AluSltu
-                    0b100 -> AluXor
+                    0b000 -> AluAdd;  0b001 -> AluSll;  0b010 -> AluSlt
+                    0b011 -> AluSltu; 0b100 -> AluXor
                     0b101 -> if f7 == 0b0100000 then AluSra else AluSrl
-                    0b110 -> AluOr
-                    0b111 -> AluAnd
-                    _ -> AluAdd
-                  -- SLLI/SRLI/SRAI use shamt, others use sign-extended 12-bit imm
+                    0b110 -> AluOr;   0b111 -> AluAnd;  _     -> AluAdd
                   imm' = case f3 of
                     0b001 -> fromIntegral shamt
                     0b101 -> fromIntegral shamt
-                    _ -> immI instr
-               in nopMicroOp {uAluOp = aluOp, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = True, uRd = rd, uRs1 = rs1, uImm = imm'}
-        -- ── LUI ──────────────────────────────────────────────────────────────
-        _
-          | op == opLUI -> nopMicroOp {uAluOp = AluLui, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = True, uRd = rd, uImm = immU instr}
-        -- ── AUIPC ────────────────────────────────────────────────────────────
-        _
-          | op == opAUIPC -> nopMicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = True, uRd = rd, uImm = immU instr, uAuipc = True}
-        -- ── JAL ──────────────────────────────────────────────────────────────
-        _
-          | op == opJAL -> nopMicroOp {uAluOp = AluLui, uAluSrc2 = Src2Imm, uWbSrc = WbPc4, uWbEn = True, uRd = rd, uImm = immJ instr, uBranchOp = BrJal}
-        -- ── JALR ─────────────────────────────────────────────────────────────
-        _
-          | op == opJALR -> nopMicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbPc4, uWbEn = True, uRd = rd, uRs1 = rs1, uImm = immI instr, uBranchOp = BrJal}
-        -- ── LOAD ─────────────────────────────────────────────────────────────
-        _
+                    _     -> immI instr
+               in nopMicroOp { uAluOp = aluOp, uAluSrc2 = Src2Imm
+                              , uWbSrc = WbAlu, uWbEn = True
+                              , uRd = rd, uRs1 = rs1, uImm = imm' }
+
+          | op == opLUI ->
+              nopMicroOp { uAluOp = AluLui, uAluSrc2 = Src2Imm
+                         , uWbSrc = WbAlu, uWbEn = True, uRd = rd, uImm = immU instr }
+
+          | op == opAUIPC ->
+              nopMicroOp { uAluOp = AluAdd, uAluSrc2 = Src2Imm
+                         , uWbSrc = WbAlu, uWbEn = True
+                         , uRd = rd, uImm = immU instr, uAuipc = True }
+
+          | op == opJAL ->
+              nopMicroOp { uAluOp = AluLui, uAluSrc2 = Src2Imm
+                         , uWbSrc = WbPc4, uWbEn = True
+                         , uRd = rd, uImm = immJ instr, uBranchOp = BrJal }
+
+          | op == opJALR ->
+              nopMicroOp { uAluOp = AluAdd, uAluSrc2 = Src2Imm
+                         , uWbSrc = WbPc4, uWbEn = True
+                         , uRd = rd, uRs1 = rs1, uImm = immI instr, uBranchOp = BrJal }
+
           | op == opLOAD ->
               let memOp = case f3 of
-                    0b000 -> MemLb
-                    0b001 -> MemLh
-                    0b010 -> MemLw
-                    0b100 -> MemLbu
-                    0b101 -> MemLhu
-                    _ -> MemLw
-               in nopMicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbMem, uWbEn = True, uRd = rd, uRs1 = rs1, uImm = immI instr, uMemOp = memOp}
-        -- ── STORE ────────────────────────────────────────────────────────────
-        _
+                    0b000 -> MemLb; 0b001 -> MemLh; 0b010 -> MemLw
+                    0b100 -> MemLbu; 0b101 -> MemLhu; _ -> MemLw
+               in nopMicroOp { uAluOp = AluAdd, uAluSrc2 = Src2Imm
+                              , uWbSrc = WbMem, uWbEn = True
+                              , uRd = rd, uRs1 = rs1, uImm = immI instr, uMemOp = memOp }
+
           | op == opSTORE ->
               let memOp = case f3 of
-                    0b000 -> MemSb
-                    0b001 -> MemSh
-                    0b010 -> MemSw
-                    _ -> MemSw
-               in nopMicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = False, uRs1 = rs1, uRs2 = rs2, uImm = immS instr, uMemOp = memOp}
-        -- ── BRANCH ───────────────────────────────────────────────────────────
-        _
+                    0b000 -> MemSb; 0b001 -> MemSh; _ -> MemSw
+               in nopMicroOp { uAluOp = AluAdd, uAluSrc2 = Src2Imm
+                              , uWbSrc = WbAlu, uWbEn = False
+                              , uRs1 = rs1, uRs2 = rs2
+                              , uImm = immS instr, uMemOp = memOp }
+
           | op == opBRANCH ->
               let brOp = case f3 of
-                    0b000 -> BrEq
-                    0b001 -> BrNe
-                    0b100 -> BrLt
-                    0b101 -> BrGe
-                    0b110 -> BrLtu
-                    0b111 -> BrGeu
-                    _ -> BrNone
-               in nopMicroOp {uAluOp = AluAdd, uAluSrc2 = Src2Imm, uWbSrc = WbAlu, uWbEn = False, uRs1 = rs1, uRs2 = rs2, uImm = immB instr, uBranchOp = brOp}
-        -- ── FENCE / SYSTEM → NOP ─────────────────────────────────────────────
+                    0b000 -> BrEq;  0b001 -> BrNe;  0b100 -> BrLt
+                    0b101 -> BrGe;  0b110 -> BrLtu; 0b111 -> BrGeu; _ -> BrNone
+               in nopMicroOp { uAluOp = AluAdd, uAluSrc2 = Src2Imm
+                              , uWbSrc = WbAlu, uWbEn = False
+                              , uRs1 = rs1, uRs2 = rs2
+                              , uImm = immB instr, uBranchOp = brOp }
 
-        _ -> nopMicroOp
+          | otherwise -> nopMicroOp
 
 -- ===========================================================================
 -- ALU
@@ -422,161 +304,125 @@ decode instr =
 
 alu :: AluOp -> Word32 -> Word32 -> Word32
 alu op a b =
-  let sa = unpack a :: Signed 32
-      sb = unpack b :: Signed 32
+  let sa    = unpack a :: Signed 32
+      sb    = unpack b :: Signed 32
       shamt = unpack (slice d4 d0 b) :: Unsigned 5
    in case op of
-        AluAdd -> pack (sa + sb)
-        AluSub -> pack (sa - sb)
-        AluAnd -> a .&. b
-        AluOr -> a .|. b
-        AluXor -> a `xor` b
-        AluSll -> pack (unpack a :: Unsigned 32) `shiftL` fromIntegral shamt
-        AluSrl -> pack (unpack a :: Unsigned 32) `shiftR` fromIntegral shamt
-        AluSra -> pack (sa `shiftR` fromIntegral shamt)
-        AluSlt -> if sa < sb then 1 else 0
+        AluAdd  -> pack (sa + sb)
+        AluSub  -> pack (sa - sb)
+        AluAnd  -> a .&. b
+        AluOr   -> a .|. b
+        AluXor  -> a `xor` b
+        AluSll  -> pack (unpack a :: Unsigned 32) `shiftL` fromIntegral shamt
+        AluSrl  -> pack (unpack a :: Unsigned 32) `shiftR` fromIntegral shamt
+        AluSra  -> pack (sa `shiftR` fromIntegral shamt)
+        AluSlt  -> if sa < sb then 1 else 0
         AluSltu -> if (unpack a :: Unsigned 32) < (unpack b :: Unsigned 32) then 1 else 0
-        AluLui -> b -- pass-through (used for LUI and JAL which just write the imm)
+        AluLui  -> b
 
--- | Evaluate a branch condition given two register values.
 evalBranch :: BranchOp -> Word32 -> Word32 -> Bool
 evalBranch brOp a b =
-  let sa = unpack a :: Signed 32
-      sb = unpack b :: Signed 32
-      ua = unpack a :: Unsigned 32
-      ub = unpack b :: Unsigned 32
+  let sa = unpack a :: Signed 32; sb = unpack b :: Signed 32
+      ua = unpack a :: Unsigned 32; ub = unpack b :: Unsigned 32
    in case brOp of
-        BrNone -> False
-        BrEq -> a == b
-        BrNe -> a /= b
-        BrLt -> sa < sb
-        BrGe -> sa >= sb
-        BrLtu -> ua < ub
-        BrGeu -> ua >= ub
-        BrJal -> True -- unconditional
+        BrNone -> False; BrEq  -> a == b; BrNe  -> a /= b
+        BrLt   -> sa < sb; BrGe  -> sa >= sb
+        BrLtu  -> ua < ub; BrGeu -> ua >= ub; BrJal -> True
 
 -- ===========================================================================
--- Data memory helpers (byte/halfword sub-word access)
+-- Data memory helpers
 -- ===========================================================================
 
--- | Extract a sub-word from a pre-fetched 32-bit word. byteAddr supplies the byte offset; 'word' is the full aligned word.
 memLoad :: MemOp -> Addr -> Word32 -> Word32
 memLoad memOp byteAddr word =
   let byteOff = resize (byteAddr .&. 3) :: Unsigned 2
-      -- extract byte / halfword based on byte offset
-      byte0 = slice d7 d0 word
-      byte1 = slice d15 d8 word
-      byte2 = slice d23 d16 word
-      byte3 = slice d31 d24 word
       selByte = case byteOff of
-        0 -> byte0
-        1 -> byte1
-        2 -> byte2
-        _ -> byte3
-      half0 = slice d15 d0 word
-      half1 = slice d31 d16 word
-      selHalf = if byteOff < 2 then half0 else half1
+        0 -> slice d7  d0  word; 1 -> slice d15 d8  word
+        2 -> slice d23 d16 word; _ -> slice d31 d24 word
+      selHalf = if byteOff < 2 then slice d15 d0 word else slice d31 d16 word
    in case memOp of
-        MemLb -> pack (signExtend (unpack selByte :: Signed 8) :: Signed 32)
+        MemLb  -> pack (signExtend (unpack selByte :: Signed 8)  :: Signed 32)
         MemLbu -> zeroExtend selByte
-        MemLh -> pack (signExtend (unpack selHalf :: Signed 16) :: Signed 32)
+        MemLh  -> pack (signExtend (unpack selHalf :: Signed 16) :: Signed 32)
         MemLhu -> zeroExtend selHalf
-        MemLw -> word
-        -- non-load: unused
-        _ -> 0
+        MemLw  -> word
+        _      -> 0
 
--- | Produce the (wordIdx, newWord) pair for a data memory write. 'oldWord' is the current word at the target address (pre-fetched from BRAM); it is used for the read-modify-write of sub-word (byte / halfword) stores. Returns Nothing when memOp is not a store.
 memStore :: MemOp -> Addr -> Word32 -> Word32 -> Maybe (Unsigned 10, Word32)
 memStore memOp byteAddr storeVal oldWord =
   let wordIdx = truncateB (byteAddr `shiftR` 2) :: Unsigned 10
       byteOff = resize (byteAddr .&. 3) :: Unsigned 2
-      b8 = zeroExtend (slice d7 d0 storeVal) :: BitVector 32
+      b8  = zeroExtend (slice d7  d0 storeVal) :: BitVector 32
       h16 = zeroExtend (slice d15 d0 storeVal) :: BitVector 32
       newWord = case memOp of
         MemSb -> case byteOff of
           0 -> (oldWord .&. 0xFFFFFF00) .|. b8
-          1 -> (oldWord .&. 0xFFFF00FF) .|. (b8 `shiftL` 8)
-          2 -> (oldWord .&. 0xFF00FFFF) .|. (b8 `shiftL` 16)
-          _ -> (oldWord .&. 0x00FFFFFF) .|. (b8 `shiftL` 24)
-        MemSh -> if byteOff < 2 then (oldWord .&. 0xFFFF0000) .|. h16 else (oldWord .&. 0x0000FFFF) .|. (h16 `shiftL` 16)
+          1 -> (oldWord .&. 0xFFFF00FF) .|. (b8  `shiftL` 8)
+          2 -> (oldWord .&. 0xFF00FFFF) .|. (b8  `shiftL` 16)
+          _ -> (oldWord .&. 0x00FFFFFF) .|. (b8  `shiftL` 24)
+        MemSh -> if byteOff < 2
+                   then (oldWord .&. 0xFFFF0000) .|. h16
+                   else (oldWord .&. 0x0000FFFF) .|. (h16 `shiftL` 16)
         MemSw -> storeVal
-        _ -> oldWord
+        _     -> oldWord
    in case memOp of
-        MemNone -> Nothing
-        MemLb -> Nothing
-        MemLh -> Nothing
-        MemLw -> Nothing
-        MemLbu -> Nothing
-        MemLhu -> Nothing
-        _ -> Just (wordIdx, newWord)
+        MemNone -> Nothing; MemLb -> Nothing; MemLh  -> Nothing
+        MemLw   -> Nothing; MemLbu -> Nothing; MemLhu -> Nothing
+        _       -> Just (wordIdx, newWord)
 
--- ===========================================================================
--- Memory controller dispatch
--- ===========================================================================
-
--- | Route a load through the memory controller. 'ramWord' is the word pre-fetched from the data blockRam this cycle.
 memCtrlLoad :: MemCtrl -> MemOp -> Addr -> Word32 -> Word32
 memCtrlLoad _mc memOp byteAddr ramWord
-  | byteAddr <= ramTop = memLoad memOp byteAddr ramWord
-  | byteAddr == uartTxAddr = 0 -- TX is write-only; reads return 0
-  | byteAddr == uartStatAddr = 1 -- STATUS bit 0 = tx_ready, always 1 in sim
-  | otherwise = 0
+  | byteAddr <= ramTop       = memLoad memOp byteAddr ramWord
+  | byteAddr == uartTxAddr   = 0
+  | byteAddr == uartStatAddr = 1
+  | otherwise                = 0
 
--- | Route a store through the memory controller. Returns the updated controller state and an optional data-BRAM write command. 'oldWord' is the word pre-fetched from the data blockRam (needed for RMW).
-memCtrlStore :: MemCtrl -> MemOp -> Addr -> Word32 -> Word32 -> (MemCtrl, Maybe (Unsigned 10, Word32))
+memCtrlStore :: MemCtrl -> MemOp -> Addr -> Word32 -> Word32
+             -> (MemCtrl, Maybe (Unsigned 10, Word32))
 memCtrlStore mc memOp byteAddr storeVal oldWord
-  | byteAddr <= ramTop = (mc, memStore memOp byteAddr storeVal oldWord)
+  | byteAddr <= ramTop     = (mc, memStore memOp byteAddr storeVal oldWord)
   | byteAddr == uartTxAddr = case memOp of
-      MemSb -> (mc {mcUart = UartState (truncateB (pack storeVal)) True}, Nothing)
-      MemSh -> (mc {mcUart = UartState (truncateB (pack storeVal)) True}, Nothing)
-      MemSw -> (mc {mcUart = UartState (truncateB (pack storeVal)) True}, Nothing)
-      _ -> (mc, Nothing)
+      MemSb -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+      MemSh -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+      MemSw -> (mc { mcUart = UartState (truncateB (pack storeVal)) True }, Nothing)
+      _     -> (mc, Nothing)
   | otherwise = (mc, Nothing)
 
 -- ===========================================================================
--- Pipeline state
+-- Pipeline registers
 -- ===========================================================================
 
--- ---------------------------------------------------------------------------
--- IF/ID pipeline register
--- ---------------------------------------------------------------------------
+-- IF/ID -----------------------------------------------------------------------
 
--- | Carries the fetched instruction and the PC of that instruction.
---   Also records the branch prediction made during IF so EX can compare.
 data IfIdReg = IfIdReg
-  { ifidValid    :: Bool
-  , ifidPC       :: PC
-  , ifidInstr    :: Word32
-  , ifidPredPC   :: PC    -- ^ predicted next-PC used to fetch the cycle after this one
-  , ifidPredTaken :: Bool  -- ^ was a branch predicted taken in IF?
+  { ifidValid     :: Bool
+  , ifidPC        :: PC
+  , ifidInstr     :: Word32
+  , ifidPredPC    :: PC
+  , ifidPredTaken :: Bool
   } deriving (Generic, NFDataX, Show)
 
 emptyIfId :: IfIdReg
 emptyIfId = IfIdReg False 0 0 0 False
 
--- ---------------------------------------------------------------------------
--- ID/EX pipeline register
--- ---------------------------------------------------------------------------
+-- ID/EX -----------------------------------------------------------------------
+-- CP1: rs1Val/rs2Val have the MEM/WB bypass pre-applied.
 
--- | Carries the decoded micro-op and the register values read in ID.
 data IdExReg = IdExReg
   { idexValid     :: Bool
   , idexPC        :: PC
   , idexUop       :: MicroOp
   , idexRs1Val    :: Word32
   , idexRs2Val    :: Word32
-  , idexPredPC    :: PC    -- ^ prediction forwarded from IF/ID
-  , idexPredTaken :: Bool  -- ^ prediction forwarded from IF/ID
+  , idexPredPC    :: PC
+  , idexPredTaken :: Bool
   } deriving (Generic, NFDataX, Show)
 
 emptyIdEx :: IdExReg
 emptyIdEx = IdExReg False 0 nopMicroOp 0 0 0 False
 
--- ---------------------------------------------------------------------------
--- EX/MEM pipeline register
--- ---------------------------------------------------------------------------
+-- EX/MEM ----------------------------------------------------------------------
 
--- | Carries the ALU result and all information needed by MEM and WB.
 data ExMemReg = ExMemReg
   { exmemValid  :: Bool
   , exmemPC     :: PC
@@ -584,90 +430,88 @@ data ExMemReg = ExMemReg
   , exmemWbEn   :: Bool
   , exmemWbSrc  :: WbSrc
   , exmemAluOut :: Word32
-  , exmemRs2Val :: Word32  -- ^ store data
+  , exmemRs2Val :: Word32
   , exmemMemOp  :: MemOp
   } deriving (Generic, NFDataX, Show)
 
 emptyExMem :: ExMemReg
 emptyExMem = ExMemReg False 0 0 False WbAlu 0 0 MemNone
 
--- ---------------------------------------------------------------------------
--- MEM/WB pipeline register
--- ---------------------------------------------------------------------------
+-- MEM/WB ----------------------------------------------------------------------
 
--- | Carries the memory result (or ALU result) ready for write-back.
 data MemWbReg = MemWbReg
   { memwbValid  :: Bool
   , memwbRd     :: RegIdx
   , memwbWbEn   :: Bool
   , memwbWbSrc  :: WbSrc
-  , memwbAluOut :: Word32  -- ^ ALU result (also used as load address for WbMem)
-  , memwbMemVal :: Word32  -- ^ value read from data memory
-  , memwbPc4    :: Word32  -- ^ PC+4 for link (JAL/JALR)
+  , memwbAluOut :: Word32
+  , memwbMemVal :: Word32
+  , memwbPc4    :: Word32
   } deriving (Generic, NFDataX, Show)
 
 emptyMemWb :: MemWbReg
 emptyMemWb = MemWbReg False 0 False WbAlu 0 0 0
 
--- ---------------------------------------------------------------------------
--- Overall CPU state
--- ---------------------------------------------------------------------------
+-- ===========================================================================
+-- CPU state
+-- ===========================================================================
 
 data CpuStateRV = CpuStateRV
-  { rvPC    :: PC
-  , rvRegs  :: RegFile
-  , rvIfId  :: IfIdReg
-  , rvIdEx  :: IdExReg
-  , rvExMem :: ExMemReg
-  , rvMemWb :: MemWbReg
-  , rvBHT   :: BHT
-  , rvHalt  :: Bool
+  { rvPC        :: PC
+  , rvIfId      :: IfIdReg
+  , rvIdEx      :: IdExReg
+  , rvExMem     :: ExMemReg
+  , rvMemWb     :: MemWbReg
+  , rvBHT       :: BHT    -- ^ CP2: committed BHT, one cycle behind the update
+  , rvStallNext :: Bool   -- ^ CP3: registered load-use stall signal
+  , rvHalt      :: Bool
   } deriving (Generic, NFDataX, Show)
 
 initCpuStateRV :: CpuStateRV
 initCpuStateRV = CpuStateRV
-  { rvPC    = 0
-  , rvRegs  = repeat 0
-  , rvIfId  = emptyIfId
-  , rvIdEx  = emptyIdEx
-  , rvExMem = emptyExMem
-  , rvMemWb = emptyMemWb
-  , rvBHT   = initBHT
-  , rvHalt  = False
+  { rvPC        = 0
+  , rvIfId      = emptyIfId
+  , rvIdEx      = emptyIdEx
+  , rvExMem     = emptyExMem
+  , rvMemWb     = emptyMemWb
+  , rvBHT       = initBHT
+  , rvStallNext = False
+  , rvHalt      = False
   }
 
 -- ===========================================================================
--- CPU step function
+-- CPU step (Mealy body)
 -- ===========================================================================
+--
+-- Inputs:
+--   instrWord    – instruction from instruction blockRam at rvPC
+--   dataBramWord – data blockRam word for EX/MEM address (previous cycle)
+--   regRdA       – CP4: register file port A output (rs1 of last cycle's ID instr)
+--   regRdB       – CP4: register file port B output (rs2 of last cycle's ID instr)
+--   memCtrl      – peripheral state
+--   en           – clock enable
+--
+-- Outputs:
+--   (newState, newMemCtrl, dataWrCmd, regWrCmd, nextFetchPC, wbRd, wbVal, wbValid)
+--   regWrCmd   – CP4: optional (RegIdx, Word32) write to register blockRam
+--   nextFetchPC – address for the next instrWord fetch
 
--- | One-cycle step of the 5-stage RV32I pipeline.
---
---   Stages: IF → ID → EX → MEM → WB
---
---   Inputs:
---     instrWord    – instruction word fetched from instruction memory at rvPC
---                    (combinatorial / 1-cycle BRAM, registered externally)
---     dataBramWord – aligned word pre-fetched from the data BRAM.
---                    The address is the EX/MEM AluOut from the *previous*
---                    cycle (i.e. this word is available at the start of MEM).
---     memCtrl      – peripheral state (UART only; data RAM is external)
---     en           – clock enable
---
---   Outputs:
---     (newState, newMemCtrl, dataWrCmd, nextFetchPC, wbRd, wbVal, wbValid)
---     dataWrCmd  – optional BRAM write produced by stores.
---     nextFetchPC – the address the caller should supply instrWord for next cycle.
-stepCpuRV :: CpuStateRV
-           -> (Word32, Word32, MemCtrl, Bool)
-           -> (CpuStateRV, MemCtrl, Maybe (Unsigned 10, Word32), PC, RegIdx, Word32, Bool)
-stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
-  | rvHalt  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
-  | not en  = (s, memCtrl, Nothing, rvPC, 0, 0, False)
+stepCpuRV
+  :: CpuStateRV
+  -> (Word32, Word32, Word32, Word32, MemCtrl, Bool)
+  -> ( CpuStateRV
+     , MemCtrl
+     , Maybe (Unsigned 10, Word32)
+     , Maybe (RegIdx, Word32)
+     , PC
+     , RegIdx, Word32, Bool
+     )
+stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en)
+  | rvHalt = (s, memCtrl, Nothing, Nothing, rvPC, 0, 0, False)
+  | not en = (s, memCtrl, Nothing, Nothing, rvPC, 0, 0, False)
   | otherwise =
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 5 – WB  (combinatorial; register write happens at end of cycle)
-  -- ────────────────────────────────────────────────────────────────────────
+  -- ── WB ──────────────────────────────────────────────────────────────────
   let mwb = rvMemWb
 
       wbResult = case memwbWbSrc mwb of
@@ -675,12 +519,13 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
         WbPc4 -> memwbPc4    mwb
         WbMem -> memwbMemVal mwb
 
-      wbEn  = memwbValid mwb && memwbWbEn mwb && memwbRd mwb /= 0
-      regs1 = if wbEn then replace (memwbRd mwb) wbResult rvRegs else rvRegs
+      wbEn = memwbValid mwb && memwbWbEn mwb && memwbRd mwb /= 0
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 4 – MEM
-  -- ────────────────────────────────────────────────────────────────────────
+      -- CP4: drive external register blockRam write port
+      regWrCmd :: Maybe (RegIdx, Word32)
+      regWrCmd = if wbEn then Just (memwbRd mwb, wbResult) else Nothing
+
+  -- ── MEM ─────────────────────────────────────────────────────────────────
       exmem = rvExMem
 
       memAddr  = unpack (exmemAluOut exmem) :: Addr
@@ -707,81 +552,56 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
       memwb' = if exmemValid exmem
                  then MemWbReg
                         { memwbValid  = True
-                        , memwbRd     = exmemRd     exmem
-                        , memwbWbEn   = exmemWbEn   exmem
-                        , memwbWbSrc  = exmemWbSrc  exmem
-                        , memwbAluOut = exmemAluOut  exmem
+                        , memwbRd     = exmemRd    exmem
+                        , memwbWbEn   = exmemWbEn  exmem
+                        , memwbWbSrc  = exmemWbSrc exmem
+                        , memwbAluOut = exmemAluOut exmem
                         , memwbMemVal = memReadVal
                         , memwbPc4    = pack (exmemPC exmem + 4)
                         }
                  else emptyMemWb
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 3 – EX
-  -- ────────────────────────────────────────────────────────────────────────
+  -- ── EX ──────────────────────────────────────────────────────────────────
       idex = rvIdEx
       uop  = idexUop idex
 
-      -- ── Forwarding network ──────────────────────────────────────────
-      -- Priority: EX/MEM forward > MEM/WB forward > register file value
+      -- CP1: EX only checks EX/MEM. MEM/WB was pre-applied in ID.
       fwdRs1 =
         let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
                           && exmemRd exmem == uRs1 uop
                           && exmemWbSrc exmem /= WbMem
-            fromMemWb = wbEn && memwbRd mwb /= 0
-                          && memwbRd mwb == uRs1 uop
-        in if fromExMem then exmemAluOut exmem
-           else if fromMemWb then wbResult
-           else idexRs1Val idex
+        in if fromExMem then exmemAluOut exmem else idexRs1Val idex
 
       fwdRs2 =
         let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
                           && exmemRd exmem == uRs2 uop
                           && exmemWbSrc exmem /= WbMem
-            fromMemWb = wbEn && memwbRd mwb /= 0
-                          && memwbRd mwb == uRs2 uop
-        in if fromExMem then exmemAluOut exmem
-           else if fromMemWb then wbResult
-           else idexRs2Val idex
+        in if fromExMem then exmemAluOut exmem else idexRs2Val idex
 
-      -- ── ALU ─────────────────────────────────────────────────────────
+      aluA = if uAuipc uop then pack (idexPC idex) else fwdRs1
       aluB = case uAluSrc2 uop of
                Src2Reg -> fwdRs2
                Src2Imm -> pack (uImm uop)
 
-      aluA = if uAuipc uop then pack (idexPC idex) else fwdRs1
-
       aluResult = alu (uAluOp uop) aluA aluB
 
-      -- ── Branch resolution ───────────────────────────────────────────
       brActualTaken = evalBranch (uBranchOp uop) fwdRs1 fwdRs2
 
-      -- Compute the real target (needed for misprediction recovery and JALR)
       brTarget = case uBranchOp uop of
         BrJal ->
-          -- JALR: use ALU result (rs1 + imm) with bit-0 cleared
-          -- JAL:  PC + imm
           if opcode (ifidInstr rvIfId) == opJALR
             then unpack (aluResult .&. complement 1) :: PC
-            else unpack (pack (fromIntegral (idexPC idex)
-                              + uImm uop :: Signed 32)) :: PC
-        _ ->
-          unpack (pack (fromIntegral (idexPC idex)
-                       + uImm uop :: Signed 32)) :: PC
+            else unpack (pack (fromIntegral (idexPC idex) + uImm uop :: Signed 32)) :: PC
+        _ -> unpack (pack (fromIntegral (idexPC idex) + uImm uop :: Signed 32)) :: PC
 
-      -- The PC we predicted in IF for this instruction
-      predPC = idexPredPC idex
-
-      -- Actual next-PC from the EX point of view
       actualNextPC = if brActualTaken then brTarget else idexPC idex + 4
 
-      -- Misprediction: prediction disagrees with actual outcome
       mispredicted =
         idexValid idex
           && uBranchOp uop /= BrNone
-          && predPC /= actualNextPC
+          && idexPredPC idex /= actualNextPC
 
-      -- Update BHT with actual outcome (only for conditional branches + JAL)
+      -- CP2: compute bht' for storage; IF reads rvBHT (last committed value)
       bhtUpdateIdx = bhtIdx (idexPC idex)
       bhtOld       = rvBHT !! bhtUpdateIdx
       bhtNew       = if brActualTaken then bhtStrengthenTaken    bhtOld
@@ -803,33 +623,41 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
                         }
                  else emptyExMem
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Load-use hazard detection (EX sees a load, ID needs the result)
-  -- ────────────────────────────────────────────────────────────────────────
-      isLoad op = case op of
-        MemLb -> True; MemLbu -> True; MemLh -> True
-        MemLhu -> True; MemLw -> True; _ -> False
+  -- ── CP3: Load-use hazard (registered) ───────────────────────────────────
+  --
+  --   loadUseHazard for THIS cycle = rvStallNext computed LAST cycle.
+  --   stallNext' for NEXT cycle is computed from the current IF/ID and ID/EX.
 
-      -- The instruction currently in ID is in IF/ID
+      isLoad op = case op of
+        MemLb -> True; MemLbu -> True; MemLh  -> True
+        MemLhu -> True; MemLw  -> True; _      -> False
+
+      loadUseHazard = rvStallNext  -- registered; off the critical path
+
       ifidDecRs1 = rs1Of (ifidInstr rvIfId)
       ifidDecRs2 = rs2Of (ifidInstr rvIfId)
 
-      loadUseHazard =
+      stallNext' =
         idexValid idex
           && isLoad (uMemOp uop)
           && uWbEn uop
           && uRd uop /= 0
           && (uRd uop == ifidDecRs1 || uRd uop == ifidDecRs2)
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 2 – ID  (decode + register read)
-  -- ────────────────────────────────────────────────────────────────────────
-      ifid  = rvIfId
-      uop'  = decode (ifidInstr ifid)
-      rs1v  = regs1 !! uRs1 uop'
-      rs2v  = regs1 !! uRs2 uop'
+  -- ── ID ──────────────────────────────────────────────────────────────────
+      ifid = rvIfId
+      uop' = decode (ifidInstr ifid)
 
-      -- On flush (misprediction or load-use stall) inject a bubble
+      -- CP4: use blockRam read ports for register values.
+      -- CP1: pre-apply MEM/WB bypass so EX needs only one forwarding mux.
+      rs1vRaw = if uRs1 uop' == 0 then 0 else regRdA
+      rs2vRaw = if uRs2 uop' == 0 then 0 else regRdB
+
+      rs1v = if wbEn && memwbRd mwb /= 0 && memwbRd mwb == uRs1 uop'
+               then wbResult else rs1vRaw
+      rs2v = if wbEn && memwbRd mwb /= 0 && memwbRd mwb == uRs2 uop'
+               then wbResult else rs2vRaw
+
       idex' =
         if mispredicted || not (ifidValid ifid) || loadUseHazard
           then emptyIdEx
@@ -843,39 +671,31 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
                  , idexPredTaken = ifidPredTaken ifid
                  }
 
-  -- ────────────────────────────────────────────────────────────────────────
-  -- Stage 1 – IF  (PC selection + branch prediction)
-  -- ────────────────────────────────────────────────────────────────────────
+  -- ── IF ──────────────────────────────────────────────────────────────────
 
-      -- BHT lookup for the *current* fetch PC
-      bhtPred = bhtPredTaken (bht' !! bhtIdx rvPC)
-
-      -- Quick peek at the instruction to detect JAL in IF
-      -- (opcode only – target can be computed without a full decode)
+      -- CP2: read rvBHT (registered, not bht') to break the EX→BHT→IF loop
+      bhtPred = bhtPredTaken (rvBHT !! bhtIdx rvPC)
       fetchOp = opcode instrWord
 
-      -- Static prediction helper: predict taken for JAL; use BHT for branches
       (ifPredTaken, ifPredTarget) =
         if fetchOp == opJAL
-          then (True, unpack (pack (fromIntegral rvPC
-                                   + immJ instrWord :: Signed 32)) :: PC)
+          then ( True
+               , unpack (pack (fromIntegral rvPC + immJ instrWord :: Signed 32)) :: PC )
           else if fetchOp == opBRANCH && bhtPred
                  then ( True
-                      , unpack (pack (fromIntegral rvPC
-                                     + immB instrWord :: Signed 32)) :: PC
-                      )
+                      , unpack (pack (fromIntegral rvPC + immB instrWord :: Signed 32)) :: PC )
                  else (False, rvPC + 4)
 
       nextPC
-        | loadUseHazard = rvPC                 -- stall: re-fetch same PC
-        | mispredicted  = actualNextPC          -- flush: jump to correct PC
-        | otherwise     = ifPredTarget          -- normal: predicted next-PC
+        | loadUseHazard = rvPC
+        | mispredicted  = actualNextPC
+        | otherwise     = ifPredTarget
 
       ifid' =
         if loadUseHazard
-          then ifid                             -- stall: hold IF/ID
+          then ifid
           else if mispredicted
-                 then emptyIfId                 -- flush IF/ID
+                 then emptyIfId
                  else IfIdReg
                         { ifidValid     = True
                         , ifidPC        = rvPC
@@ -884,206 +704,156 @@ stepCpuRV s@CpuStateRV {..} (instrWord, dataBramWord, memCtrl, en)
                         , ifidPredTaken = ifPredTaken
                         }
 
-      s' = s { rvPC    = nextPC
-             , rvRegs  = regs1
-             , rvIfId  = ifid'
-             , rvIdEx  = idex'
-             , rvExMem = exmem'
-             , rvMemWb = memwb'
-             , rvBHT   = bht'
-             , rvHalt  = False
+      s' = s { rvPC        = nextPC
+             , rvIfId      = ifid'
+             , rvIdEx      = idex'
+             , rvExMem     = exmem'
+             , rvMemWb     = memwb'
+             , rvBHT       = bht'        -- CP2: committed next cycle
+             , rvStallNext = stallNext'  -- CP3: consumed next cycle
+             , rvHalt      = False
              }
 
-   in (s', memCtrl', dataWrCmd, nextPC, memwbRd mwb, wbResult, wbEn)
+   in (s', memCtrl', dataWrCmd, regWrCmd, nextPC, memwbRd mwb, wbResult, wbEn)
 
 -- ===========================================================================
--- Simple simulation helper (no UART)
+-- Simulation helper
 -- ===========================================================================
 
--- | simRam: data RAM (separate from MemCtrl for synthesis)
-data SimState = SimState {simCpu :: CpuStateRV, simData :: MemCtrl, simRam :: Vec 1024 Word32} deriving (Generic, NFDataX, Show)
+data SimState = SimState
+  { simCpu  :: CpuStateRV
+  , simData :: MemCtrl
+  , simRam  :: Vec 1024 Word32
+  , simRegs :: Vec 32  Word32   -- CP4: register file modelled as synchronous RAM
+  } deriving (Generic, NFDataX, Show)
 
 initSimState :: SimState
-initSimState = SimState initCpuStateRV initMemCtrl (repeat 0)
+initSimState = SimState initCpuStateRV initMemCtrl (repeat 0) (repeat 0)
 
--- | Pre-fetch the aligned word the MEM stage will read this cycle.
---   The address is driven by the EX/MEM register (result from the previous EX stage).
 simDataWord :: SimState -> Word32
 simDataWord st =
   let addr = truncateB (unpack (exmemAluOut (rvExMem (simCpu st))) `shiftR` 2) :: Unsigned 10
    in simRam st !! addr
 
--- | Run the CPU for n cycles on a fixed instruction memory image.
---   Returns a list of (pc, wbRd, wbVal, wbEn) per cycle.
+-- | CP4 sim: read register file for the rs1/rs2 of the IF/ID instruction.
+--   Models the one-cycle blockRam latency: we read from last cycle's simRegs.
+simRegRead :: SimState -> (Word32, Word32)
+simRegRead st =
+  let instr = ifidInstr (rvIfId (simCpu st))
+   in (simRegs st !! rs1Of instr, simRegs st !! rs2Of instr)
+
 simulateRV :: InstrMem -> Int -> [(PC, RegIdx, Word32, Bool)]
 simulateRV iMem n = P.take n $ go initSimState
   where
     go st =
-      let cpu = simCpu st
-          mc  = simData st
-          pcW = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
-          instr  = iMem !! pcW
-          dword  = simDataWord st
-          (cpu', mc', wc, pc, rd, val, wbEn) = stepCpuRV cpu (instr, dword, mc, True)
-          ram' = case wc of
-            Just (idx, w) -> replace idx w (simRam st)
-            Nothing       -> simRam st
-          st' = st {simCpu = cpu', simData = mc', simRam = ram'}
-       in (pc, rd, val, wbEn) : go st'
+      let cpu   = simCpu  st
+          mc    = simData st
+          pcW   = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
+          instr = iMem !! pcW
+          dword = simDataWord st
+          (rA, rB) = simRegRead st
+          (cpu', mc', dataWc, regWc, pc, rd, val, en)
+            = stepCpuRV cpu (instr, dword, rA, rB, mc, True)
+          ram'  = case dataWc of
+            Just (i, w) -> replace i w (simRam  st); Nothing -> simRam  st
+          regs' = case regWc of
+            Just (i, w) | i /= 0 -> replace i w (simRegs st); _ -> simRegs st
+          st' = st { simCpu  = cpu', simData = mc'
+                   , simRam  = ram', simRegs = regs' }
+       in (pc, rd, val, en) : go st'
 
 -- ===========================================================================
 -- Instruction assembly helpers
 -- ===========================================================================
 
--- | Build an R-type instruction word.
 mkR :: BitVector 7 -> RegIdx -> RegIdx -> RegIdx -> BitVector 3 -> BitVector 7 -> Word32
-mkR op rd rs1 rs2 f3 f7 =
-  f7 ++# pack rs2 ++# pack rs1 ++# f3 ++# pack rd ++# op
+mkR op rd rs1 rs2 f3 f7 = f7 ++# pack rs2 ++# pack rs1 ++# f3 ++# pack rd ++# op
 
--- | Build an I-type instruction word.
 mkI :: BitVector 7 -> RegIdx -> BitVector 3 -> RegIdx -> Signed 12 -> Word32
-mkI op rd f3 rs1 imm =
-  pack imm ++# pack rs1 ++# f3 ++# pack rd ++# op
+mkI op rd f3 rs1 imm = pack imm ++# pack rs1 ++# f3 ++# pack rd ++# op
 
--- | Build an S-type instruction word.
 mkS :: BitVector 7 -> RegIdx -> RegIdx -> BitVector 3 -> Signed 12 -> Word32
 mkS op rs1 rs2 f3 imm =
   let immBV = pack imm
-      hi = slice d11 d5 immBV
-      lo = slice d4 d0 immBV
-   in hi ++# pack rs2 ++# pack rs1 ++# f3 ++# lo ++# op
+   in slice d11 d5 immBV ++# pack rs2 ++# pack rs1 ++# f3 ++# slice d4 d0 immBV ++# op
 
--- | Build a B-type instruction word.
 mkB :: BitVector 7 -> RegIdx -> RegIdx -> BitVector 3 -> Signed 13 -> Word32
 mkB op rs1 rs2 f3 imm =
-  let immBV = pack imm -- 13 bits: [12:0]
-      b12 = slice d12 d12 immBV
-      b11 = slice d11 d11 immBV
-      b10_5 = slice d10 d5 immBV
-      b4_1 = slice d4 d1 immBV
+  let immBV = pack imm
+      b12   = slice d12 d12 immBV; b11   = slice d11 d11 immBV
+      b10_5 = slice d10 d5  immBV; b4_1  = slice d4  d1  immBV
    in (b12 ++# b10_5) ++# pack rs2 ++# pack rs1 ++# f3 ++# (b4_1 ++# b11) ++# op
 
--- | Build a U-type instruction word (imm is the upper 20 bits).
 mkU :: BitVector 7 -> RegIdx -> BitVector 20 -> Word32
 mkU op rd imm20 = imm20 ++# pack rd ++# op
 
--- | Build a J-type instruction word.
 mkJ :: BitVector 7 -> RegIdx -> Signed 21 -> Word32
 mkJ op rd imm =
-  let immBV = pack imm -- 21 bits
-      b20 = slice d20 d20 immBV
-      b19_12 = slice d19 d12 immBV
-      b11 = slice d11 d11 immBV
-      b10_1 = slice d10 d1 immBV
+  let immBV  = pack imm
+      b20    = slice d20 d20 immBV; b19_12 = slice d19 d12 immBV
+      b11    = slice d11 d11 immBV; b10_1  = slice d10 d1  immBV
    in (b20 ++# b10_1 ++# b11 ++# b19_12) ++# pack rd ++# op
 
--- Convenience constructors ---------------------------------------------------
-
--- R-type
-iADD rd rs1 rs2 = mkR opOP rd rs1 rs2 0b000 0b0000000
-
-iSUB rd rs1 rs2 = mkR opOP rd rs1 rs2 0b000 0b0100000
-
-iSLL rd rs1 rs2 = mkR opOP rd rs1 rs2 0b001 0b0000000
-
-iSLT rd rs1 rs2 = mkR opOP rd rs1 rs2 0b010 0b0000000
-
+iADD  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b000 0b0000000
+iSUB  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b000 0b0100000
+iSLL  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b001 0b0000000
+iSLT  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b010 0b0000000
 iSLTU rd rs1 rs2 = mkR opOP rd rs1 rs2 0b011 0b0000000
+iXOR  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b100 0b0000000
+iSRL  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b101 0b0000000
+iSRA  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b101 0b0100000
+iOR   rd rs1 rs2 = mkR opOP rd rs1 rs2 0b110 0b0000000
+iAND  rd rs1 rs2 = mkR opOP rd rs1 rs2 0b111 0b0000000
 
-iXOR rd rs1 rs2 = mkR opOP rd rs1 rs2 0b100 0b0000000
-
-iSRL rd rs1 rs2 = mkR opOP rd rs1 rs2 0b101 0b0000000
-
-iSRA rd rs1 rs2 = mkR opOP rd rs1 rs2 0b101 0b0100000
-
-iOR rd rs1 rs2 = mkR opOP rd rs1 rs2 0b110 0b0000000
-
-iAND rd rs1 rs2 = mkR opOP rd rs1 rs2 0b111 0b0000000
-
--- I-type arithmetic
-iADDI rd rs1 imm = mkI opOPIMM rd 0b000 rs1 imm
-
-iSLTI rd rs1 imm = mkI opOPIMM rd 0b010 rs1 imm
-
+iADDI  rd rs1 imm = mkI opOPIMM rd 0b000 rs1 imm
+iSLTI  rd rs1 imm = mkI opOPIMM rd 0b010 rs1 imm
 iSLTIU rd rs1 imm = mkI opOPIMM rd 0b011 rs1 imm
+iXORI  rd rs1 imm = mkI opOPIMM rd 0b100 rs1 imm
+iORI   rd rs1 imm = mkI opOPIMM rd 0b110 rs1 imm
+iANDI  rd rs1 imm = mkI opOPIMM rd 0b111 rs1 imm
 
-iXORI rd rs1 imm = mkI opOPIMM rd 0b100 rs1 imm
-
-iORI rd rs1 imm = mkI opOPIMM rd 0b110 rs1 imm
-
-iANDI rd rs1 imm = mkI opOPIMM rd 0b111 rs1 imm
-
--- Shifts with shamt encoded in imm[4:0]
 iSLLI rd rs1 sh = mkI opOPIMM rd 0b001 rs1 (fromIntegral (sh :: Unsigned 5) :: Signed 12)
-
 iSRLI rd rs1 sh = mkI opOPIMM rd 0b101 rs1 (fromIntegral (sh :: Unsigned 5) :: Signed 12)
-
 iSRAI rd rs1 sh = mkI opOPIMM rd 0b101 rs1 (0b0100000_00000 .|. fromIntegral (sh :: Unsigned 5) :: Signed 12)
 
--- Loads
-iLB rd rs1 imm = mkI opLOAD rd 0b000 rs1 imm
-
-iLH rd rs1 imm = mkI opLOAD rd 0b001 rs1 imm
-
-iLW rd rs1 imm = mkI opLOAD rd 0b010 rs1 imm
-
+iLB  rd rs1 imm = mkI opLOAD rd 0b000 rs1 imm
+iLH  rd rs1 imm = mkI opLOAD rd 0b001 rs1 imm
+iLW  rd rs1 imm = mkI opLOAD rd 0b010 rs1 imm
 iLBU rd rs1 imm = mkI opLOAD rd 0b100 rs1 imm
-
 iLHU rd rs1 imm = mkI opLOAD rd 0b101 rs1 imm
 
--- Stores
 iSB rs1 rs2 imm = mkS opSTORE rs1 rs2 0b000 imm
-
 iSH rs1 rs2 imm = mkS opSTORE rs1 rs2 0b001 imm
-
 iSW rs1 rs2 imm = mkS opSTORE rs1 rs2 0b010 imm
 
--- Branches (imm is byte offset, must be even)
-iBEQ rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b000 imm
-
-iBNE rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b001 imm
-
-iBLT rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b100 imm
-
-iBGE rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b101 imm
-
+iBEQ  rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b000 imm
+iBNE  rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b001 imm
+iBLT  rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b100 imm
+iBGE  rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b101 imm
 iBLTU rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b110 imm
-
 iBGEU rs1 rs2 imm = mkB opBRANCH rs1 rs2 0b111 imm
 
--- Upper-immediate / jumps
-iLUI rd imm20 = mkU opLUI rd imm20
-
-iAUIPC rd imm20 = mkU opAUIPC rd imm20
-
-iJAL rd imm = mkJ opJAL rd imm
-
-iJALR rd rs1 imm = mkI opJALR rd 0b000 rs1 imm
+iLUI   rd imm20   = mkU opLUI   rd imm20
+iAUIPC rd imm20   = mkU opAUIPC rd imm20
+iJAL   rd imm     = mkJ opJAL   rd imm
+iJALR  rd rs1 imm = mkI opJALR  rd 0b000 rs1 imm
 
 iNOP :: Word32
-iNOP = iADDI 0 0 0 -- ADDI x0, x0, 0
+iNOP = iADDI 0 0 0
 
 -- ===========================================================================
--- Example test program
+-- Test program
 -- ===========================================================================
 
--- | Compute 1+2+3+...+10 (= 55) and store result in x1.
---   x1=0, x2=10 (counter), x3=1 (step), x4=accumulator
---   loop: if x2 == 0 goto done; x4 += x2; x2 -= 1; goto loop
 testProgRV :: InstrMem
 testProgRV =
-  let nop = iNOP
+  let nop  = iNOP
       base = repeat nop :: InstrMem
-   in -- x0 is always 0
-      -- x1 = 10  (loop counter)
-      -- x2 = 0   (accumulator, starts 0)
-      replace (0 :: Unsigned 10) (iADDI 1 0 10) -- x1 = 10
-        $ replace (1 :: Unsigned 10) (iADDI 2 0 0) -- x2 = 0
-        -- loop (byte addr 8, word addr 2):
-        $ replace (2 :: Unsigned 10) (iBEQ 1 0 16) -- if x1==0 goto +16 (word 6 = done)
-        $ replace (3 :: Unsigned 10) (iADD 2 2 1) -- x2 += x1
-        $ replace (4 :: Unsigned 10) (iADDI 1 1 (-1)) -- x1 -= 1
-        $ replace (5 :: Unsigned 10) (iBEQ 0 0 (-12)) -- goto -12 (back to word 2, byte 8)
-        -- done (word 6, byte 24):
-        $ replace (6 :: Unsigned 10) nop
-        $ base
+   in replace (0 :: Unsigned 10) (iADDI 1 0 10)
+    $ replace (1 :: Unsigned 10) (iADDI 2 0 0)
+    $ replace (2 :: Unsigned 10) (iBEQ  1 0 16)
+    $ replace (3 :: Unsigned 10) (iADD  2 2 1)
+    $ replace (4 :: Unsigned 10) (iADDI 1 1 (-1))
+    $ replace (5 :: Unsigned 10) (iBEQ  0 0 (-12))
+    $ replace (6 :: Unsigned 10) nop
+    $ base
