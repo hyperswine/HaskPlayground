@@ -830,18 +830,26 @@ runCollectUart iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 []
       | otherwise =
           let cpu      = simCpu st
               mc       = simData st
-              ram      = simRam st
+              dword    = simDataWord st
+              (rA, rB) = simRegRead st
+              bhtRd    = simBhtRead st
               pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
               instr    = iMem !! pcW
-              dataAddr = truncateB (unpack (exmemAluOut (rvExMem cpu)) `shiftR` 2) :: Unsigned 10
-              dataWord = ram !! dataAddr
-              (cpu', mc1, wc, pc, _, _, _) = stepCpuRV cpu (instr, dataWord, mc, True)
-              ram'     = case wc of
-                           Just (idx, w) -> replace idx w ram
-                           Nothing       -> ram
+              (cpu', mc1, dataWc, regWc, bhtWc, pc, _, _, _)
+                       = stepCpuRV cpu (instr, dword, rA, rB, bhtRd, mc, True)
+              ram'     = case dataWc of
+                           Just (idx, w) -> replace idx w (simRam st)
+                           Nothing       -> simRam st
+              regs'    = case regWc of
+                           Just (i, w) | i /= 0 -> replace i w (simRegs st)
+                           _                     -> simRegs st
+              bht'     = case bhtWc of
+                           Just (i, w) -> replace i w (simBHT st)
+                           Nothing     -> simBHT st
               (mc2, mByte) = uartPop mc1
               acc'     = case mByte of { Just b -> b : acc; Nothing -> acc }
-              st'      = st { simCpu = cpu', simData = mc2, simRam = ram' }
+              st'      = st { simCpu = cpu', simData = mc2
+                            , simRam = ram', simRegs = regs', simBHT = bht' }
               same     = if pc == lastPC then sameCount + 1 else 0
            in go st' (n - 1) pc same acc'
 
