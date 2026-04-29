@@ -32,28 +32,36 @@ import qualified Prelude as P
 -- Simulation helpers
 -- ===========================================================================
 
--- | Run the CPU until the PC remains stationary for 4 consecutive cycles (no instruction changes it), or until a cycle budget is exhausted. Returns the final register file and memory-controller state.
-runUntilDone :: InstrMem -> Int -> (RegFile, MemCtrl)
+-- | Run the CPU until the PC remains stationary for 4 consecutive cycles, or
+-- until the cycle budget is exhausted.  Returns the final register file and
+-- memory-controller state.  Uses 'simulateRV' to stay in sync with the CP4/CP5
+-- blockRam-based register file and BHT.
+runUntilDone :: InstrMem -> Int -> (Vec 32 Word32, MemCtrl)
 runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
   where
-    go st 0 _ _ = (rvRegs (simCpu st), simData st)
-    go st n lastPC sameCount
-      | sameCount >= 4 = (rvRegs (simCpu st), simData st)
-      | otherwise =
-          let cpu      = simCpu st
-              mc       = simData st
-              ram      = simRam st
-              pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
-              instr    = iMem !! pcW
-              dataAddr = truncateB (unpack (exmemAluOut (rvExMem cpu)) `shiftR` 2) :: Unsigned 10
-              dataWord = ram !! dataAddr
-              (cpu', mc', wc, pc, _, _, _) = stepCpuRV cpu (instr, dataWord, mc, True)
-              ram'  = case wc of
-                Just (idx, w) -> replace idx w ram
-                Nothing       -> ram
-              st'  = st { simCpu = cpu', simData = mc', simRam = ram' }
-              same = if pc == lastPC then sameCount + 1 else 0
-           in go st' (n - 1) pc same
+    go st 0 _ _           = (simRegs st, simData st)
+    go st _ _ sameCount
+      | sameCount >= 4    = (simRegs st, simData st)
+    go st n lastPC sameCount =
+      let cpu    = simCpu st
+          mc     = simData st
+          dword  = simDataWord st
+          (rA, rB) = simRegRead st
+          bhtRd    = simBhtRead st
+          pcW    = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
+          instr  = iMem !! pcW
+          (cpu', mc', dataWc, regWc, bhtWc, nextPc, _, _, _)
+                 = stepCpuRV cpu (instr, dword, rA, rB, bhtRd, mc, True)
+          ram'   = case dataWc of
+            Just (i, w) -> replace i w (simRam st); Nothing -> simRam st
+          regs'  = case regWc of
+            Just (i, w) | i /= 0 -> replace i w (simRegs st); _ -> simRegs st
+          bht'   = case bhtWc of
+            Just (i, w) -> replace i w (simBHT st); Nothing -> simBHT st
+          st'    = st { simCpu = cpu', simData = mc'
+                      , simRam = ram', simRegs = regs', simBHT = bht' }
+          same   = if nextPc == lastPC then sameCount + 1 else 0
+       in go st' (n - 1) nextPc same
 
 -- | Read a register from the result register file (syntactic sugar).
 reg :: RegFile -> RegIdx -> Word32

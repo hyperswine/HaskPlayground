@@ -205,33 +205,40 @@ initSysStateRV = SysStateRV
 -- ===========================================================================
 --
 -- Inputs: (rxPin, instrBRAM output, dataBRAM output, regBRAM port-A output,
---                                                     regBRAM port-B output)
+--                                                     regBRAM port-B output,
+--                                                     bhtBRAM output)
 -- Outputs: ((txPin, led[5:0]),
 --            instrBramRdAddr, instrBramWrCmd,
 --            dataRdAddr,      dataWrCmd,
---            regRdAddrA,      regRdAddrB,   regWrCmd)
+--            regRdAddrA,      regRdAddrB,   regWrCmd,
+--            bhtRdAddr,       bhtWrCmd)
 --
 -- The register blockRam read addresses (regRdAddrA/B) are the rs1/rs2 fields
 -- of the instruction currently in IF/ID, so the read data arrives one cycle
 -- later – exactly when ID needs it.
+--
+-- CP5: bhtRdAddr = bhtIdx(cpu.rvPC), so the BHT prediction for the next
+-- fetch arrives one cycle later -- matching CP2 registered-BHT semantics.
 
 type SysOut =
-  ( (Bit, BitVector 6)           -- (txPin, led)
-  , Unsigned 10                  -- instrBramRdAddr
-  , Maybe (Unsigned 10, Word32)  -- instrBramWrCmd
-  , Unsigned 10                  -- dataRdAddr
-  , Maybe (Unsigned 10, Word32)  -- dataWrCmd
-  , Unsigned 5                   -- regRdAddrA   (CP4)
-  , Unsigned 5                   -- regRdAddrB   (CP4)
-  , Maybe (Unsigned 5, Word32)   -- regWrCmd     (CP4)
+  ( (Bit, BitVector 6)             -- (txPin, led)
+  , Unsigned 10                    -- instrBramRdAddr
+  , Maybe (Unsigned 10, Word32)    -- instrBramWrCmd
+  , Unsigned 10                    -- dataRdAddr
+  , Maybe (Unsigned 10, Word32)    -- dataWrCmd
+  , Unsigned 5                     -- regRdAddrA            (CP4)
+  , Unsigned 5                     -- regRdAddrB            (CP4)
+  , Maybe (Unsigned 5, Word32)     -- regWrCmd              (CP4)
+  , Unsigned 6                     -- bhtRdAddr             (CP5)
+  , Maybe (Unsigned 6, BhtCounter) -- bhtWrCmd              (CP5)
   )
 
 sysStepRV
   :: SysStateRV
-  -> (Bit, Word32, Word32, Word32, Word32)
-     -- ^ (rxPin, instrBramOut, dataBramOut, regBramOutA, regBramOutB)
+  -> (Bit, Word32, Word32, Word32, Word32, BhtCounter)
+     -- ^ (rxPin, instrBramOut, dataBramOut, regBramOutA, regBramOutB, bhtRd)
   -> (SysStateRV, SysOut)
-sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB) =
+sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB, bhtRd) =
   let top  = sTop
       cpu0 = sCpu
       mc0  = sMC
@@ -246,10 +253,11 @@ sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB)
 
       -- ── CPU step ─────────────────────────────────────────────────────────
       -- CP4: pass register file read results; receive write command back.
-      (cpu1, mc1, dataWrCmd, regWrCmd, _nextPC, _rd, _val, _wbEn) =
+      -- CP5: pass BHT read result; receive BHT write command back.
+      (cpu1, mc1, dataWrCmd, regWrCmd, bhtWrCmd, _nextPC, _rd, _val, _wbEn) =
         if cpuRst top
-          then ( initCpuStateRV, mc0, Nothing, Nothing, 0, 0, 0, False )
-          else stepCpuRV cpu0 (bramOut, dataBramOut, regBramOutA, regBramOutB, mc0, cpuEn)
+          then ( initCpuStateRV, mc0, Nothing, Nothing, Nothing, 0, 0, 0, False )
+          else stepCpuRV cpu0 (bramOut, dataBramOut, regBramOutA, regBramOutB, bhtRd, mc0, cpuEn)
 
       -- Drain UART_TX byte written by CPU
       (mc2, cpuTxMaybe) = uartPop mc1
@@ -333,15 +341,30 @@ sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB)
       -- ── Data BRAM read address ────────────────────────────────────────────
       dataRdAddr = truncateB (unpack (exmemAluOut (rvExMem cpu2)) `shiftR` 2) :: Unsigned 10
 
-      -- ── CP4: Register BRAM read addresses ────────────────────────────────
-      -- Feed rs1/rs2 of the instruction in IF/ID so the read data is ready
-      -- one cycle later when ID needs it.
-      regRdAddrA = uRs1 (decode (ifidInstr (rvIfId cpu2)))
-      regRdAddrB = uRs2 (decode (ifidInstr (rvIfId cpu2)))
+      -- ── CP4/CP6: Register BRAM read addresses ────────────────────────────
+      -- CP6: Use bramOut (the raw instruction being loaded into IF/ID this
+      -- cycle) rather than cpu2.rvIfId.ifidInstr.  The latter depends on
+      -- `mispredicted` (which depends on the EX-stage ALU result), creating a
+      -- 18+ ns critical path through: ALU → mispredicted → ifid' → regRdAddr
+      -- → blockRam MUX tree.  Using bramOut (a registered DFF) breaks this
+      -- chain; incorrect reads during a flush are harmless because idex' =
+      -- emptyIdEx the following cycle (ifidValid = False).
+      regRdAddrA = uRs1 (decode bramOut)
+      regRdAddrB = uRs2 (decode bramOut)
 
       -- CP4: register file write command (from WB)
       regWrCmdOut :: Maybe (Unsigned 5, Word32)
       regWrCmdOut = regWrCmd
+
+      -- ── CP5: BHT BRAM read address ────────────────────────────────────────
+      -- Issue the BHT read for the NEXT fetch PC so the prediction arrives
+      -- exactly one cycle later when IF needs it.
+      bhtRdAddr :: Unsigned 6
+      bhtRdAddr = bhtIdx (rvPC cpu2)
+
+      -- CP5: BHT write command (from EX stage)
+      bhtWrCmdOut :: Maybe (Unsigned 6, BhtCounter)
+      bhtWrCmdOut = bhtWrCmd
 
       sys' = SysStateRV top3 cpu2 mc2 fifo4 rx' tx'
 
@@ -350,6 +373,7 @@ sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB)
         , instrRdAddr, instrWrCmd
         , dataRdAddr,  dataWrCmd
         , regRdAddrA,  regRdAddrB, regWrCmdOut
+        , bhtRdAddr,   bhtWrCmdOut
         )
       )
 
@@ -369,18 +393,18 @@ topEntityRV :: Clock Dom80 -> Signal Dom80 Bit -> Signal Dom80 (Bit, BitVector 6
 topEntityRV clk rxPin =
   withClockResetEnable clk resetGen enableGen $
     let fullOut = mealy sysStepRV initSysStateRV
-                    (bundle (rxPin, instrBramOut, dataBramOut, regBramOutA, regBramOutB))
+                    (bundle (rxPin, instrBramOut, dataBramOut, regBramOutA, regBramOutB, bhtRd))
 
         -- Instruction BRAM -----------------------------------------------
-        instrRdAddr = (\(_, a, _, _, _, _, _, _) -> a) <$> fullOut
-        instrWrCmd  = (\(_, _, w, _, _, _, _, _) -> w) <$> fullOut
+        instrRdAddr = (\(_, a, _, _, _, _, _, _, _, _) -> a) <$> fullOut
+        instrWrCmd  = (\(_, _, w, _, _, _, _, _, _, _) -> w) <$> fullOut
         instrBramOut = blockRam
           (repeat (0x00000013 :: Word32) :: Vec 1024 Word32)
           instrRdAddr instrWrCmd
 
         -- Data BRAM -------------------------------------------------------
-        dataRdAddr  = (\(_, _, _, a, _, _, _, _) -> a) <$> fullOut
-        dataWrCmdS  = (\(_, _, _, _, w, _, _, _) -> w) <$> fullOut
+        dataRdAddr  = (\(_, _, _, a, _, _, _, _, _, _) -> a) <$> fullOut
+        dataWrCmdS  = (\(_, _, _, _, w, _, _, _, _, _) -> w) <$> fullOut
         dataBramRaw = blockRam
           (repeat (0 :: Word32) :: Vec 1024 Word32)
           dataRdAddr dataWrCmdS
@@ -392,12 +416,10 @@ topEntityRV clk rxPin =
         -- 32 × 32-bit synchronous blockRam.
         -- Read ports A and B are driven by the rs1/rs2 of the IF/ID instr;
         -- the write port is driven by regWrCmdOut from WB.
-        regRdAddrA  = (\(_, _, _, _, _, a, _, _) -> a) <$> fullOut
-        regRdAddrB  = (\(_, _, _, _, _, _, b, _) -> b) <$> fullOut
-        regWrCmdS   = (\(_, _, _, _, _, _, _, w) -> w) <$> fullOut
+        regRdAddrA  = (\(_, _, _, _, _, a, _, _, _, _) -> a) <$> fullOut
+        regRdAddrB  = (\(_, _, _, _, _, _, b, _, _, _) -> b) <$> fullOut
+        regWrCmdS   = (\(_, _, _, _, _, _, _, w, _, _) -> w) <$> fullOut
 
-        -- Convert Maybe (Unsigned 5, Word32) to the form blockRam expects.
-        -- blockRam :: Vec n a -> Signal rd addr -> Signal wr (Maybe (addr, a))
         -- We split the dual read into two separate blockRam calls sharing the
         -- same write port.  Clash will merge them into a true-dual-port BRAM.
         regBramRawA = blockRam
@@ -414,7 +436,22 @@ topEntityRV clk rxPin =
         regBramOutA = wfBypassReg <$> prevRegWrCmd <*> prevRegRdAddrA <*> regBramRawA
         regBramOutB = wfBypassReg <$> prevRegWrCmd <*> prevRegRdAddrB <*> regBramRawB
 
-     in (\(x, _, _, _, _, _, _, _) -> x) <$> fullOut
+        -- BHT blockRam (CP5) -----------------------------------------------
+        -- 64 × 2-bit synchronous blockRam.
+        -- Read address = bhtIdx(cpu.rvPC); result arrives one cycle later,
+        -- replacing the in-state Vec 64 BhtCounter and its expensive mux trees.
+        bhtRdAddrS  = (\(_, _, _, _, _, _, _, _, a, _) -> a) <$> fullOut
+        bhtWrCmdS   = (\(_, _, _, _, _, _, _, _, _, w) -> w) <$> fullOut
+        bhtBramRaw  = blockRam
+          (repeat WNT :: Vec 64 BhtCounter)
+          bhtRdAddrS bhtWrCmdS
+
+        -- Write-first bypass for BHT.
+        prevBhtWrCmd  = register Nothing bhtWrCmdS
+        prevBhtRdAddr = register 0 bhtRdAddrS
+        bhtRd = wfBypassBht <$> prevBhtWrCmd <*> prevBhtRdAddr <*> bhtBramRaw
+
+     in (\(x, _, _, _, _, _, _, _, _, _) -> x) <$> fullOut
 
   where
     -- Write-first bypass for data BRAM (word-addressed, Unsigned 10)
@@ -424,3 +461,7 @@ topEntityRV clk rxPin =
     -- Write-first bypass for register BRAM (Unsigned 5)
     wfBypassReg (Just (wa, wd)) pra _ | wa == pra = wd
     wfBypassReg _               _   raw           = raw
+
+    -- Write-first bypass for BHT (Unsigned 6)
+    wfBypassBht (Just (wa, wd)) pra _ | wa == pra = wd
+    wfBypassBht _               _   raw           = raw

@@ -416,10 +416,13 @@ data IdExReg = IdExReg
   , idexRs2Val    :: Word32
   , idexPredPC    :: PC
   , idexPredTaken :: Bool
+  -- CP8: branch/JAL target pre-computed in ID (= ifidPC + uImm), so EX
+  -- mispredicted no longer drives a 32-bit adder on the critical path.
+  , idexBrTarget  :: PC
   } deriving (Generic, NFDataX, Show)
 
 emptyIdEx :: IdExReg
-emptyIdEx = IdExReg False 0 nopMicroOp 0 0 0 False
+emptyIdEx = IdExReg False 0 nopMicroOp 0 0 0 False 0
 
 -- EX/MEM ----------------------------------------------------------------------
 
@@ -462,7 +465,7 @@ data CpuStateRV = CpuStateRV
   , rvIdEx      :: IdExReg
   , rvExMem     :: ExMemReg
   , rvMemWb     :: MemWbReg
-  , rvBHT       :: BHT    -- ^ CP2: committed BHT, one cycle behind the update
+  -- rvBHT removed in CP5: BHT is now an external blockRam (see CPURiscVTop).
   , rvStallNext :: Bool   -- ^ CP3: registered load-use stall signal
   , rvHalt      :: Bool
   } deriving (Generic, NFDataX, Show)
@@ -474,7 +477,6 @@ initCpuStateRV = CpuStateRV
   , rvIdEx      = emptyIdEx
   , rvExMem     = emptyExMem
   , rvMemWb     = emptyMemWb
-  , rvBHT       = initBHT
   , rvStallNext = False
   , rvHalt      = False
   }
@@ -487,28 +489,31 @@ initCpuStateRV = CpuStateRV
 --   instrWord    – instruction from instruction blockRam at rvPC
 --   dataBramWord – data blockRam word for EX/MEM address (previous cycle)
 --   regRdA       – CP4: register file port A output (rs1 of last cycle's ID instr)
+--   bhtRd        – CP5: BHT blockRam output for bhtIdx(rvPC) issued last cycle
 --   regRdB       – CP4: register file port B output (rs2 of last cycle's ID instr)
 --   memCtrl      – peripheral state
 --   en           – clock enable
 --
 -- Outputs:
---   (newState, newMemCtrl, dataWrCmd, regWrCmd, nextFetchPC, wbRd, wbVal, wbValid)
+--   (newState, newMemCtrl, dataWrCmd, regWrCmd, bhtWrCmd, nextFetchPC, wbRd, wbVal, wbValid)
 --   regWrCmd   – CP4: optional (RegIdx, Word32) write to register blockRam
+--   bhtWrCmd   – CP5: optional (Unsigned 6, BhtCounter) write to BHT blockRam
 --   nextFetchPC – address for the next instrWord fetch
 
 stepCpuRV
   :: CpuStateRV
-  -> (Word32, Word32, Word32, Word32, MemCtrl, Bool)
+  -> (Word32, Word32, Word32, Word32, BhtCounter, MemCtrl, Bool)
   -> ( CpuStateRV
      , MemCtrl
      , Maybe (Unsigned 10, Word32)
      , Maybe (RegIdx, Word32)
+     , Maybe (Unsigned 6, BhtCounter)
      , PC
      , RegIdx, Word32, Bool
      )
-stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en)
-  | rvHalt = (s, memCtrl, Nothing, Nothing, rvPC, 0, 0, False)
-  | not en = (s, memCtrl, Nothing, Nothing, rvPC, 0, 0, False)
+stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memCtrl, en)
+  | rvHalt = (s, memCtrl, Nothing, Nothing, Nothing, rvPC, 0, 0, False)
+  | not en = (s, memCtrl, Nothing, Nothing, Nothing, rvPC, 0, 0, False)
   | otherwise =
 
   -- ── WB ──────────────────────────────────────────────────────────────────
@@ -587,12 +592,15 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en
 
       brActualTaken = evalBranch (uBranchOp uop) fwdRs1 fwdRs2
 
+      -- CP8: For BRANCH/JAL, brTarget is the pre-computed DFF idexBrTarget.
+      -- For JALR, brTarget is still aluResult (rs1+imm), but JALR is rare.
+      -- The expensive `idexPC + uImm` adder is now hidden in the ID stage.
       brTarget = case uBranchOp uop of
         BrJal ->
-          if opcode (ifidInstr rvIfId) == opJALR
+          if uAluOp uop == AluAdd  -- JALR uses AluAdd; JAL uses AluLui
             then unpack (aluResult .&. complement 1) :: PC
-            else unpack (pack (fromIntegral (idexPC idex) + uImm uop :: Signed 32)) :: PC
-        _ -> unpack (pack (fromIntegral (idexPC idex) + uImm uop :: Signed 32)) :: PC
+            else idexBrTarget idex
+        _ -> idexBrTarget idex
 
       actualNextPC = if brActualTaken then brTarget else idexPC idex + 4
 
@@ -601,14 +609,16 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en
           && uBranchOp uop /= BrNone
           && idexPredPC idex /= actualNextPC
 
-      -- CP2: compute bht' for storage; IF reads rvBHT (last committed value)
+      -- CP5: BHT is now an external blockRam; compute write command for this cycle.
+      -- CP2 semantics preserved: IF uses bhtRd (blockRam output from last cycle's
+      -- read address), so the EX→BHT→IF combinatorial loop is fully broken.
       bhtUpdateIdx = bhtIdx (idexPC idex)
-      bhtOld       = rvBHT !! bhtUpdateIdx
-      bhtNew       = if brActualTaken then bhtStrengthenTaken    bhtOld
-                                      else bhtStrengthenNotTaken bhtOld
-      bht' = if idexValid idex && uBranchOp uop /= BrNone
-               then replace bhtUpdateIdx bhtNew rvBHT
-               else rvBHT
+      bhtNew       = if brActualTaken then bhtStrengthenTaken    bhtRd
+                                      else bhtStrengthenNotTaken bhtRd
+      bhtWrCmd :: Maybe (Unsigned 6, BhtCounter)
+      bhtWrCmd = if idexValid idex && uBranchOp uop /= BrNone
+                   then Just (bhtUpdateIdx, bhtNew)
+                   else Nothing
 
       exmem' = if idexValid idex
                  then ExMemReg
@@ -658,6 +668,11 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en
       rs2v = if wbEn && memwbRd mwb /= 0 && memwbRd mwb == uRs2 uop'
                then wbResult else rs2vRaw
 
+      -- CP8: idexBrTarget is the branch/JAL target pre-computed in ID, so the
+      -- EX-stage critical path through mispredicted no longer needs an adder.
+      idexBrTarget' :: PC
+      idexBrTarget' = unpack (pack (fromIntegral (ifidPC ifid) + uImm uop' :: Signed 32))
+
       idex' =
         if mispredicted || not (ifidValid ifid) || loadUseHazard
           then emptyIdEx
@@ -669,12 +684,14 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en
                  , idexRs2Val    = rs2v
                  , idexPredPC    = ifidPredPC   ifid
                  , idexPredTaken = ifidPredTaken ifid
+                 , idexBrTarget  = idexBrTarget'
                  }
 
   -- ── IF ──────────────────────────────────────────────────────────────────
 
-      -- CP2: read rvBHT (registered, not bht') to break the EX→BHT→IF loop
-      bhtPred = bhtPredTaken (rvBHT !! bhtIdx rvPC)
+      -- CP5: bhtRd is the blockRam output for bhtIdx(rvPC) from the previous cycle,
+      -- matching CP2 semantics (committed BHT, one cycle behind the update).
+      bhtPred = bhtPredTaken bhtRd
       fetchOp = opcode instrWord
 
       (ifPredTaken, ifPredTarget) =
@@ -691,30 +708,30 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, memCtrl, en
         | mispredicted  = actualNextPC
         | otherwise     = ifPredTarget
 
-      ifid' =
-        if loadUseHazard
-          then ifid
-          else if mispredicted
-                 then emptyIfId
-                 else IfIdReg
-                        { ifidValid     = True
-                        , ifidPC        = rvPC
-                        , ifidInstr     = instrWord
-                        , ifidPredPC    = ifPredTarget
-                        , ifidPredTaken = ifPredTaken
-                        }
+      -- CP7+CP8: only ifidValid is gated by mispredicted (the long EX carry-chain
+      -- path).  All other ifid' fields are muxed only between DFF sources:
+      -- either "hold" (loadUseHazard) or "new fetch" (also DFFs: rvPC, instrWord,
+      -- ifPredTarget, ifPredTaken).  When ifidValid=False the stale field values
+      -- are harmless because idex' will be emptyIdEx.
+      ifid' = IfIdReg
+                 { ifidValid     = not loadUseHazard && not mispredicted
+                 , ifidPC        = if loadUseHazard then ifidPC       ifid else rvPC
+                 , ifidInstr     = if loadUseHazard then ifidInstr    ifid else instrWord
+                 , ifidPredPC    = if loadUseHazard then ifidPredPC   ifid else ifPredTarget
+                 , ifidPredTaken = if loadUseHazard then ifidPredTaken ifid else ifPredTaken
+                 }
 
       s' = s { rvPC        = nextPC
              , rvIfId      = ifid'
              , rvIdEx      = idex'
              , rvExMem     = exmem'
              , rvMemWb     = memwb'
-             , rvBHT       = bht'        -- CP2: committed next cycle
+             -- rvBHT removed CP5: write goes out via bhtWrCmd
              , rvStallNext = stallNext'  -- CP3: consumed next cycle
              , rvHalt      = False
              }
 
-   in (s', memCtrl', dataWrCmd, regWrCmd, nextPC, memwbRd mwb, wbResult, wbEn)
+   in (s', memCtrl', dataWrCmd, regWrCmd, bhtWrCmd, nextPC, memwbRd mwb, wbResult, wbEn)
 
 -- ===========================================================================
 -- Simulation helper
@@ -725,15 +742,20 @@ data SimState = SimState
   , simData :: MemCtrl
   , simRam  :: Vec 1024 Word32
   , simRegs :: Vec 32  Word32   -- CP4: register file modelled as synchronous RAM
+  , simBHT  :: Vec 64  BhtCounter  -- CP5: BHT modelled as synchronous RAM
   } deriving (Generic, NFDataX, Show)
 
 initSimState :: SimState
-initSimState = SimState initCpuStateRV initMemCtrl (repeat 0) (repeat 0)
+initSimState = SimState initCpuStateRV initMemCtrl (repeat 0) (repeat 0) initBHT
 
 simDataWord :: SimState -> Word32
 simDataWord st =
   let addr = truncateB (unpack (exmemAluOut (rvExMem (simCpu st))) `shiftR` 2) :: Unsigned 10
    in simRam st !! addr
+
+-- | CP5 sim: read BHT for the fetch PC. Models one-cycle blockRam latency.
+simBhtRead :: SimState -> BhtCounter
+simBhtRead st = simBHT st !! bhtIdx (rvPC (simCpu st))
 
 -- | CP4 sim: read register file for the rs1/rs2 of the IF/ID instruction.
 --   Models the one-cycle blockRam latency: we read from last cycle's simRegs.
@@ -752,14 +774,17 @@ simulateRV iMem n = P.take n $ go initSimState
           instr = iMem !! pcW
           dword = simDataWord st
           (rA, rB) = simRegRead st
-          (cpu', mc', dataWc, regWc, pc, rd, val, en)
-            = stepCpuRV cpu (instr, dword, rA, rB, mc, True)
+          bhtRd    = simBhtRead st
+          (cpu', mc', dataWc, regWc, bhtWc, pc, rd, val, en)
+            = stepCpuRV cpu (instr, dword, rA, rB, bhtRd, mc, True)
           ram'  = case dataWc of
             Just (i, w) -> replace i w (simRam  st); Nothing -> simRam  st
           regs' = case regWc of
             Just (i, w) | i /= 0 -> replace i w (simRegs st); _ -> simRegs st
+          bht'  = case bhtWc of
+            Just (i, w) -> replace i w (simBHT  st); Nothing -> simBHT  st
           st' = st { simCpu  = cpu', simData = mc'
-                   , simRam  = ram', simRegs = regs' }
+                   , simRam  = ram', simRegs = regs', simBHT = bht' }
        in (pc, rd, val, en) : go st'
 
 -- ===========================================================================

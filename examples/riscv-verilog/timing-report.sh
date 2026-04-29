@@ -52,7 +52,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 "$NEXTPNR" \
     --json config.json \
     --write config_pnr.json \
-    --freq 54 \
+    --freq 81 \
     --seed "$SEED" \
     --device GW2AR-LV18QN88C8/I7 \
     --vopt family=GW2A-18C \
