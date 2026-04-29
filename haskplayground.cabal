@@ -45,6 +45,7 @@ library
       Lib
       MyHardware
       Processor
+      QuantUI
       RVAsm
       RVLang
       SMT

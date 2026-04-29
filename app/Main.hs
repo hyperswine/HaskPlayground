@@ -1,7 +1,6 @@
 module Main where
 
-import qualified FPL1Runner
-import qualified FPXSyn
+import qualified QuantUI
 
 main :: IO ()
-main = FPXSyn.main
+main = QuantUI.main
