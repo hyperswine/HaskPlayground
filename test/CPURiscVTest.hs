@@ -37,16 +37,16 @@ import qualified Prelude as P
 -- memory-controller state.  Uses 'simulateRV' to stay in sync with the CP4/CP5
 -- blockRam-based register file and BHT.
 runUntilDone :: InstrMem -> Int -> (Vec 32 Word32, MemCtrl)
-runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
+runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 (0, 0) 0
   where
-    go st 0 _ _           = (simRegs st, simData st)
-    go st _ _ sameCount
-      | sameCount >= 4    = (simRegs st, simData st)
-    go st n lastPC sameCount =
+    go st 0 _ _ _ _             = (simRegs st, simData st)
+    go st _ _ sameCount _ _
+      | sameCount >= 4        = (simRegs st, simData st)
+    go st n lastPC sameCount regRdPrev dword =
       let cpu    = simCpu st
           mc     = simData st
-          dword  = simDataWord st
-          (rA, rB) = simRegRead st
+          -- regRdPrev: blockRam output from the read issued last cycle
+          (rA, rB) = regRdPrev
           bhtRd    = simBhtRead st
           pcW    = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
           instr  = iMem !! pcW
@@ -61,7 +61,12 @@ runUntilDone iMem budget = go initSimState budget (rvPC initCpuStateRV) 0
           st'    = st { simCpu = cpu', simData = mc'
                       , simRam = ram', simRegs = regs', simBHT = bht' }
           same   = if nextPc == lastPC then sameCount + 1 else 0
-       in go st' (n - 1) nextPc same
+          -- Issue data BRAM read this cycle; result arrives next cycle
+          dwordNext = simDataWordNext st' ram'
+          -- Issue register BRAM read this cycle; result arrives next cycle.
+          -- Use post-WB register file (regs') to model write-first bypass.
+          regRdNext = simRegRead st iMem regs'
+       in go st' (n - 1) nextPc same regRdNext dwordNext
 
 -- | Read a register from the result register file (syntactic sugar).
 reg :: RegFile -> RegIdx -> Word32
@@ -799,7 +804,7 @@ prop_bht_warms_up_loop5 = property $ do
             (1, iADDI 2 0 0),
             (2, iADD 2 2 1),
             (3, iADDI 1 1 (-1)),
-            (4, iBNE 1 0 (-12))
+            (4, iBNE 1 0 (-8))
           ]
       (rf, _) = runUntilDone mem 100
   reg rf 1 === 0
@@ -824,7 +829,7 @@ prop_bht_exit_misprediction_recovery = property $ do
             (1, iADDI 2 0 0),
             (2, iADD 2 2 1),
             (3, iADDI 1 1 (-1)),
-            (4, iBNE 1 0 (-12)),
+            (4, iBNE 1 0 (-8)),
             (5, iADDI 3 0 42)
           ]
       (rf, _) = runUntilDone mem 100
@@ -1160,16 +1165,15 @@ cpuRiscVGroup =
 
 -- | Run the CPU collecting every UART byte as it is emitted, draining the UART latch after each step so back-to-back writes are all captured. Stops when the PC has been stationary for 4 consecutive cycles or the cycle budget is exhausted.
 runCollectUart :: InstrMem -> Int -> [BitVector 8]
-runCollectUart iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 []
+runCollectUart iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 [] (0, 0) 0
   where
-    go _ 0 _ _ acc = P.reverse acc
-    go st n lastPC sameCount acc
+    go _ 0 _ _ acc _ _  = P.reverse acc
+    go st n lastPC sameCount acc regRdPrev dword
       | sameCount >= 4 = P.reverse acc
       | otherwise =
           let cpu      = simCpu st
               mc       = simData st
-              dword    = simDataWord st
-              (rA, rB) = simRegRead st
+              (rA, rB) = regRdPrev
               bhtRd    = simBhtRead st
               pcW      = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
               instr    = iMem !! pcW
@@ -1189,7 +1193,9 @@ runCollectUart iMem budget = go initSimState budget (rvPC initCpuStateRV) 0 []
               st'      = st { simCpu = cpu', simData = mc2
                             , simRam = ram', simRegs = regs', simBHT = bht' }
               same     = if pc == lastPC then sameCount + 1 else 0
-           in go st' (n - 1) pc same acc'
+              dwordNext = simDataWordNext st' ram'
+              regRdNext = simRegRead st iMem regs'
+           in go st' (n - 1) pc same acc' regRdNext dwordNext
 
 -- ---------------------------------------------------------------------------
 -- count.S (hand-assembled)

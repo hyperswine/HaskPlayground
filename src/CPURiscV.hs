@@ -570,18 +570,27 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
       idex = rvIdEx
       uop  = idexUop idex
 
-      -- CP1: EX only checks EX/MEM. MEM/WB was pre-applied in ID.
+      -- CP1: EX checks EX/MEM first (highest priority), then MEM/WB.
+      -- MEM/WB bypass is also pre-applied in ID for the 2+ instruction gap case,
+      -- but the 1-instruction gap case (producer in EX/MEM during ID, then in
+      -- MEM/WB during EX) must still be caught here.
       fwdRs1 =
         let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
                           && exmemRd exmem == uRs1 uop
                           && exmemWbSrc exmem /= WbMem
-        in if fromExMem then exmemAluOut exmem else idexRs1Val idex
+            fromMemWb = wbEn && memwbRd mwb == uRs1 uop
+        in if fromExMem then exmemAluOut exmem
+           else if fromMemWb then wbResult
+           else idexRs1Val idex
 
       fwdRs2 =
         let fromExMem = exmemWbEn exmem && exmemRd exmem /= 0
                           && exmemRd exmem == uRs2 uop
                           && exmemWbSrc exmem /= WbMem
-        in if fromExMem then exmemAluOut exmem else idexRs2Val idex
+            fromMemWb = wbEn && memwbRd mwb == uRs2 uop
+        in if fromExMem then exmemAluOut exmem
+           else if fromMemWb then wbResult
+           else idexRs2Val idex
 
       aluA = if uAuipc uop then pack (idexPC idex) else fwdRs1
       aluB = case uAluSrc2 uop of
@@ -620,7 +629,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
                    then Just (bhtUpdateIdx, bhtNew)
                    else Nothing
 
-      exmem' = if idexValid idex
+      exmem' = if idexValid idex && not loadUseHazard
                  then ExMemReg
                         { exmemValid  = True
                         , exmemPC     = idexPC  idex
@@ -704,7 +713,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
                  else (False, rvPC + 4)
 
       nextPC
-        | loadUseHazard = rvPC
+        | loadUseHazard = idexPC idex  -- replay the consumer instruction
         | mispredicted  = actualNextPC
         | otherwise     = ifPredTarget
 
@@ -715,8 +724,8 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
       -- are harmless because idex' will be emptyIdEx.
       ifid' = IfIdReg
                  { ifidValid     = not loadUseHazard && not mispredicted
-                 , ifidPC        = if loadUseHazard then ifidPC       ifid else rvPC
-                 , ifidInstr     = if loadUseHazard then ifidInstr    ifid else instrWord
+                 , ifidPC        = rvPC
+                 , ifidInstr     = instrWord
                  , ifidPredPC    = if loadUseHazard then ifidPredPC   ifid else ifPredTarget
                  , ifidPredTaken = if loadUseHazard then ifidPredTaken ifid else ifPredTaken
                  }
@@ -748,32 +757,41 @@ data SimState = SimState
 initSimState :: SimState
 initSimState = SimState initCpuStateRV initMemCtrl (repeat 0) (repeat 0) initBHT
 
-simDataWord :: SimState -> Word32
-simDataWord st =
+-- | Compute the dataBramWord to pass to the NEXT simulation step.
+-- Models one-cycle blockRam read latency: issue the read for rvExMem.aluOut now,
+-- get the result next cycle (write-first: simRam already includes this cycle's write).
+simDataWordNext :: SimState -> Vec 1024 Word32 -> Word32
+simDataWordNext st ram' =
   let addr = truncateB (unpack (exmemAluOut (rvExMem (simCpu st))) `shiftR` 2) :: Unsigned 10
-   in simRam st !! addr
+   in ram' !! addr
 
 -- | CP5 sim: read BHT for the fetch PC. Models one-cycle blockRam latency.
 simBhtRead :: SimState -> BhtCounter
 simBhtRead st = simBHT st !! bhtIdx (rvPC (simCpu st))
 
--- | CP4 sim: read register file for the rs1/rs2 of the IF/ID instruction.
---   Models the one-cycle blockRam latency: we read from last cycle's simRegs.
-simRegRead :: SimState -> (Word32, Word32)
-simRegRead st =
-  let instr = ifidInstr (rvIfId (simCpu st))
-   in (simRegs st !! rs1Of instr, simRegs st !! rs2Of instr)
+-- | CP4/CP6 sim: issue the register blockRam read for the instruction being
+--   fetched into IF/ID this cycle (i.e. the instruction at rvPC), matching
+--   the hardware which uses bramOut (the current fetch word) as the read
+--   address.  The result arrives next cycle when the instruction is in ID.
+--   Uses the post-WB register file (regs') to model write-first bypass:
+--   if WB writes rd==rs1/rs2 in the same cycle as the read is issued,
+--   the hardware bypass returns the new value.
+simRegRead :: SimState -> InstrMem -> Vec 32 Word32 -> (Word32, Word32)
+simRegRead st iMem regs =
+  let pcW   = truncateB (rvPC (simCpu st) `shiftR` 2) :: Unsigned 10
+      instr = iMem !! pcW
+   in (regs !! rs1Of instr, regs !! rs2Of instr)
 
 simulateRV :: InstrMem -> Int -> [(PC, RegIdx, Word32, Bool)]
-simulateRV iMem n = P.take n $ go initSimState
+simulateRV iMem n = P.take n $ go initSimState (0, 0) 0
   where
-    go st =
+    go st regRdPrev dword =
       let cpu   = simCpu  st
           mc    = simData st
           pcW   = truncateB (rvPC cpu `shiftR` 2) :: Unsigned 10
           instr = iMem !! pcW
-          dword = simDataWord st
-          (rA, rB) = simRegRead st
+          -- regRdPrev = blockRam output from last cycle's read address (one-cycle latency)
+          (rA, rB) = regRdPrev
           bhtRd    = simBhtRead st
           (cpu', mc', dataWc, regWc, bhtWc, pc, rd, val, en)
             = stepCpuRV cpu (instr, dword, rA, rB, bhtRd, mc, True)
@@ -785,7 +803,12 @@ simulateRV iMem n = P.take n $ go initSimState
             Just (i, w) -> replace i w (simBHT  st); Nothing -> simBHT  st
           st' = st { simCpu  = cpu', simData = mc'
                    , simRam  = ram', simRegs = regs', simBHT = bht' }
-       in (pc, rd, val, en) : go st'
+          -- Issue data BRAM read this cycle; result arrives next cycle
+          dwordNext = simDataWordNext st' ram'
+          -- Issue register BRAM read this cycle; result arrives next cycle.
+          -- Use post-WB register file (regs') to model write-first bypass.
+          regRdNext = simRegRead st iMem regs'
+       in (pc, rd, val, en) : go st' regRdNext dwordNext
 
 -- ===========================================================================
 -- Instruction assembly helpers

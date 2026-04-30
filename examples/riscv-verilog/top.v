@@ -172,7 +172,6 @@ module top
   wire [31:0] c$app_arg_22;
   wire [31:0] c$case_alt_55;
   wire [31:0] c$app_arg_23;
-  wire  wbEn;
   wire [31:0] c$case_alt_56;
   wire [62:0] result_9;
   wire [62:0] c$case_alt_57;
@@ -248,8 +247,6 @@ module top
   wire [31:0] c$app_arg_36;
   wire [31:0] c$app_arg_37;
   wire [31:0] c$app_arg_38;
-  wire  c$wbEn_case_alt;
-  reg [31:0] c$wbResult_case_alt;
   wire [31:0] c$nextPC_case_alt;
   wire  mispredicted;
   wire [31:0] ifPredTarget;
@@ -276,8 +273,13 @@ module top
   wire [31:0] fwdRs2;
   wire [31:0] c$aluResult_app_arg_0;
   wire [31:0] fwdRs1;
-  reg  c$fwdRs1_case_alt;
-  wire  c$fwdRs1_case_alt_0;
+  wire [31:0] c$fwdRs2_case_alt;
+  wire [31:0] c$fwdRs1_case_alt;
+  wire  wbEn;
+  reg  c$fwdRs1_case_alt_0;
+  wire  c$fwdRs1_case_alt_1;
+  wire  c$wbEn_case_alt;
+  reg [31:0] c$wbResult_case_alt;
   wire [32:0] result_18;
   wire [32:0] c$ds9_case_alt;
   wire signed [31:0] result_19;
@@ -548,15 +550,15 @@ module top
   wire signed [11:0] c$s_4;
   wire signed [11:0] c$s_5;
   wire signed [12:0] c$s_6;
-  wire [1:0] c$wbResult_case_alt_selection_3;
   wire [2:0] c$mispredicted_case_alt_selection_4;
   wire [2:0] c$actualNextPC_case_alt_selection_4;
   wire [3:0] c$actualNextPC_case_alt_selection_10;
   wire [2:0] result_selection_15;
   wire [3:0] result_selection_21;
   wire [31:0] c$bv_4;
-  wire [4:0] c$i_183;
-  wire [1:0] c$fwdRs1_case_alt_selection_3;
+  wire [4:0] c$i_182;
+  wire [1:0] c$fwdRs1_case_alt_selection_13;
+  wire [1:0] c$wbResult_case_alt_selection_3;
   wire signed [20:0] c$s_7;
   wire signed [12:0] c$s_8;
   wire [31:0] c$i_190;
@@ -1153,8 +1155,6 @@ module top
 
   assign c$app_arg_23 = (wbEn & (c$wbEn_case_alt & (c$ds_app_arg_1[306:302] == result_9[49:45]))) ? c$wbResult_case_alt : c$case_alt_56;
 
-  assign wbEn = c$ds_app_arg_1[307:307] & (c$ds_app_arg_1[301:301] & c$wbEn_case_alt);
-
   assign c$case_alt_56 = (result_9[49:45] == 5'd0) ? 32'b00000000000000000000000000000000 : result_35;
 
   assign result_9 = (op_0 == 7'b0110011) ? {result_10,
@@ -1342,18 +1342,6 @@ module top
 
   assign c$app_arg_38 = c$ds_app_arg_1[202:202] ? c$ds_app_arg_1[738:707] : c$ds_app_arg_1[771:740];
 
-  assign c$wbEn_case_alt = c$ds_app_arg_1[306:302] != 5'd0;
-
-  assign c$wbResult_case_alt_selection_3 = c$ds_app_arg_1[300:299];
-
-  always @(*) begin
-    case(c$wbResult_case_alt_selection_3)
-      2'b00 : c$wbResult_case_alt = c$ds_app_arg_1[298:267];
-      2'b01 : c$wbResult_case_alt = c$ds_app_arg_1[234:203];
-      default : c$wbResult_case_alt = c$ds_app_arg_1[266:235];
-    endcase
-  end
-
   assign c$nextPC_case_alt = mispredicted ? actualNextPC : ifPredTarget;
 
   assign mispredicted = c$ds_app_arg_1[641:641] & (c$mispredicted_case_alt & (c$ds_app_arg_1[481:450] != actualNextPC));
@@ -1440,9 +1428,9 @@ module top
 
   assign c$bv_4 = (c$aluResult_app_arg);
 
-  assign c$i_183 = ((c$bv_4[4 : 0]));
+  assign c$i_182 = ((c$bv_4[4 : 0]));
 
-  assign c$ds_app_arg = $unsigned({{(64-5) {1'b0}},c$i_183});
+  assign c$ds_app_arg = $unsigned({{(64-5) {1'b0}},c$i_182});
 
   assign c$app_arg_43 = (c$app_arg_44);
 
@@ -1454,22 +1442,40 @@ module top
 
   assign c$aluResult_app_arg = c$ds_app_arg_1[604:604] ? (($unsigned($signed(c$ds_app_arg_1[585:554])))) : fwdRs2;
 
-  assign fwdRs2 = (c$ds_app_arg_1[378:378] & (c$fwdRs1_case_alt_0 & ((c$ds_app_arg_1[383:379] == c$ds_app_arg_1[590:586]) & c$fwdRs1_case_alt))) ? c$ds_app_arg_1[375:344] : c$ds_app_arg_1[513:482];
+  assign fwdRs2 = (c$ds_app_arg_1[378:378] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[383:379] == c$ds_app_arg_1[590:586]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[375:344] : c$fwdRs2_case_alt;
 
   assign c$aluResult_app_arg_0 = c$ds_app_arg_1[546:546] ? ((c$ds_app_arg_1[640:609])) : fwdRs1;
 
-  assign fwdRs1 = (c$ds_app_arg_1[378:378] & (c$fwdRs1_case_alt_0 & ((c$ds_app_arg_1[383:379] == c$ds_app_arg_1[595:591]) & c$fwdRs1_case_alt))) ? c$ds_app_arg_1[375:344] : c$ds_app_arg_1[545:514];
+  assign fwdRs1 = (c$ds_app_arg_1[378:378] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[383:379] == c$ds_app_arg_1[595:591]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[375:344] : c$fwdRs1_case_alt;
 
-  assign c$fwdRs1_case_alt_selection_3 = c$ds_app_arg_1[377:376];
+  assign c$fwdRs2_case_alt = (wbEn & (c$ds_app_arg_1[306:302] == c$ds_app_arg_1[590:586])) ? c$wbResult_case_alt : c$ds_app_arg_1[513:482];
+
+  assign c$fwdRs1_case_alt = (wbEn & (c$ds_app_arg_1[306:302] == c$ds_app_arg_1[595:591])) ? c$wbResult_case_alt : c$ds_app_arg_1[545:514];
+
+  assign wbEn = c$ds_app_arg_1[307:307] & (c$ds_app_arg_1[301:301] & c$wbEn_case_alt);
+
+  assign c$fwdRs1_case_alt_selection_13 = c$ds_app_arg_1[377:376];
 
   always @(*) begin
-    case(c$fwdRs1_case_alt_selection_3)
-      2'b10 : c$fwdRs1_case_alt = 1'b0;
-      default : c$fwdRs1_case_alt = 1'b1;
+    case(c$fwdRs1_case_alt_selection_13)
+      2'b10 : c$fwdRs1_case_alt_0 = 1'b0;
+      default : c$fwdRs1_case_alt_0 = 1'b1;
     endcase
   end
 
-  assign c$fwdRs1_case_alt_0 = c$ds_app_arg_1[383:379] != 5'd0;
+  assign c$fwdRs1_case_alt_1 = c$ds_app_arg_1[383:379] != 5'd0;
+
+  assign c$wbEn_case_alt = c$ds_app_arg_1[306:302] != 5'd0;
+
+  assign c$wbResult_case_alt_selection_3 = c$ds_app_arg_1[300:299];
+
+  always @(*) begin
+    case(c$wbResult_case_alt_selection_3)
+      2'b00 : c$wbResult_case_alt = c$ds_app_arg_1[298:267];
+      2'b01 : c$wbResult_case_alt = c$ds_app_arg_1[234:203];
+      default : c$wbResult_case_alt = c$ds_app_arg_1[266:235];
+    endcase
+  end
 
   assign result_18 = (fetchOp == 7'b1101111) ? {1'b1,
                                                 (($unsigned((c$ds9_app_arg + result_19))))} : c$ds9_case_alt;
