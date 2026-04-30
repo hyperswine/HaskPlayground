@@ -757,6 +757,326 @@ prop_uart_loop_last_byte = property $ do
   uartByte mc === Just 3
 
 -- ---------------------------------------------------------------------------
+-- Branch predictor tests
+-- ---------------------------------------------------------------------------
+
+-- | BHT initial state is WNT (weakly not-taken), so the first occurrence of a
+--   taken backward branch causes a misprediction.  The pipeline must flush and
+--   recover to the correct loop-top PC so the final result is correct.
+prop_bht_initial_misprediction_recovery :: Property
+prop_bht_initial_misprediction_recovery = property $ do
+  --  word  byte
+  --  0     0x00  ADDI x1, x0, 1       -- x1 = counter = 1
+  --  1     0x04  ADDI x2, x0, 0       -- x2 = accumulator = 0
+  --  2     0x08  ADD  x2, x2, x1      -- x2 += x1   ← loop top
+  --  3     0x0C  ADDI x1, x1, -1      -- x1 -= 1
+  --  4     0x10  BNE  x1, x0, -12     -- branch back to word 2 if x1 != 0
+  --  After loop: x1=0, x2=1.
+  --  The BNE is not taken on exit; on the one taken iteration the BHT starts
+  --  WNT so there is a misprediction; recovery must produce x2 = 1.
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 1),
+            (1, iADDI 2 0 0),
+            (2, iADD 2 2 1),
+            (3, iADDI 1 1 (-1)),
+            (4, iBNE 1 0 (-12))
+          ]
+      (rf, _) = runUntilDone mem 60
+  reg rf 1 === 0
+  reg rf 2 === 1
+
+-- | BHT saturates to ST after two consecutive taken iterations.
+--   Loop runs 5 times (sum 1..5 = 15).  After the first two taken branches
+--   the BHT counter reaches ST and predicts taken for the remaining
+--   iterations.  The final exit is a not-taken branch that causes a
+--   misprediction (BHT still predicts taken); recovery must give x2 = 15.
+prop_bht_warms_up_loop5 :: Property
+prop_bht_warms_up_loop5 = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 5),
+            (1, iADDI 2 0 0),
+            (2, iADD 2 2 1),
+            (3, iADDI 1 1 (-1)),
+            (4, iBNE 1 0 (-12))
+          ]
+      (rf, _) = runUntilDone mem 100
+  reg rf 1 === 0
+  reg rf 2 === 15
+
+-- | After enough loop iterations the BHT reaches ST for the backward branch.
+--   When the loop finally exits (branch not taken) the BHT mispredicts taken;
+--   the pipeline flushes to the fall-through PC and the instruction after the
+--   loop (ADDI x3, x0, 42) must execute with the correct value.
+prop_bht_exit_misprediction_recovery :: Property
+prop_bht_exit_misprediction_recovery = property $ do
+  --  word  byte
+  --  0     0x00  ADDI x1, x0, 3
+  --  1     0x04  ADDI x2, x0, 0
+  --  2     0x08  ADD  x2, x2, x1      ← loop top
+  --  3     0x0C  ADDI x1, x1, -1
+  --  4     0x10  BNE  x1, x0, -12
+  --  5     0x14  ADDI x3, x0, 42      ← must execute after loop exits
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 3),
+            (1, iADDI 2 0 0),
+            (2, iADD 2 2 1),
+            (3, iADDI 1 1 (-1)),
+            (4, iBNE 1 0 (-12)),
+            (5, iADDI 3 0 42)
+          ]
+      (rf, _) = runUntilDone mem 100
+  reg rf 1 === 0
+  reg rf 2 === 6  -- 3+2+1 = 6
+  reg rf 3 === 42
+
+-- | Forward branch that is not taken: BHT default (WNT) predicts not-taken
+--   correctly, so no flush occurs and the instruction after the branch runs.
+prop_bht_forward_not_taken_correct :: Property
+prop_bht_forward_not_taken_correct = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 1),
+            (1, iADDI 2 0 2),
+            (2, iBEQ 1 2 8),      -- not taken (correct WNT prediction)
+            (3, iADDI 3 0 55)
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 3 === 55
+
+-- | Forward branch that IS taken: BHT predicts not-taken (WNT), causing a
+--   misprediction.  The pipeline must flush and squash the instruction after
+--   the branch; x3 must remain 0.
+prop_bht_forward_taken_recovery :: Property
+prop_bht_forward_taken_recovery = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 5),
+            (1, iADDI 2 0 5),
+            (2, iBEQ 1 2 8),      -- taken; BHT mispredicts → flush
+            (3, iADDI 3 0 99)     -- squashed by misprediction recovery
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 3 === 0
+
+-- | Two consecutive taken forward branches (different BHT indices) both
+--   mispredict but recover independently; neither squash pollutes the other.
+prop_bht_consecutive_branch_recovery :: Property
+prop_bht_consecutive_branch_recovery = property $ do
+  --  word  byte
+  --  0     0x00  ADDI x1, x0, 7
+  --  1     0x04  ADDI x2, x0, 7
+  --  2     0x08  BEQ  x1, x2, +8    → taken; skip word 3; land at word 4
+  --  3     0x0C  ADDI x3, x0, 11    -- squashed
+  --  4     0x10  ADDI x4, x0, 3
+  --  5     0x14  ADDI x5, x0, 3
+  --  6     0x18  BEQ  x4, x5, +8    → taken; skip word 7; land at word 8
+  --  7     0x1C  ADDI x6, x0, 22    -- squashed
+  --  8     0x20  ADDI x7, x0, 99    -- executes
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 7),
+            (1, iADDI 2 0 7),
+            (2, iBEQ 1 2 8),
+            (3, iADDI 3 0 11),    -- squashed
+            (4, iADDI 4 0 3),
+            (5, iADDI 5 0 3),
+            (6, iBEQ 4 5 8),
+            (7, iADDI 6 0 22),    -- squashed
+            (8, iADDI 7 0 99)
+          ]
+      (rf, _) = runUntilDone mem 50
+  reg rf 3 === 0   -- squashed
+  reg rf 6 === 0   -- squashed
+  reg rf 7 === 99
+
+-- ---------------------------------------------------------------------------
+-- Additional hazard tests
+-- ---------------------------------------------------------------------------
+
+-- | EX/MEM forwarding with both source operands coming from the same
+--   in-flight instruction: ADD x2 = x1 + x1 immediately after ADDI x1.
+prop_exmem_forwarding_both_ops :: Property
+prop_exmem_forwarding_both_ops = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 7),
+            (1, iADD 2 1 1)   -- x2 = x1 + x1 = 14; both operands forwarded
+          ]
+      (rf, _) = runUntilDone mem 20
+  reg rf 2 === 14
+
+-- | Three-deep forwarding chain: each ADD consumes the result of the
+--   immediately preceding instruction (EX/MEM forward every cycle).
+prop_forwarding_three_deep :: Property
+prop_forwarding_three_deep = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 1),
+            (1, iADD 2 1 1),   -- x2 = 2  (EX/MEM forward)
+            (2, iADD 3 2 2),   -- x3 = 4  (EX/MEM forward, both ops)
+            (3, iADD 4 3 3)    -- x4 = 8  (EX/MEM forward, both ops)
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 1 === 1
+  reg rf 2 === 2
+  reg rf 3 === 4
+  reg rf 4 === 8
+
+-- | Load-use hazard when BOTH operands of the consuming instruction are the
+--   loaded register: LW x3 then ADD x4 = x3 + x3.
+prop_load_use_both_operands :: Property
+prop_load_use_both_operands = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 0x100),
+            (1, iADDI 2 0 5),
+            (2, iSW 1 2 0),         -- mem[0x100] = 5
+            (3, iLW 3 1 0),         -- x3 = 5
+            (4, iADD 4 3 3)         -- x4 = x3 + x3 = 10  (load-use, both ops)
+          ]
+      (rf, _) = runUntilDone mem 40
+  reg rf 4 === 10
+
+-- | Two consecutive load-use hazards: each load is immediately consumed by
+--   the next instruction, requiring two separate one-cycle stalls.
+prop_double_load_use :: Property
+prop_double_load_use = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 0x100),
+            (1, iADDI 2 0 3),
+            (2, iADDI 5 0 4),
+            (3, iSW 1 2 0),         -- mem[0x100] = 3
+            (4, iSW 1 5 4),         -- mem[0x104] = 4
+            (5, iLW 3 1 0),         -- x3 = 3
+            (6, iADD 6 3 2),        -- x6 = 3+3 = 6  (load-use stall)
+            (7, iLW 4 1 4),         -- x4 = 4
+            (8, iADD 7 4 5)         -- x7 = 4+4 = 8  (load-use stall)
+          ]
+      (rf, _) = runUntilDone mem 60
+  reg rf 6 === 6
+  reg rf 7 === 8
+
+-- | Branch immediately after a load: the pipeline must stall for the load-use
+--   hazard before evaluating the branch condition, but the result must be
+--   correct (branch taken, word 5 skipped).
+prop_branch_after_load :: Property
+prop_branch_after_load = property $ do
+  --  word  byte
+  --  0     0x00  ADDI x1, x0, 0x100
+  --  1     0x04  ADDI x2, x0, 5
+  --  2     0x08  SW   x1, x2, 0       -- mem[0x100] = 5
+  --  3     0x0C  LW   x3, 0(x1)       -- x3 = 5
+  --  4     0x10  BEQ  x3, x2, +8      -- x3==x2==5 → taken; skip word 5
+  --  5     0x14  ADDI x4, x0, 99      -- skipped
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 0x100),
+            (1, iADDI 2 0 5),
+            (2, iSW 1 2 0),
+            (3, iLW 3 1 0),
+            (4, iBEQ 3 2 8),
+            (5, iADDI 4 0 99)
+          ]
+      (rf, _) = runUntilDone mem 50
+  reg rf 3 === 5
+  reg rf 4 === 0
+
+-- | Read-after-write through memory with a NOP gap: SW then LW at the same
+--   address (gap ensures no load-use stall) must read back the stored value.
+prop_raw_through_memory :: Property
+prop_raw_through_memory = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 0x200),
+            (1, iADDI 2 0 0xAB),
+            (2, iSW 1 2 0),        -- mem[0x200] = 0xAB
+            (3, iNOP),             -- gap
+            (4, iLW 3 1 0)         -- x3 = 0xAB
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 3 === 0xAB
+
+-- | JALR always causes an EX-stage flush (regardless of BHT).
+--   The two instructions in the shadow (words 2 and 3) must be squashed.
+prop_jalr_flushes_pipeline :: Property
+prop_jalr_flushes_pipeline = property $ do
+  --  word  byte
+  --  0     0x00  ADDI x2, x0, 16
+  --  1     0x04  JALR x1, x2, 0      -- jump to 16; x1 = 0x08
+  --  2     0x08  ADDI x3, x0, 11     -- squashed
+  --  3     0x0C  ADDI x3, x0, 22     -- squashed
+  --  4     0x10  ADDI x3, x0, 33     -- executes
+  let mem =
+        buildMem
+          [ (0, iADDI 2 0 16),
+            (1, iJALR 1 2 0),
+            (2, iADDI 3 0 11),
+            (3, iADDI 3 0 22),
+            (4, iADDI 3 0 33)
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 1 === 8
+  reg rf 3 === 33
+
+-- | JAL is predicted taken in the ID stage, so no EX flush is needed.
+--   Instructions in the fetch shadow (words 1 and 2) are squashed by the
+--   early ID prediction; only word 3 (the target) executes.
+prop_jal_predicted_taken :: Property
+prop_jal_predicted_taken = property $ do
+  --  word  byte
+  --  0     0x00  JAL x1, +12         -- jump to byte 12 (word 3); x1 = 0x04
+  --  1     0x04  ADDI x2, x0, 99     -- squashed
+  --  2     0x08  ADDI x2, x0, 88     -- squashed
+  --  3     0x0C  ADDI x3, x0, 42     -- executes
+  let mem =
+        buildMem
+          [ (0, iJAL 1 12),
+            (1, iADDI 2 0 99),
+            (2, iADDI 2 0 88),
+            (3, iADDI 3 0 42)
+          ]
+      (rf, _) = runUntilDone mem 30
+  reg rf 1 === 4
+  reg rf 2 === 0
+  reg rf 3 === 42
+
+-- | Forwarding from WB into ID (MEM/WB bypass, CP1): result produced two
+--   cycles ago must be visible to the instruction currently in ID.
+--   A NOP between producer and consumer prevents a load-use stall but the
+--   result must still be forwarded via the WB path pre-applied in ID.
+prop_memwb_bypass_in_id :: Property
+prop_memwb_bypass_in_id = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 20),   -- x1 = 20  (in WB two cycles later)
+            (1, iNOP),
+            (2, iADD 2 1 1)       -- x2 = x1 + x1 = 40  (WB→ID bypass)
+          ]
+      (rf, _) = runUntilDone mem 20
+  reg rf 2 === 40
+
+-- | Back-to-back stores to the same memory address: the second SW must
+--   overwrite the first so that a subsequent LW reads the latest value.
+prop_store_overwrite :: Property
+prop_store_overwrite = property $ do
+  let mem =
+        buildMem
+          [ (0, iADDI 1 0 0x300),
+            (1, iADDI 2 0 10),
+            (2, iADDI 3 0 99),
+            (3, iSW 1 2 0),        -- mem[0x300] = 10
+            (4, iSW 1 3 0),        -- mem[0x300] = 99  (overwrite)
+            (5, iNOP),
+            (6, iLW 4 1 0)         -- x4 = 99
+          ]
+      (rf, _) = runUntilDone mem 40
+  reg rf 4 === 99
+
+-- ---------------------------------------------------------------------------
 -- Property group
 -- ---------------------------------------------------------------------------
 
@@ -811,6 +1131,24 @@ cpuRiscVGroup =
     ("uart pop clears valid", prop_uart_pop_clears_valid),
     ("uart overwrite", prop_uart_overwrite),
     ("uart loop last byte", prop_uart_loop_last_byte),
+    -- Branch predictor tests
+    ("bht initial misprediction recovery",  prop_bht_initial_misprediction_recovery),
+    ("bht warms up loop5",                  prop_bht_warms_up_loop5),
+    ("bht exit misprediction recovery",     prop_bht_exit_misprediction_recovery),
+    ("bht forward not-taken correct",       prop_bht_forward_not_taken_correct),
+    ("bht forward taken recovery",          prop_bht_forward_taken_recovery),
+    ("bht consecutive branch recovery",     prop_bht_consecutive_branch_recovery),
+    -- Additional hazard tests
+    ("exmem forwarding both ops",           prop_exmem_forwarding_both_ops),
+    ("forwarding three deep",               prop_forwarding_three_deep),
+    ("load-use both operands",              prop_load_use_both_operands),
+    ("double load-use hazard",              prop_double_load_use),
+    ("branch after load",                   prop_branch_after_load),
+    ("raw through memory",                  prop_raw_through_memory),
+    ("jalr flushes pipeline",               prop_jalr_flushes_pipeline),
+    ("jal predicted taken",                 prop_jal_predicted_taken),
+    ("memwb bypass in id",                  prop_memwb_bypass_in_id),
+    ("store overwrite",                     prop_store_overwrite),
     -- Integration tests (full program simulations)
     ("count.S: uart output 0-9 newline", prop_count_s_uart),
     ("sum 1..10: uart byte = 55",        prop_sum_s_uart)
