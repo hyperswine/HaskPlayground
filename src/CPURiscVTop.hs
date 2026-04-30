@@ -46,9 +46,9 @@ import qualified Prelude as P
 -- Clock domain
 -- ===========================================================================
 
-createDomain vSystem {vName = "Dom80", vPeriod = 18519}
+createDomain vSystem {vName = "Dom80", vPeriod = 12346}
 
-type ClkFreqRV    = 54_000_000
+type ClkFreqRV    = 81_000_000
 type BaudRateRV   = 115_200
 type ClksPerBitRV = Div ClkFreqRV BaudRateRV
 type HalfBitRV    = Div ClksPerBitRV 2
@@ -61,7 +61,7 @@ data RxFSM = RxIdle | RxStart | RxData | RxStop
   deriving (Generic, NFDataX, Show, Eq)
 
 data UartRxSt = UartRxSt
-  { rxFSM    :: RxFSM,    rxCnt    :: Unsigned 9, rxBitIdx :: Unsigned 3
+  { rxFSM    :: RxFSM,    rxCnt    :: Unsigned 10, rxBitIdx :: Unsigned 3
   , rxShift  :: BitVector 8, rxSync1  :: Bit,       rxSync2  :: Bit
   , rxData   :: BitVector 8, rxValid  :: Bool
   } deriving (Generic, NFDataX, Show)
@@ -72,8 +72,8 @@ initRxSt = UartRxSt RxIdle 0 0 0 1 1 0 False
 uartRxStep :: UartRxSt -> Bit -> (UartRxSt, (BitVector 8, Bool))
 uartRxStep s@UartRxSt{..} rxPin =
   let sampled = rxSync2
-      clksPB  = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 9
-      half    = snatToNum (SNat :: SNat HalfBitRV)    :: Unsigned 9
+      clksPB  = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 10
+      half    = snatToNum (SNat :: SNat HalfBitRV)    :: Unsigned 10
       shifted = pack sampled ++# slice d7 d1 rxShift
       (fsm', cnt', bitIdx', shift', valid') = case rxFSM of
         RxIdle
@@ -103,7 +103,7 @@ data TxFSM = TxIdle | TxStart | TxData | TxStop
   deriving (Generic, NFDataX, Show, Eq)
 
 data UartTxSt = UartTxSt
-  { txFSM    :: TxFSM,  txCnt    :: Unsigned 9, txBitIdx :: Unsigned 3
+  { txFSM    :: TxFSM,  txCnt    :: Unsigned 10, txBitIdx :: Unsigned 3
   , txShift  :: BitVector 8, txPin :: Bit
   } deriving (Generic, NFDataX, Show)
 
@@ -112,7 +112,7 @@ initTxSt = UartTxSt TxIdle 0 0 0 1
 
 uartTxStep :: UartTxSt -> (BitVector 8, Bool) -> (UartTxSt, (Bit, Bool))
 uartTxStep s@UartTxSt{..} (dat, send) =
-  let clksPB = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 9
+  let clksPB = snatToNum (SNat :: SNat ClksPerBitRV) :: Unsigned 10
       busy   = txFSM /= TxIdle
       bit0   = lsb txShift
       shifted = 0 ++# slice d7 d1 txShift
