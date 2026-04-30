@@ -21,15 +21,15 @@ tmp_bin = "/tmp/rvlang_out".
 src_file = getenv "RVLANG_FILE" |> unwrap_or "".
 src_expr = getenv "RVLANG_EXPR" |> unwrap_or "".
 
-source = if != src_file "" then read src_file else if != src_expr "" then src_expr else "".
+# source = if != src_file "" then read src_file else if != src_expr "" then src_expr else "".
 
-if == source "" then echo "Error: set RVLANG_FILE=<path> or RVLANG_EXPR='<expression>'" |> exit 1.
+# if == source "" then echo "Error: set RVLANG_FILE=<path> or RVLANG_EXPR='<expression>'" |> exit 1.
 
-echo "Source: {source}".
+# echo "Source: {source}".
 
-# ── 2. Write source to a temp file so the Haskell runner can read it ────────
+# # ── 2. Write source to a temp file so the Haskell runner can read it ────────
 
-write tmp_src source.
+# write tmp_src source.
 
 # ── 3. Write a tiny Haskell runner that calls runCodeGen ────────────────────
 
@@ -52,7 +52,7 @@ write tmp_hs runner.
 echo "Generating assembly ...".
 codegen = sh "stack exec -- runghc {tmp_hs}".
 
-res = if failed codegen then echo "Codegen error:" else "".
+# res = if failed codegen then echo "Codegen error:" else "".
 # res' = if res then echo codegen|stderr |> exit 1.
 
 # asm = codegen|stdout.
