@@ -1,5 +1,6 @@
 #!/usr/bin/env sol
-# Copies the Clash-generated top.v and prog.hex into examples/processor-verilog.
+
+# Copies the Clash-generated top.v into examples/riscv-verilog.
 
 output = sh "stack exec --package clash-ghc -- clash src/CPURiscVTop.hs --verilog".
 echo output.
