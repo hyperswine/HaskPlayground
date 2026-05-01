@@ -43,6 +43,7 @@ library
       Gameloop
       HuffmanClash
       Lib
+      MyClash
       MyHardware
       Processor
       QuantUI
