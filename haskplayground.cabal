@@ -47,6 +47,7 @@ library
       MyHardware
       Processor
       QuantUI
+      RealWorld
       RVAsm
       RVLang
       SMT
