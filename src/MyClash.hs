@@ -1,17 +1,20 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE NumericUnderscores #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module MyClash where
 
+import qualified Clash.Explicit.Prelude as CP
 import Clash.Prelude hiding (mux)
 import qualified Data.List as L
-import Prelude hiding (map)
+import Prelude hiding (map, not)
 
 infixl 0 |>
 
@@ -86,6 +89,7 @@ example :: Signal System Bit -> Signal System Bit
 example = id
 
 input1 = fromList [low, low, high]
+
 input2 = fromList ([low, low, high] <> L.repeat low)
 
 t1 = L.take 20 $ sample $ example input2
@@ -99,3 +103,28 @@ mux = liftA3 $ \cond thn els -> if cond then thn else els
 
 -- x1 is NOTed, x2 is as is, sw is as is
 myCircuit sw x = mux sw (complement <$> x) x
+
+helloreg :: Clock System -> Reset System -> Enable System -> Signal System Bool
+-- expect True False False False ...
+helloreg clk rst en = CP.register clk rst en True $ pure False
+
+res = sampleN 5 $ helloreg clockGen resetGen enableGen
+
+--- >>> res
+-- [True,True,False,False,False]
+
+flippy :: Clock System -> Reset System -> Enable System -> Signal System Bool
+flippy clk rst en = r where r = CP.register clk rst en True (not <$> r)
+
+res' = L.zip [0 ..] $ sampleN 8 $ flippy clockGen resetGen enableGen
+
+--- >>> res'
+-- [(0,True),(1,True),(2,False),(3,True),(4,False),(5,True),(6,False),(7,True)]
+
+type SecondPeriods dom = 1_000_000_000_000 `Div` DomainPeriod dom
+
+blinkingSecond :: forall dom. KnownDomain dom => (1 <= DomainPeriod dom, KnownNat (DomainPeriod dom)) => (1 <= 1_000_000_000_000 `Div` (DomainPeriod dom)) => Clock dom -> Reset dom -> Enable dom -> Signal dom Bit
+blinkingSecond clk rst en = msb <$> r
+  where
+    r :: Signal dom (Unsigned (CLog 2 (SecondPeriods dom)))
+    r = CP.register clk rst en 0 (r + 1)
