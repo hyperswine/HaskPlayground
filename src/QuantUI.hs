@@ -1,6 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-name-shadowing #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module QuantUI where
 
@@ -20,12 +23,9 @@ module QuantUI where
 import Brick hiding (clamp)
 import Brick.BChan (newBChan, writeBChan)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Monad (forM_, void, when)
+import Control.Monad (void)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON, ToJSON, decodeFileStrict, encodeFile)
-import Data.List (intercalate)
-import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import GHC.Generics (Generic)
 import qualified Graphics.Vty as V
@@ -58,6 +58,7 @@ data CalcState = CalcState
   deriving (Eq, Show, Generic)
 
 instance ToJSON CalcState
+
 instance FromJSON CalcState
 
 emptyCalc :: CalcState
@@ -113,6 +114,7 @@ data PlatState = PlatState
   deriving (Eq, Show, Generic)
 
 instance ToJSON PlatState
+
 instance FromJSON PlatState
 
 platWidth, platHeight :: Int
@@ -158,6 +160,7 @@ data WeatherState = WeatherState
   deriving (Eq, Show, Generic)
 
 instance ToJSON WeatherState
+
 instance FromJSON WeatherState
 
 -- Simulate a refresh (deterministic-ish from a tick seed)
@@ -187,6 +190,7 @@ data NotesState = NotesState
   deriving (Eq, Show, Generic)
 
 instance ToJSON NotesState
+
 instance FromJSON NotesState
 
 emptyNotes :: NotesState
@@ -326,7 +330,8 @@ renderPlat ps =
       scoreBar =
         withAttr (attrName "hint") $
           str $
-            "  Score: " ++ show (platScore ps)
+            "  Score: "
+              ++ show (platScore ps)
               ++ if platLevelComplete ps then "  ★ Level Complete!" else ""
    in vBox
         [ header,
@@ -472,8 +477,9 @@ handleOS _ = pure ()
 
 handleAppKey :: OSState -> AppID -> V.Key -> EventM WName OSState ()
 handleAppKey os AppCalc key = case key of
-  V.KChar c | c `elem` ("0123456789+-*/.() " :: String) ->
-    put $ os {osCalc = (osCalc os) {calcInput = calcInput (osCalc os) ++ [c]}}
+  V.KChar c
+    | c `elem` ("0123456789+-*/.() " :: String) ->
+        put $ os {osCalc = (osCalc os) {calcInput = calcInput (osCalc os) ++ [c]}}
   V.KEnter ->
     let inp = calcInput (osCalc os)
         result = maybe "Error" show (evalExpr inp)
@@ -673,4 +679,3 @@ main = do
 
 forever :: IO () -> IO ()
 forever action = action >> forever action
-
