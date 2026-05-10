@@ -56,20 +56,13 @@ data AExpr
 instance Show AExpr where
   show (AAtom a) = show a
   show (AApp f args) = unwords (f : map show args)
-  show (ALet x e body) =
-    "let " ++ x ++ " = " ++ show e ++ "\n    in " ++ show body
+  show (ALet x e body) = "let " ++ x ++ " = " ++ show e ++ "\n    in " ++ show body
 
 -- A top-level lifted function definition
-data TopDef = TopDef
-  { tdName :: Name,
-    tdParams :: [Name],
-    tdBody :: AExpr
-  }
-  deriving (Eq)
+data TopDef = TopDef {tdName :: Name, tdParams :: [Name], tdBody :: AExpr} deriving (Eq)
 
 instance Show TopDef where
-  show (TopDef name params body) =
-    name ++ concatMap (' ' :) params ++ " =\n    " ++ show body
+  show (TopDef name params body) = name ++ concatMap (' ' :) params ++ " =\n    " ++ show body
 
 --------------------------------------------------------------------------------
 -- Compilation monad
@@ -88,9 +81,7 @@ emitDef :: TopDef -> Compile ()
 emitDef d = modify (\(n, defs) -> (n, defs ++ [d]))
 
 runCompile :: Compile a -> (a, [TopDef])
-runCompile m =
-  let (a, (_, defs)) = runState m (1, [])
-   in (a, defs)
+runCompile m = let (a, (_, defs)) = runState m (1, []) in (a, defs)
 
 --------------------------------------------------------------------------------
 -- Free variable analysis
@@ -125,10 +116,9 @@ normalize :: [Name] -> Expr -> (Atom -> Compile AExpr) -> Compile AExpr
 normalize _env (Var x) k = k (AVar x)
 normalize _env (Lit n) k = k (ALit n)
 -- Let: normalize the binding to an AExpr, extend scope, normalize body
-normalize env (Let x rhs body) k =
-  normExpr env rhs $ \rhsExpr -> do
-    bodyExpr <- normalize (x : env) body k
-    return (ALet x rhsExpr bodyExpr)
+normalize env (Let x rhs body) k = normExpr env rhs $ \rhsExpr -> do
+  bodyExpr <- normalize (x : env) body k
+  return (ALet x rhsExpr bodyExpr)
 
 -- Application: normalize function, then argument, then emit AApp
 normalize env (App f arg) k = do
@@ -186,24 +176,19 @@ spine expr = go expr []
 
 -- Normalize to an Atom, binding to a fresh name if needed
 normalizeAtom :: [Name] -> Expr -> (Atom -> Compile AExpr) -> Compile AExpr
-normalizeAtom env expr k =
-  case expr of
-    Var x -> k (AVar x)
-    Lit n -> k (ALit n)
-    _ -> normalize env expr k
+normalizeAtom env expr k = case expr of
+  Var x -> k (AVar x)
+  Lit n -> k (ALit n)
+  _ -> normalize env expr k
 
 -- Normalize a list of expressions to atoms (threading lets correctly)
 normalizeArgs :: [Name] -> [Expr] -> ([Atom] -> Compile AExpr) -> Compile AExpr
 normalizeArgs _env [] k = k []
-normalizeArgs env (e : es) k =
-  normalizeAtom env e $ \a ->
-    normalizeArgs env es $ \as ->
-      k (a : as)
+normalizeArgs env (e : es) k = normalizeAtom env e $ \a -> normalizeArgs env es $ \as -> k (a : as)
 
 -- Normalize an expression to an AExpr (not necessarily an atom)
 normExpr :: [Name] -> Expr -> (AExpr -> Compile AExpr) -> Compile AExpr
-normExpr env expr k =
-  normalize env expr $ \atom -> k (AAtom atom)
+normExpr env expr k = normalize env expr $ \atom -> k (AAtom atom)
 
 -- Capture-avoiding substitution (used in Let normalisation above; simple version)
 subst :: Name -> Expr -> Expr -> Expr
@@ -218,8 +203,7 @@ subst x s (Let y e b) = Let y (subst x s e) (if x == y then b else subst x s b)
 --------------------------------------------------------------------------------
 
 compile :: Expr -> (AExpr, [TopDef])
-compile expr =
-  runCompile $ normalize [] expr (return . AAtom)
+compile expr = runCompile $ normalize [] expr (return . AAtom)
 
 printResult :: String -> Expr -> IO ()
 printResult label expr = do
