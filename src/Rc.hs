@@ -13,6 +13,7 @@
 -- increffed (new ownership) or decreffed (dropped ownership).
 -- The output is a simple imperative RC-annotated IR that could be
 -- straightforwardly lowered to C.
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Rc where
 
@@ -53,17 +54,11 @@ data AExpr
   | ALet Name AExpr AExpr -- let x = e in body
   deriving (Eq)
 
-data ABranch
-  = ABranch Name [Name] AExpr -- Ctor bound_vars -> body
-  deriving (Eq)
+-- Ctor bound_vars -> body
+data ABranch = ABranch Name [Name] AExpr deriving (Eq)
 
 -- Top-level function (already lambda-lifted: no free vars)
-data FunDef = FunDef
-  { fnName :: Name,
-    fnParams :: [Name],
-    fnBody :: AExpr
-  }
-  deriving (Eq)
+data FunDef = FunDef {fnName :: Name, fnParams :: [Name], fnBody :: AExpr} deriving (Eq)
 
 --------------------------------------------------------------------------------
 -- Output: RC-annotated IR
@@ -85,16 +80,10 @@ data RExpr
   | RCall Name [Atom] -- f(args...)
   deriving (Eq)
 
-data RBranch = RBranch Name [Name] [RStmt]
-  deriving (Eq)
+data RBranch = RBranch Name [Name] [RStmt] deriving (Eq)
 
 -- A complete RC-annotated function
-data RFunDef = RFunDef
-  { rfName :: Name,
-    rfParams :: [Name],
-    rfBody :: [RStmt]
-  }
-  deriving (Eq)
+data RFunDef = RFunDef {rfName :: Name, rfParams :: [Name], rfBody :: [RStmt]} deriving (Eq)
 
 --------------------------------------------------------------------------------
 -- Pretty printing
@@ -109,14 +98,10 @@ ppStmt d (RIncref x) = indent d $ "incref(" ++ x ++ ");"
 ppStmt d (RDecref x) = indent d $ "decref(" ++ x ++ ");"
 ppStmt d (RFree x) = indent d $ "free(" ++ x ++ ");"
 ppStmt d (RReturn e) = indent d $ "return " ++ ppExpr e ++ ";"
-ppStmt d (RCase x brs) =
-  indent d ("case " ++ x ++ " of\n")
-    ++ concatMap (ppBranch (d + 2)) brs
+ppStmt d (RCase x brs) = indent d ("case " ++ x ++ " of\n") ++ concatMap (ppBranch (d + 2)) brs
 
 ppBranch :: Int -> RBranch -> String
-ppBranch d (RBranch ctor fields stmts) =
-  indent d (ctor ++ " " ++ unwords fields ++ " ->\n")
-    ++ concatMap (\s -> ppStmt (d + 2) s ++ "\n") stmts
+ppBranch d (RBranch ctor fields stmts) = indent d (ctor ++ " " ++ unwords fields ++ " ->\n") ++ concatMap (\s -> ppStmt (d + 2) s ++ "\n") stmts
 
 ppExpr :: RExpr -> String
 ppExpr (RAtom a) = show a
@@ -124,14 +109,7 @@ ppExpr (RAlloc c args) = "alloc(" ++ c ++ ", " ++ intercalate ", " (map show arg
 ppExpr (RCall f args) = f ++ "(" ++ intercalate ", " (map show args) ++ ")"
 
 ppFun :: RFunDef -> String
-ppFun (RFunDef name params body) =
-  "fun "
-    ++ name
-    ++ "("
-    ++ intercalate ", " params
-    ++ ") {\n"
-    ++ concatMap (\s -> ppStmt 2 s ++ "\n") body
-    ++ "}"
+ppFun (RFunDef name params body) = "fun " ++ name ++ "(" ++ intercalate ", " params ++ ") {\n" ++ concatMap (\s -> ppStmt 2 s ++ "\n") body ++ "}"
 
 --------------------------------------------------------------------------------
 -- Liveness / use analysis on ANF
@@ -150,12 +128,9 @@ usesOf (AAtom a) = atomUses a
 usesOf (AApp _ args) = Set.unions (map atomUses args)
 usesOf (ACtor _ args) = Set.unions (map atomUses args)
 usesOf (ALet x e b) = usesOf e `Set.union` Set.delete x (usesOf b)
-usesOf (ACase a brs) = atomUses a `Set.union` Set.unions (map brUses brs)
-  where
-    brUses (ABranch _ fields body) = usesOf body Set.\\ Set.fromList fields
+usesOf (ACase a brs) = atomUses a `Set.union` Set.unions (map brUses brs) where brUses (ABranch _ fields body) = usesOf body Set.\\ Set.fromList fields
 
--- Names live in the *continuation* after a let-binding
--- i.e. what does the body use?
+-- Names live in the *continuation* after a let-binding. i.e. what does the body use?
 liveInCont :: AExpr -> Set Name
 liveInCont = usesOf
 
@@ -166,7 +141,8 @@ liveInCont = usesOf
 -- At each point we emit the appropriate RC operations.
 --------------------------------------------------------------------------------
 
-type Live = Set Name -- names currently holding a live reference
+-- | Names currently holding a live reference
+type Live = Set Name
 
 -- Insert RC for a complete function definition
 insertFun :: FunDef -> RFunDef
@@ -181,8 +157,7 @@ insertFun (FunDef name params body) =
       finalDecrefs = map RDecref (Set.toList unusedParams)
    in RFunDef name params (stmts ++ finalDecrefs ++ [RReturn ret])
 
--- Very rough approximation: which names are decreffed or used in stmts
--- (used to avoid double-decref of params that were already handled)
+-- Very rough approximation: which names are decreffed or used in stmts (used to avoid double-decref of params that were already handled)
 usedInStmts :: [RStmt] -> Set Name
 usedInStmts = Set.unions . map go
   where
@@ -193,23 +168,17 @@ usedInStmts = Set.unions . map go
     go (RCase x brs) = Set.singleton x
     go (RReturn _) = Set.empty
 
--- Insert RC for an expression.
--- Returns (statements-before-return, return-expression)
+-- Insert RC for an expression. Returns (statements-before-return, return-expression)
 insertExpr :: Live -> [Name] -> AExpr -> ([RStmt], RExpr)
 -- Base case: just an atom, nothing to emit
 insertExpr _live _params (AAtom a) = ([], RAtom a)
--- Constructor: alloc + incref each non-primitive field
-insertExpr _live _params (ACtor ctor args) =
-  let increfs = [RIncref x | AVar x <- args] -- only heap values
-   in (increfs, RAlloc ctor args)
+-- Constructor: alloc + incref each non-primitive field (only heap values)
+insertExpr _live _params (ACtor ctor args) = let increfs = [RIncref x | AVar x <- args] in (increfs, RAlloc ctor args)
 -- Function call: incref each non-primitive arg before call
-insertExpr _live _params (AApp f args) =
-  let increfs = [RIncref x | AVar x <- args]
-   in (increfs, RCall f args)
--- Let binding: the interesting case
+insertExpr _live _params (AApp f args) = let increfs = [RIncref x | AVar x <- args] in (increfs, RCall f args)
+-- Let binding: the interesting case. Need to know what the body uses (for dead-binding detection)
 insertExpr live params (ALet x rhs body) =
-  let -- What does the body use? (for dead-binding detection)
-      bodyUses = usesOf body
+  let bodyUses = usesOf body
       isDead = not (Set.member x bodyUses)
 
       -- RC ops for the RHS
@@ -220,11 +189,9 @@ insertExpr live params (ALet x rhs body) =
       deadStmts =
         if isDead
           then case rhs of
-            ACtor _ args ->
-              -- decref each field before freeing the allocation
-              [RDecref f | AVar f <- args] ++ [RFree x]
-            _ ->
-              [RDecref x]
+            -- decref each field before freeing the allocation
+            ACtor _ args -> [RDecref f | AVar f <- args] ++ [RFree x]
+            _ -> [RDecref x]
           else []
 
       -- Continue with body
@@ -240,16 +207,16 @@ insertExpr live params (ACase scrutinee branches) =
       caseStmt = RCase scrutName rBranches
    in ([caseStmt], RAtom (AVar "_case_result"))
 
--- Note: in a real impl the branches would each set a result slot;
--- here we simplify and emit the case as a single statement block.
+-- Note: in a real impl the branches would each set a result slot; here we simplify and emit the case as a single statement block.
 
 insertBranch :: Live -> [Name] -> ABranch -> RBranch
+-- incref each bound field (pattern match creates new references)
 insertBranch live params (ABranch ctor fields body) =
-  let -- incref each bound field (pattern match creates new references)
-      increfs = [RIncref f | f <- fields]
+  let increfs = [RIncref f | f <- fields]
       live' = live `Set.union` Set.fromList fields
       (stmts, retEx) = insertExpr live' params body
       retStmt = RReturn retEx
+
       -- fields not used in body should be decreffed
       bodyUses = usesOf body
       unusedFields = filter (\f -> not (Set.member f bodyUses)) fields
@@ -266,18 +233,12 @@ printExample label fn = do
   putStrLn $ replicate 60 '='
   putStrLn $ "EXAMPLE: " ++ label
   putStrLn $ replicate 60 '-'
-  putStrLn $
-    "Source function: "
-      ++ fnName fn
-      ++ "("
-      ++ intercalate ", " (fnParams fn)
-      ++ ")"
+  putStrLn $ "Source function: " ++ fnName fn ++ "(" ++ intercalate ", " (fnParams fn) ++ ")"
   putStrLn $ replicate 60 '-'
   putStrLn "RC-annotated output:"
   putStrLn $ ppFun (insertFun fn)
   putStrLn ""
 
-main :: IO ()
 main = do
   -- 1. Identity: f x = x
   --    x is returned so no decref needed
