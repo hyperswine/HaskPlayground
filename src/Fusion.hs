@@ -1,23 +1,14 @@
--- Stream Fusion over ANF IR
---
--- Demonstrates producer/consumer fusion in ANF form.
--- In ANF every intermediate collection is a named let-binding,
--- making producer-consumer edges trivially visible:
---
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+-- Demonstrates producer/consumer fusion in ANF form. In ANF every intermediate collection is a named let-binding, making producer-consumer edges trivially visible:
+
 --   let xs = map f input     -- producer
 --       ys = map g xs        -- consumer of xs (xs used exactly once -> fuse)
---
--- The pass walks the let-chain collecting a "pipeline context"
--- (name -> Pipeline). When a binding is consumed by a single downstream
--- combinator, it is fused in and the intermediate binding is erased.
--- When used more than once, it must materialise.
---
--- Covered cases:
---   FUSED:   map.map, filter.map, map.filter, foldl.map, foldl.filter,
---            take.map, range as source, long chains
+
+-- The pass walks the let-chain collecting a "pipeline context" (name -> Pipeline). When a binding is consumed by a single downstream combinator, it is fused in and the intermediate binding is erased. When used more than once, it must materialise.
+
+--   FUSED:   map.map, filter.map, map.filter, foldl.map, foldl.filter, take.map, range as source, long chains
 --   BLOCKED: use-count > 1, zip with opaque input, opaque function call
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Fusion where
 
@@ -36,10 +27,7 @@ instance Show Atom where
   show (AVar x) = x
   show (ALit n) = show n
 
-data Rhs
-  = RCall Name [Atom]
-  | RAtom Atom
-  deriving (Eq)
+data Rhs = RCall Name [Atom] | RAtom Atom deriving (Eq)
 
 instance Show Rhs where
   show (RCall f args) = unwords (f : map show args)
@@ -50,41 +38,22 @@ data Binding = Binding Name Rhs deriving (Eq)
 data Program = Program [Binding] Atom deriving (Eq)
 
 ppProgram :: Program -> String
-ppProgram (Program binds result) =
-  concatMap ppB binds ++ show result
-  where
-    ppB (Binding x r) = "let " ++ x ++ " = " ++ show r ++ "\n"
+ppProgram (Program binds result) = concatMap ppB binds ++ show result where ppB (Binding x r) = "let " ++ x ++ " = " ++ show r ++ "\n"
 
 --------------------------------------------------------------------------------
 -- Pipeline IR
 --------------------------------------------------------------------------------
 
-data Source
-  = SVar Name
-  | SRange Atom Atom
-  deriving (Eq, Show)
+data Source = SVar Name | SRange Atom Atom deriving (Eq, Show)
 
-data Stage
-  = SMap Name
-  | SFilter Name
-  | STake Atom
-  deriving (Eq, Show)
+data Stage = SMap Name | SFilter Name | STake Atom deriving (Eq, Show)
 
-data Terminal
-  = TToList
-  | TFoldl Name Atom
-  deriving (Eq, Show)
+data Terminal = TToList | TFoldl Name Atom deriving (Eq, Show)
 
-data Pipeline = Pipeline
-  { plSource :: Source,
-    plStages :: [Stage],
-    plTerminal :: Terminal
-  }
-  deriving (Eq, Show)
+data Pipeline = Pipeline {plSource :: Source, plStages :: [Stage], plTerminal :: Terminal} deriving (Eq, Show)
 
 ppPipeline :: Pipeline -> String
-ppPipeline (Pipeline src stages term) =
-  ppSrc src ++ concatMap ppStage stages ++ ppTerm term
+ppPipeline (Pipeline src stages term) = ppSrc src ++ concatMap ppStage stages ++ ppTerm term
   where
     ppSrc (SVar n) = n
     ppSrc (SRange lo hi) = "range(" ++ show lo ++ ".." ++ show hi ++ ")"
@@ -107,8 +76,7 @@ rhsUses x (RAtom a) = atomUses x a
 rhsUses x (RCall _ args) = sum (map (atomUses x) args)
 
 usesAfter :: Name -> [Binding] -> Atom -> Int
-usesAfter x bs result =
-  sum [rhsUses x r | Binding _ r <- bs] + atomUses x result
+usesAfter x bs result = sum [rhsUses x r | Binding _ r <- bs] + atomUses x result
 
 --------------------------------------------------------------------------------
 -- Recognise a Rhs as a pipeline node
@@ -117,20 +85,11 @@ usesAfter x bs result =
 type FusionCtx = Map Name Pipeline
 
 recognise :: FusionCtx -> Rhs -> Maybe Pipeline
-recognise _ (RCall "range" [lo, hi]) =
-  Just $ Pipeline (SRange lo hi) [] TToList
-recognise ctx (RCall "map" [AVar f, AVar xs]) =
-  let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx
-   in Just base {plStages = plStages base ++ [SMap f]}
-recognise ctx (RCall "filter" [AVar p, AVar xs]) =
-  let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx
-   in Just base {plStages = plStages base ++ [SFilter p]}
-recognise ctx (RCall "take" [n, AVar xs]) =
-  let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx
-   in Just base {plStages = plStages base ++ [STake n]}
-recognise ctx (RCall "foldl" [AVar step, z, AVar xs]) =
-  let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx
-   in Just base {plTerminal = TFoldl step z}
+recognise _ (RCall "range" [lo, hi]) = Just $ Pipeline (SRange lo hi) [] TToList
+recognise ctx (RCall "map" [AVar f, AVar xs]) = let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx in Just base {plStages = plStages base ++ [SMap f]}
+recognise ctx (RCall "filter" [AVar p, AVar xs]) = let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx in Just base {plStages = plStages base ++ [SFilter p]}
+recognise ctx (RCall "take" [n, AVar xs]) = let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx in Just base {plStages = plStages base ++ [STake n]}
+recognise ctx (RCall "foldl" [AVar step, z, AVar xs]) = let base = Map.findWithDefault (Pipeline (SVar xs) [] TToList) xs ctx in Just base {plTerminal = TFoldl step z}
 recognise _ _ = Nothing
 
 --------------------------------------------------------------------------------
@@ -138,8 +97,8 @@ recognise _ _ = Nothing
 --------------------------------------------------------------------------------
 
 data Note
-  = NFused String String -- what fused,  resulting pipeline string
-  | NBlocked String String -- reason,      binding description
+  = NFused String String -- what fused, resulting pipeline string
+  | NBlocked String String -- reason, binding description
   | NThrough String -- passed through unchanged
   | NZip String -- zip handling
   deriving (Eq)
@@ -155,80 +114,43 @@ instance Show Note where
 --------------------------------------------------------------------------------
 
 fusionPass :: Program -> (Program, [Note])
-fusionPass (Program binds result) =
-  let (outBinds, notes) = go binds result Map.empty [] []
-   in (Program (reverse outBinds) result, reverse notes)
+fusionPass (Program binds result) = let (outBinds, notes) = go binds result Map.empty [] [] in (Program (reverse outBinds) result, reverse notes)
   where
-    go ::
-      [Binding] ->
-      Atom ->
-      FusionCtx ->
-      [Binding] ->
-      [Note] ->
-      ([Binding], [Note])
+    go :: [Binding] -> Atom -> FusionCtx -> [Binding] -> [Note] -> ([Binding], [Note])
     go [] _ _ out notes = (out, notes)
     go (Binding x rhs : rest) result ctx out notes =
       let uc = usesAfter x rest result
        in case () of
             -- ── zip special case ──────────────────────────────────────────────────
-            _ | RCall "zip" [AVar a, AVar b] <- rhs ->
-              case (Map.lookup a ctx, Map.lookup b ctx) of
-                (Just plA, Just plB) ->
-                  -- Both inputs are fused pipelines: emit a zipFused node.
-                  -- In a real backend this becomes a paired-pull loop.
-                  let outRhs =
-                        RCall
-                          "zipFused"
-                          [ AVar ("(" ++ ppPipeline plA ++ ")"),
-                            AVar ("(" ++ ppPipeline plB ++ ")")
-                          ]
-                      note =
-                        NZip $
-                          "both inputs fused:\n"
-                            ++ "                  L: "
-                            ++ ppPipeline plA
-                            ++ "\n                  R: "
-                            ++ ppPipeline plB
-                      -- Remove consumed pipeline entries from ctx
-                      ctx' = Map.delete b (Map.delete a ctx)
-                   in go rest result ctx' (Binding x outRhs : out) (note : notes)
-                (Just _, Nothing) ->
-                  let note = NBlocked "right input of zip is opaque" (x ++ " = " ++ show rhs)
-                   in go rest result ctx (Binding x rhs : out) (note : notes)
-                (Nothing, Just _) ->
-                  let note = NBlocked "left input of zip is opaque" (x ++ " = " ++ show rhs)
-                   in go rest result ctx (Binding x rhs : out) (note : notes)
-                _ ->
-                  let note = NThrough (x ++ " = " ++ show rhs ++ "  (both opaque)")
-                   in go rest result ctx (Binding x rhs : out) (note : notes)
+            _ | RCall "zip" [AVar a, AVar b] <- rhs -> case (Map.lookup a ctx, Map.lookup b ctx) of
+              (Just plA, Just plB) ->
+                -- Both inputs are fused pipelines: emit a zipFused node. In a real backend this becomes a paired-pull loop.
+                let outRhs = RCall "zipFused" [AVar ("(" ++ ppPipeline plA ++ ")"), AVar ("(" ++ ppPipeline plB ++ ")")]
+                    note = NZip $ "both inputs fused:\n" ++ "                  L: " ++ ppPipeline plA ++ "\n                  R: " ++ ppPipeline plB
+                    -- Remove consumed pipeline entries from ctx
+                    ctx' = Map.delete b (Map.delete a ctx)
+                 in go rest result ctx' (Binding x outRhs : out) (note : notes)
+              (Just _, Nothing) -> let note = NBlocked "right input of zip is opaque" (x ++ " = " ++ show rhs) in go rest result ctx (Binding x rhs : out) (note : notes)
+              (Nothing, Just _) -> let note = NBlocked "left input of zip is opaque" (x ++ " = " ++ show rhs) in go rest result ctx (Binding x rhs : out) (note : notes)
+              _ -> let note = NThrough (x ++ " = " ++ show rhs ++ "  (both opaque)") in go rest result ctx (Binding x rhs : out) (note : notes)
             -- ── recognised pipeline node ──────────────────────────────────────────
-            _
-              | Just pl <- recognise ctx rhs ->
-                  if uc == 0
-                    then
-                      -- Dead: drop the binding entirely
-                      let note = NBlocked "dead (use-count=0), dropped" (x ++ " = " ++ show rhs)
-                       in go rest result ctx out (note : notes)
-                    else
-                      if uc == 1
-                        then
-                          -- Safe to fuse: suppress binding, record in ctx
+            _ | Just pl <- recognise ctx rhs ->
+                  -- Dead: drop the binding entirely
+                  if uc == 0 then
+                      let note = NBlocked "dead (use-count=0), dropped" (x ++ " = " ++ show rhs) in go rest result ctx out (note : notes)
+                  else
+                      -- Safe to fuse: suppress binding, record in ctx
+                      if uc == 1 then
                           let note = NFused (x ++ " = " ++ show rhs) (ppPipeline pl)
                               ctx' = Map.insert x pl ctx
                            in go rest result ctx' out (note : notes)
-                        else
-                          -- Must materialise: emit as a pipeline{...} call so it's clear
-                          -- a single fused loop runs but the result list exists in memory
-                          let note =
-                                NBlocked
-                                  ("use-count=" ++ show uc ++ ", must materialise as list")
-                                  (x ++ " = " ++ show rhs)
+                      -- Must materialise: emit as a pipeline{...} call so it's clear. A single fused loop runs but the result list exists in memory
+                      else
+                          let note = NBlocked ("use-count=" ++ show uc ++ ", must materialise as list") (x ++ " = " ++ show rhs)
                               outRhs = RCall ("pipeline{" ++ ppPipeline pl ++ "}") []
                            in go rest result ctx (Binding x outRhs : out) (note : notes)
             -- ── opaque: pass through unchanged ───────────────────────────────────
-            _ ->
-              let note = NThrough (x ++ " = " ++ show rhs)
-               in go rest result ctx (Binding x rhs : out) (note : notes)
+            _ -> let note = NThrough (x ++ " = " ++ show rhs) in go rest result ctx (Binding x rhs : out) (note : notes)
 
 --------------------------------------------------------------------------------
 -- Builders
