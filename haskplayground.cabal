@@ -44,6 +44,7 @@ library
       Gameloop
       HuffmanClash
       Lib
+      Linear
       Lower
       MyClash
       MyHardware
