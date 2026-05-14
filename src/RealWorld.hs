@@ -1,26 +1,40 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# HLINT ignore "Use newtype instead of data" #-}
+{-# HLINT ignore "Redundant flip" #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# HLINT ignore "Eta reduce" #-}
 {-# OPTIONS_GHC -Wno-missing-signatures #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module RealWorld where
 
-import Control.Monad (forM, liftM)
+import Control.Monad (forM, forM_, liftM, when)
+import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (runReaderT), ask)
+import Control.Monad.State (MonadState, StateT (runStateT))
+import Control.Monad.Trans (liftIO)
+import Control.Monad.Writer (WriterT, tell)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as L8
 import Data.Char (isSpace)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Void (Void)
 import System.Directory (doesDirectoryExist, getDirectoryContents)
 import System.FilePath ((</>))
 import Text.ParserCombinators.Parsec
 import Text.Printf (printf)
 import Text.Read (readMaybe)
-import Control.Monad.Reader (ask)
-import Data.Void (Void)
+
+data AppConfig = AppConfig {cfgMaxDepth :: Int} deriving (Show)
+
+data AppState = AppState {stDeepestReached :: Int} deriving (Show)
 
 data Color = Red | Green | Blue deriving (Show)
 
@@ -246,5 +260,65 @@ x''' = undefined
 intro :: a -> ((a -> Void) -> Void)
 intro x = \k -> k x
 
-absurd :: Void -> a
-absurd x = case x of {}  -- no cases, because Void has none
+-- absurd :: Void -> a
+-- absurd x = case x of {}  -- no cases, because Void has none
+
+-- must derive Functor to derive Monad
+-- use generalized new type deriving
+newtype MyApp a = MyA {run :: ReaderT AppConfig (StateT AppState IO) a} deriving (Functor, Applicative, Monad, MonadIO, MonadReader AppConfig, MonadState AppState)
+
+-- cannot use maxdepth in new version of AppConfig
+runMyApp :: MyApp a -> Int -> IO (a, AppState)
+runMyApp k maxdepth = runStateT (runReaderT (run k) config) state
+  where
+    config = AppConfig maxdepth
+    state = AppState 0
+
+countEntries :: FilePath -> WriterT [(FilePath, Int)] IO ()
+countEntries path = do
+  contents <- liftIO . listDirectory $ path
+  tell [(path, length contents)]
+  forM_ contents $ \name -> do
+    let newName = path </> name
+    isDir <- liftIO . doesDirectoryExist $ newName
+    when isDir $ countEntries newName
+
+-- This is equivalent to 2 / 10
+r''' :: Double
+r''' = flip (/) 10 2
+
+--- >>> r'''
+-- 0.2
+
+newtype MyString = MyString String deriving (Show, Eq)
+
+instance Num MyString where
+  (MyString s1) + (MyString s2) = MyString (s1 ++ s2)
+  fromInteger n = MyString (show n)
+
+  abs x = x
+  signum _ = MyString "1"
+  negate (MyString s) = MyString (reverse s)
+  (*) (MyString s) (MyString n) = MyString (concat $ replicate (read n) s)
+
+--- >>> MyString "Hi" + MyString "Bye"
+-- MyString "HiBye"
+
+returnTest :: IO String
+returnTest = do
+  one <- return 1
+  putStrLn "hi"
+  let two = 2
+  return $ show (one + two)
+
+--- >>> returnTest
+-- "3"
+
+class Collects e c where
+  insert :: e -> c -> c
+
+instance Collects Char [Char] where
+  insert = (:)
+
+-- r2 :: [Char]
+r2 = insert 'a' ['e']
