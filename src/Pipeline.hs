@@ -96,15 +96,20 @@ closeResource (Linear _) = Right $ Linear () -- consume the token, return unit
 main :: IO ()
 main = do
   putStrLn "=== Case 1: FApp - plain pipeline ==="
+
+  -- < ACTUAL COMPUTATION >
   let result1 = 5 |> FApp double |> FApp addOne |> FApp showInt
+
   putStrLn $ "5 |> double |> addOne |> show = " ++ result1
 
-  putStrLn ""
-  putStrLn "=== Case 2: FRes - short circuiting on error ==="
+  putStrLn "\n=== Case 2: FRes - short circuiting on error ==="
 
+  -- < ACTUAL COMPUTATION >
   let result2 = ok 42 |> FRes validatePositive |> FRes validateSmall |> FRes (Right . double)
+
   putStrLn $ "ok 42  |> validatePositive |> validateSmall |> double = " ++ show result2
 
+  -- < ACTUAL COMPUTATION >
   let result3 =
         ok (-5)
           |> FRes validatePositive -- short circuits here
@@ -112,6 +117,7 @@ main = do
           |> FRes (Right . double) -- never runs
   putStrLn $ "ok -5  |> validatePositive |> ... = " ++ show result3
 
+  -- < ACTUAL COMPUTATION >
   let result4 =
         ok 9999
           |> FRes validatePositive
@@ -119,16 +125,18 @@ main = do
           |> FRes (Right . double) -- never runs
   putStrLn $ "ok 9999 |> validatePositive |> validateSmall |> ... = " ++ show result4
 
-  putStrLn ""
-  putStrLn "=== Case 3: FLinear - linear resource pipeline ==="
+  putStrLn "\n=== Case 3: FLinear - linear resource pipeline ==="
 
+  -- < ACTUAL COMPUTATION >
   let result5 = okL "myfile.txt" |> FLinear readResource |> FLinear processResource |> FLinear closeResource
+
   putStrLn $ "linear pipeline success = " ++ show result5
 
   -- Simulating a failure mid-pipeline
   let failingProcess :: Linear String -> Either String (Linear String)
       failingProcess _ = Left "resource corrupted"
 
+  -- < ACTUAL COMPUTATION >
   let result6 =
         okL "myfile.txt"
           |> FLinear readResource
