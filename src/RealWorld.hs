@@ -19,13 +19,18 @@ import Control.Monad.Reader (MonadIO, MonadReader, ReaderT (runReaderT), ask)
 import Control.Monad.State (MonadState, StateT (runStateT))
 import Control.Monad.Trans (liftIO)
 import Control.Monad.Writer (WriterT, tell)
+import Data.Array (Array, bounds, listArray)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as L8
 import Data.Char (isSpace)
+import Data.Int (Int64)
+import Data.List (group)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Void (Void)
+import GHC.Arr (indices, (!))
+import GHC.Ix (Ix)
 import System.Directory (doesDirectoryExist, getDirectoryContents)
 import System.FilePath ((</>))
 import Text.ParserCombinators.Parsec
@@ -322,3 +327,150 @@ instance Collects Char [Char] where
 
 -- r2 :: [Char]
 r2 = insert 'a' ['e']
+
+data ParseState = ParseState {parse_string :: L.ByteString, offset :: Int64} deriving (Show)
+
+-- use this instead of a function directly ParseState -> Either err ast
+newtype Parse a = Parse {run_parse :: ParseState -> Either String (a, ParseState)}
+
+bail :: String -> Parse a
+bail err = Parse $ \s -> Left $ "byte offset " ++ show (offset s) ++ ": " ++ err
+
+modifyOffset init new = init {offset = new}
+
+before = ParseState (L8.pack "foo") 0
+
+after = modifyOffset before 3
+
+--- >>> before
+-- ParseState {parse_string = "foo", offset = 0}
+
+--- >>> after
+-- ParseState {parse_string = "foo", offset = 3}
+
+-- left associative, high precedence 9
+(>>?) :: Maybe a -> (a -> Maybe b) -> Maybe b
+Nothing >>? _ = Nothing
+Just v >>? f = f v
+
+-- parseByte =
+--   getState ==> \init ->
+--     case L.uncons $ parse_string init of
+--       Nothing -> bail "No more input"
+--       Just (b, r) -> putState state' ==> \_ -> identity byte
+--         where
+--           state' = init {parse_string = remainder, offset = offset'}
+--           offset' = offset init + 1
+
+-- always succeeds because if no spaces, then fine
+skipSpace (a, s) = Just (a, L8.dropWhile isSpace s)
+
+parseP5__v2 s =
+  matchHeader (L8.pack "P5") s
+    >>? \s ->
+      skipSpace ((), s)
+        >>? (getNat . snd)
+        >>? skipSpace
+        >>? \(w, s) ->
+          getNat s
+            >>? skipSpace
+            >>? \(h, s) ->
+              getNat s
+                >>? \(max_grey, s) ->
+                  getBytes 1 s
+                    >>? (getBytes (w * h) . snd)
+                    >>? \(bitmap, s) -> Just (Greymap w h max_grey bitmap, s)
+
+(==>) :: Parse a -> (a -> Parse b) -> Parse b
+firstParser ==> secondParser = Parse chainedParser
+  where
+    chainedParser initState = case run_parse firstParser initState of
+      Left errMessage -> Left errMessage
+      Right (firstResult, newState) -> run_parse (secondParser firstResult) newState
+
+checkDigit :: (Integral a) => [a] -> a
+checkDigit ds = 10 - (sum products `mod` 10)
+  where
+    products = mapEveryOther (* 3) (reverse ds)
+
+mapEveryOther :: (a -> a) -> [a] -> [a]
+mapEveryOther f = zipWith ($) (cycle [f, id])
+
+leftOddList = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"]
+
+rightList = map complement <$> leftOddList
+  where
+    complement '0' = '1'
+    complement '1' = '0'
+    complement _ = undefined
+
+leftEvenList = map reverse rightList
+
+parityList = ["111111", "110100", "110010", "110001", "101100", "100110", "100011", "101010", "101001", "100101"]
+
+listToArray :: [a] -> Array Int a
+listToArray xs = listArray (0, l - 1) xs
+  where
+    l = length xs
+
+leftOddCodes, leftEvenCodes, rightCodes, parityCodes :: Array Int String
+leftOddCodes = listToArray leftOddList
+leftEvenCodes = listToArray leftEvenList
+rightCodes = listToArray rightList
+parityCodes = listToArray parityList
+
+foldA :: (Ix k) => (a -> b -> a) -> a -> Array k b -> a
+foldA f s a = go s (indices a)
+  where
+    go s (j : js) =
+      let s' = f s (a ! j)
+       in s' `seq` go s' js
+    go s _ = s
+
+x2 :: Array Integer Bool
+x2 = listArray (0, 3) [True, False, False, True, False]
+
+--- >>> x2
+-- array (0,3) [(0,True),(1,False),(2,False),(3,True)]
+
+data Bit = Zero | One deriving (Eq, Show)
+
+-- basically folds acc, next from left but strict so does not accumulate thunk
+-- Strict left fold using the first element as the accumulator
+foldA1 :: (Ix k) => (a -> a -> a) -> Array k a -> a
+foldA1 f a = foldA f (a ! fst (bounds a)) a
+
+threshold n a = binary <$> a
+  where
+    binary i | i < pivot = Zero
+    binary _ = One
+    pivot = round $ least + (greatest - least) * n
+    least = fromIntegral $ choose (<) a
+    greatest = fromIntegral $ choose (>) a
+    choose f = foldA1 $ \x y -> if f x y then x else y
+
+type Run = Int
+
+-- List (Pair Run 'a)
+type RunLength a = [(Run, a)]
+
+-- return a pair for rle (length, first elem)
+runLength :: (Eq a) => [a] -> RunLength a
+runLength = map rle . group
+  where
+    rle xs = (length xs, head xs)
+
+grpb = List.groupBy
+
+-- top 3 scores
+bestscores srl ps = List.take 3 . List.sort $ scores
+  where
+    scores = List.zip [distance d $ scaleToOne ps | d <- srl] digits
+    digits = [0 .. 9]
+
+scaleToOne xs = map divide xs
+  where
+    divide d = fromIntegral d / divisor
+    divisor = fromIntegral $ sum xs
+
+distance a b = sum . List.map abs $ zipWith (-) a b
