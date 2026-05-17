@@ -33,6 +33,7 @@ library
       DirectLang
       EncDecClash
       ExActors
+      Fir
       FPFS
       FPFSActor
       FPipeline
