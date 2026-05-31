@@ -22,7 +22,7 @@ import Control.Monad.Writer (WriterT, tell)
 import Data.Array (Array, bounds, listArray)
 import qualified Data.ByteString.Lazy as L
 import qualified Data.ByteString.Lazy.Char8 as L8
-import Data.Char (isSpace)
+import Data.Char (digitToInt, isSpace)
 import Data.Int (Int64)
 import Data.List (group)
 import qualified Data.List as List
@@ -388,14 +388,6 @@ firstParser ==> secondParser = Parse chainedParser
       Left errMessage -> Left errMessage
       Right (firstResult, newState) -> run_parse (secondParser firstResult) newState
 
-checkDigit :: (Integral a) => [a] -> a
-checkDigit ds = 10 - (sum products `mod` 10)
-  where
-    products = mapEveryOther (* 3) (reverse ds)
-
-mapEveryOther :: (a -> a) -> [a] -> [a]
-mapEveryOther f = zipWith ($) (cycle [f, id])
-
 leftOddList = ["0001101", "0011001", "0010011", "0111101", "0100011", "0110001", "0101111", "0111011", "0110111", "0001011"]
 
 rightList = map complement <$> leftOddList
@@ -474,3 +466,45 @@ scaleToOne xs = map divide xs
     divisor = fromIntegral $ sum xs
 
 distance a b = sum . List.map abs $ zipWith (-) a b
+
+encodeEAN13 = concat . encodeDigits . map digitToInt
+
+-- non empty list
+encodeDigits s@(first : rest) = outerGuard : ls ++ centerGuard : rs ++ [outerGuard]
+  where
+    (left, right) = splitAt 5 rest
+    ls = zipWith leftEncode (parityCodes ! first) left
+    rs = map rightEncode (right ++ [checkDigit s])
+
+-- only take '1' or '0'
+leftEncode '1' = (leftOddCodes !)
+leftEncode '0' = (leftEvenCodes !)
+
+rightEncode = (rightCodes !)
+
+centerGuard = "01010"
+
+outerGuard = "101"
+
+-- >>> encodeDigits [1,0,0,0,1,1]
+-- ["101","0001101","0001101","0100111","0011001","0110011","01010","1001110","101"]
+
+-- n between 0 and 3 only
+myfunc1 (a, b, c, d) 0 = a
+myfunc1 (a, b, c, d) 1 = b
+myfunc1 (a, b, c, d) 2 = c
+myfunc1 (a, b, c, d) 3 = d
+
+myfunc2 (a, b, c, d, e, f) 0 = a
+myfunc2 (a, b, c, d, e, f) 1 = b
+myfunc2 (a, b, c, d, e, f) 2 = c
+myfunc2 (a, b, c, d, e, f) 3 = d
+myfunc2 (a, b, c, d, e, f) 4 = e
+myfunc2 (a, b, c, d, e, f) 5 = f
+
+checkDigit ds = 10 - (sum products `mod` 10) where products = mapEveryOther (* 3) (reverse ds)
+
+mapEveryOther f = zipWith ($) (cycle [f, id])
+
+-- >>> checkDigit [1,2,1000,5000]
+-- 3

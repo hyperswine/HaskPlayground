@@ -104,6 +104,7 @@ declare name ty mult = Map.insert name (ty, mult, 0)
 useVar :: String -> LinearEnv -> Either TyError (Ty, LinearEnv)
 useVar name env = case Map.lookup name env of
   Nothing -> Left $ "Unbound variable: '" ++ name ++ "'"
+  -- If one has a One variable, can only use when it has n=0
   Just (ty, One, 0) -> Right (ty, Map.insert name (ty, One, 1) env)
   Just (_, One, n) -> Left $ "Linear variable '" ++ name ++ "' used " ++ show (n + 1) ++ " times (must be exactly 1)"
   -- when var has a reference, bump up by one, just that simple

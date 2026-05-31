@@ -1,5 +1,6 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
@@ -18,6 +19,7 @@ import qualified Clash.Explicit.Prelude as CP
 import Clash.Prelude hiding (mux)
 import qualified Data.List as L
 import Prelude hiding (map, not)
+import qualified GHC.Num as Num
 
 infixl 0 |>
 
@@ -157,9 +159,37 @@ blinkingSecond' clk rst en = msb <$> r
   where
     r :: Signal dom (Unsigned (CLog 2 (ClockDivider dom (HzToPeriod 1))))
     r = CP.register clk rst en 0 $ mux (r .<. limit) (r + 1) 0
-    limit = snatToNum (SNat @(ClockDivider dom (HzToPeriod 1)))
+    limit = snatToNum $ SNat @(ClockDivider dom (HzToPeriod 1))
 
 res2 = [minBound .. maxBound] :: [Index 14]
 
 -- blink :: forall dom. (KnownDomain dom, KnownNat (ClockDivider dom (HzToPeriod 2))) => Clock dom -> Reset dom -> Enable dom -> Signal dom Bit
 -- blink clk rst en = oscillate False (SNat @(ClockDivider dom (HzToPeriod 2)))
+
+-- safe successor function, pareto optimal
+succIdx :: (Eq a, Enum a, Bounded a) => a -> Maybe a
+succIdx x
+  | x == maxBound = Nothing
+  | otherwise = Just $ succ x
+
+predIdx :: (Eq a, Enum a, Bounded a) => a -> Maybe a
+predIdx x
+  | x == minBound = Nothing
+  | otherwise = Just $ pred x
+
+-- NFData is haskell base thing for normal form, X for exception at simulation - runtime. Needs to normalize
+data OnOff on off = On (Index on) | Off (Index off) deriving (Generic, NFDataX)
+
+-- ignore the inner var
+isOn On {} = True
+isOn Off {} = False
+
+-- type Seconds (s :: Nat) = Milliseconds (1_000 * s)
+
+-- type Milliseconds (ms :: Nat) = Microseconds (1_000 (*) ms)
+
+-- type Microseconds (us :: Nat) = Nanoseconds (1_000 (*) us)
+
+-- type Nanoseconds (ns :: Nat) = Picoseconds (1_000 * ns)
+
+-- type Picoseconds (ps :: Nat) = ps

@@ -1,0 +1,9 @@
+# in the repl it should look like with bindings
+# So it does > which means x = with (...)
+# so when you do x = ...
+# that means x = with ...
+
+# big deals are the Map with the string traversals and Results everywhere
+# Files are all linear so you cant "forget" to use them
+# dont have to use with if you just start off with a single linear producer
+# if you have multiple then you kind of have to
