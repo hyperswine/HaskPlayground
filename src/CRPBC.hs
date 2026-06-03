@@ -30,7 +30,7 @@ module CRPBC where
 --    * Deciding WHEN to initiate each session
 -- ============================================================
 
-import Control.Concurrent (Chan, MVar, forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay)
+import Control.Concurrent (MVar, forkIO, newEmptyMVar, putMVar, takeMVar, threadDelay)
 import Control.Concurrent.STM
 import Control.Monad (forM, forM_, forever, mapM_, unless, void, when)
 import Data.Bits (xor)
