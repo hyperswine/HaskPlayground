@@ -17,9 +17,10 @@
 --   ghc -threaded -rtsopts -with-rtsopts=-N Main.hs -o fstm-demo && ./fstm-demo
 --
 -- Dependencies: base, bytestring, containers, directory, filepath, unix (>=2.8)
-module BetterFiles (main) where
+module BetterFiles (main, conflictDemo) where
 
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 import Control.Exception
   ( SomeException,
@@ -325,22 +326,14 @@ main = do
   let nThreads = 8
       perThread = 250 :: Int
 
-  putStrLn $
-    "Starting: A=500 B=500, "
-      ++ show nThreads
-      ++ " threads x "
-      ++ show perThread
-      ++ " transfers each."
+  putStrLn $ "Starting: A=500 B=500, " ++ show nThreads ++ " threads x " ++ show perThread ++ " transfers each."
 
   done <- newEmptyMVar
   forM_ [1 .. nThreads] $ \tid -> forkIO $ do
     forM_ [1 .. perThread] $ \i -> do
       let amt = ((tid * 7 + i * 13) `mod` 50) + 1
           aToB = even (tid + i)
-      atomicallyFile retries $
-        if aToB
-          then transfer accA accB amt
-          else transfer accB accA amt
+      atomicallyFile retries $ if aToB then transfer accA accB amt else transfer accB accA amt
     putMVar done ()
 
   forM_ [1 .. nThreads] $ \_ -> takeMVar done
@@ -354,27 +347,10 @@ main = do
   r <- readIORef retries
 
   putStrLn ""
-  putStrLn $
-    "In memory:  A="
-      ++ show va
-      ++ "  B="
-      ++ show vb
-      ++ "  total="
-      ++ show (va + vb)
-  putStrLn $
-    "On disk:    A="
-      ++ show da
-      ++ "  B="
-      ++ show db
-      ++ "  total="
-      ++ show (da + db)
+  putStrLn $ "In memory:  A=" ++ show va ++ "  B=" ++ show vb ++ "  total=" ++ show (va + vb)
+  putStrLn $ "On disk:    A=" ++ show da ++ "  B=" ++ show db ++ "  total=" ++ show (da + db)
   putStrLn $ "Conflicts retried: " ++ show r
-  putStrLn $
-    "Invariant "
-      ++ ( if va + vb == total0 && da + db == total0
-             then "HELD (total conserved)"
-             else "VIOLATED"
-         )
+  putStrLn $ "Invariant " ++ (if va + vb == total0 && da + db == total0 then "HELD (total conserved)" else "VIOLATED")
 
 -- ---------------------------------------------------------------------------
 -- Tiny helper
@@ -385,3 +361,88 @@ allM _ [] = pure True
 allM p (x : xs) = do
   ok <- p x
   if ok then allM p xs else pure False
+
+-- ---------------------------------------------------------------------------
+-- Example: two threads hammering one counter, conflicts printed live
+-- ---------------------------------------------------------------------------
+
+-- | Variant of 'atomicallyFile' that logs each conflict to a Chan instead of
+-- silently retrying, so the caller can observe contention in real time.
+atomicallyFileLogged ::
+  Chan String ->
+  Int ->
+  IORef Int ->
+  FileTM a ->
+  IO a
+atomicallyFileLogged logChan tid retries tx = go (1 :: Int)
+  where
+    go attempt = do
+      tr <- newTRec
+      a <- runFileTM tx tr
+      out <- commit tr
+      case out of
+        Success -> pure a
+        Conflict -> do
+          atomicModifyIORef' retries (\n -> (n + 1, ()))
+          writeChan logChan $
+            "  [thread "
+              ++ show tid
+              ++ "] conflict on attempt "
+              ++ show attempt
+              ++ " — retrying"
+          threadDelay 100
+          go (attempt + 1)
+
+-- | Spin up two threads that each increment a shared file-backed counter
+-- @n@ times (200 by default), printing every conflict as it occurs.
+--
+-- Usage in GHCi:
+--   conflictDemo
+conflictDemo :: IO ()
+conflictDemo = do
+  let dir = "fstm-conflict-demo"
+      n = 200 :: Int
+  createDirectoryIfMissing True dir
+  let pc = dir </> "counter"
+
+  -- remove any existing files for new data
+  forM_ [pc, pc ++ ".tmp"] $ \p -> do
+    e <- doesFileExist p
+    when e (removeFile p)
+
+  counter <- newFileTVar pc (0 :: Int) intSer intParse
+  retries <- newIORef (0 :: Int)
+
+  -- A dedicated printer thread drains the conflict log so messages appear
+  -- promptly without interleaving with the worker threads' output.
+  logChan <- newChan
+  printerDone <- newEmptyMVar
+  _ <- forkIO $ do
+    let loop = do
+          msg <- readChan logChan
+          if msg == "__done__" then putMVar printerDone () else putStrLn msg >> loop
+    loop
+
+  putStrLn $ "conflictDemo: 2 threads x " ++ show n ++ " increments each.\n"
+
+  -- actual work spawn
+  done <- newEmptyMVar
+  forM_ [1, 2] $ \tid -> forkIO $ do
+    forM_ [1 .. n] $ \_ -> atomicallyFileLogged logChan tid retries $ do
+      v <- readFileTVar counter
+      writeFileTVar counter (v + 1)
+    putMVar done ()
+
+  takeMVar done >> takeMVar done
+
+  -- Shut down printer and wait for it to flush.
+  writeChan logChan "__done__"
+  takeMVar printerDone
+
+  v <- readFileTVarIO counter
+  r <- readIORef retries
+  putStrLn ""
+  putStrLn $ "Final counter value : " ++ show v
+  putStrLn $ "Expected (2 x " ++ show n ++ ")    : " ++ show (2 * n)
+  putStrLn $ "Total conflicts     : " ++ show r
+  putStrLn $ "Invariant " ++ if v == 2 * n then "HELD" else "VIOLATED (lost updates!)"
