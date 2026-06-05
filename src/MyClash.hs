@@ -193,3 +193,20 @@ isOn Off {} = False
 -- type Nanoseconds (ns :: Nat) = Picoseconds (1_000 * ns)
 
 -- type Picoseconds (ps :: Nat) = ps
+
+-- Type of the input is active high, to active high out
+-- does not directly say low, so unmapped, but can do active low to high or low
+-- success-safe
+-- to be failsafe do (Active High, Active Low) -> (Active High, Active Low)
+
+-- topEntity2
+--   :: "CLK" ::: Clock System
+--   -> "BTN" ::: Signal System (Active High)
+--   -> "LED" ::: Signal System (Active High)
+-- topEntity2 = withResetEnableGen board
+--   where
+--   board btn = toActive <$> led
+--     where
+--     btn' = fromActive <$> btn
+--     click = btn' .&&. (not <$> register False btn')
+--     led = register False $ mux click (not <$> led) led

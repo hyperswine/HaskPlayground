@@ -30,6 +30,7 @@ library
       CPURiscV
       CPURiscVSimple
       CPURiscVTop
+      CRPBC
       DirectLang
       EncDecClash
       ExActors
@@ -51,12 +52,14 @@ library
       MyHardware
       Pipeline
       Processor
+      Proto
       QuantUI
       Rc
       RealWorld
       RVAsm
       RVLang
       SMT
+      T2
       TerraII.AI
       TerraII.GameLoop
       TerraII.Main
