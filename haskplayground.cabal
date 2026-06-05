@@ -47,6 +47,7 @@ library
       HuffmanClash
       Lib
       Linear
+      LinFile
       Lower
       MyClash
       MyHardware
@@ -93,6 +94,7 @@ library
     , hedgehog
     , http-conduit
     , linear
+    , linear-base
     , megaparsec
     , mtl
     , parsec
@@ -142,6 +144,7 @@ executable haskplayground-exe
     , hedgehog
     , http-conduit
     , linear
+    , linear-base
     , megaparsec
     , mtl
     , parsec
@@ -197,6 +200,7 @@ test-suite haskplayground-test
     , hedgehog
     , http-conduit
     , linear
+    , linear-base
     , megaparsec
     , mtl
     , parsec

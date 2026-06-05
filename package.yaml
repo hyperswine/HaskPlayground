@@ -22,6 +22,7 @@ dependencies:
 - recursion-schemes
 - regex-tdfa
 - linear
+- linear-base
 - vector
 - bytestring
 - cryptohash-sha1
