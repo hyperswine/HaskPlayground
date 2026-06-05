@@ -25,6 +25,7 @@ source-repository head
 
 library
   exposed-modules:
+      BetterFiles
       Civ4x
       CPU3
       CPURiscV
@@ -110,6 +111,7 @@ library
     , temporary
     , text
     , time
+    , unix
     , unordered-containers
     , vector
     , vty
@@ -160,6 +162,7 @@ executable haskplayground-exe
     , temporary
     , text
     , time
+    , unix
     , unordered-containers
     , vector
     , vty
@@ -216,6 +219,7 @@ test-suite haskplayground-test
     , temporary
     , text
     , time
+    , unix
     , unordered-containers
     , vector
     , vty

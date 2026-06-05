@@ -51,7 +51,7 @@ dependencies:
 - vty
 - vty-crossplatform
 - binary
-# - h-raylib
+- unix
 
 ghc-options:
 - -Wall
