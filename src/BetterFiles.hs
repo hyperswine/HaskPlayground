@@ -22,12 +22,7 @@ module BetterFiles (main, conflictDemo) where
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Chan
 import Control.Concurrent.MVar
-import Control.Exception
-  ( SomeException,
-    bracket,
-    bracket_,
-    catch,
-  )
+import Control.Exception (SomeException, bracket, bracket_, catch)
 import Control.Monad (forM_, when)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
@@ -36,24 +31,13 @@ import Data.IORef
 import Data.List (sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Ord (comparing)
-import System.Directory
-  ( createDirectoryIfMissing,
-    doesFileExist,
-    removeFile,
-  )
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import System.FilePath (takeDirectory, (</>))
 import System.IO (SeekMode (AbsoluteSeek))
 import System.Posix.Files (rename)
-import System.Posix.IO
-  ( LockRequest (Unlock, WriteLock),
-    OpenMode (ReadOnly, ReadWrite, WriteOnly),
-    closeFd,
-    defaultFileFlags,
-    openFd,
-    setLock,
-    waitToSetLock,
-  )
+import System.Posix.IO (LockRequest (Unlock, WriteLock), OpenMode (ReadOnly, ReadWrite, WriteOnly), closeFd, defaultFileFlags, openFd, setLock, waitToSetLock)
 import System.Posix.Unistd (fileSynchronise)
+import System.Random (randomRIO)
 
 -- ---------------------------------------------------------------------------
 -- Core types
@@ -69,35 +53,18 @@ type Version = Int
 --                      via the OS lock alone; this MVar provides intra-process
 --                      mutual exclusion. The fcntl lock (see 'withOSLock')
 --                      handles the cross-process case.
-data FileTVar a = FileTVar
-  { ftvPath :: FilePath,
-    ftvCell :: MVar (Version, a),
-    ftvCommitLock :: MVar (),
-    ftvSerialise :: a -> ByteString,
-    ftvParse :: ByteString -> a
-  }
+data FileTVar a = FileTVar {ftvPath :: FilePath, ftvCell :: MVar (Version, a), ftvCommitLock :: MVar (), ftvSerialise :: a -> ByteString, ftvParse :: ByteString -> a}
 
 -- | A logged read: the version we observed, plus a way to re-read the current
 -- version at validation time, plus the commit lock for this variable.
-data ReadEntry = ReadEntry
-  { reLoggedVer :: !Version,
-    reCurrentVer :: IO Version,
-    reLock :: MVar ()
-  }
+data ReadEntry = ReadEntry {reLoggedVer :: !Version, reCurrentVer :: IO Version, reLock :: MVar ()}
 
 -- | A staged write: the serialised bytes to flush, an action that applies the
 -- new (version, value) to the in-memory cache, and the commit lock.
-data WriteEntry = WriteEntry
-  { weBytes :: !ByteString,
-    weBump :: IO (),
-    weLock :: MVar ()
-  }
+data WriteEntry = WriteEntry {weBytes :: !ByteString, weBump :: IO (), weLock :: MVar ()}
 
 -- | The transaction record: a read log and a write log, both keyed by path.
-data TRec = TRec
-  { trecReads :: IORef (Map.Map FilePath ReadEntry),
-    trecWrites :: IORef (Map.Map FilePath WriteEntry)
-  }
+data TRec = TRec {trecReads :: IORef (Map.Map FilePath ReadEntry), trecWrites :: IORef (Map.Map FilePath WriteEntry)}
 
 newTRec :: IO TRec
 newTRec = TRec <$> newIORef Map.empty <*> newIORef Map.empty
@@ -122,12 +89,7 @@ instance Monad FileTM where
 
 -- | Create a variable. If the backing file exists, its value is loaded;
 -- otherwise the file is initialised with @initial@.
-newFileTVar ::
-  FilePath ->
-  a ->
-  (a -> ByteString) ->
-  (ByteString -> a) ->
-  IO (FileTVar a)
+newFileTVar :: FilePath -> a -> (a -> ByteString) -> (ByteString -> a) -> IO (FileTVar a)
 newFileTVar path initial serialise parse = do
   exists <- doesFileExist path
   val <-
@@ -138,14 +100,7 @@ newFileTVar path initial serialise parse = do
         pure initial
   cell <- newMVar (0, val)
   lock <- newMVar ()
-  pure
-    FileTVar
-      { ftvPath = path,
-        ftvCell = cell,
-        ftvCommitLock = lock,
-        ftvSerialise = serialise,
-        ftvParse = parse
-      }
+  pure FileTVar {ftvPath = path, ftvCell = cell, ftvCommitLock = lock, ftvSerialise = serialise, ftvParse = parse}
 
 -- | Transactional read. If we have already staged a write to this variable,
 -- we see our own write (read-your-writes). Otherwise we read the cache and log
@@ -158,31 +113,16 @@ readFileTVar ftv = FileTM $ \tr -> do
     Just we -> pure (ftvParse ftv (weBytes we)) -- read-your-own-write
     Nothing -> do
       (ver, val) <- readMVar (ftvCell ftv)
-      let entry =
-            ReadEntry
-              { reLoggedVer = ver,
-                reCurrentVer = fst <$> readMVar (ftvCell ftv),
-                reLock = ftvCommitLock ftv
-              }
+      let entry = ReadEntry {reLoggedVer = ver, reCurrentVer = fst <$> readMVar (ftvCell ftv), reLock = ftvCommitLock ftv}
       -- Keep the FIRST observed version if read more than once.
-      modifyIORef'
-        (trecReads tr)
-        (Map.insertWith (\_new old -> old) (ftvPath ftv) entry)
+      modifyIORef' (trecReads tr) (Map.insertWith (\_new old -> old) (ftvPath ftv) entry)
       pure val
 
 -- | Transactional write. Stages the serialised value and a cache-update action.
 -- Note we do NOT remove any prior read entry: the read that informed this write
 -- must still be validated at commit (this is what prevents lost updates).
 writeFileTVar :: FileTVar a -> a -> FileTM ()
-writeFileTVar ftv newVal = FileTM $ \tr ->
-  modifyIORef' (trecWrites tr) $
-    Map.insert
-      (ftvPath ftv)
-      WriteEntry
-        { weBytes = ftvSerialise ftv newVal,
-          weBump = modifyMVar_ (ftvCell ftv) (\(v, _) -> pure (v + 1, newVal)),
-          weLock = ftvCommitLock ftv
-        }
+writeFileTVar ftv newVal = FileTM $ \tr -> modifyIORef' (trecWrites tr) $ Map.insert (ftvPath ftv) WriteEntry {weBytes = ftvSerialise ftv newVal, weBump = modifyMVar_ (ftvCell ftv) (\(v, _) -> pure (v + 1, newVal)), weLock = ftvCommitLock ftv}
 
 -- | Non-transactional peek at the current value (handy for assertions).
 readFileTVarIO :: FileTVar a -> IO a
@@ -204,10 +144,7 @@ commit tr = do
   -- set too — not just the write set — is what gives serializability and rules
   -- out write-skew, matching GHC STM's commit which acquires every TVar it
   -- touched.
-  let lockMap =
-        Map.fromList $
-          [(p, reLock r) | (p, r) <- reads']
-            ++ [(p, weLock w) | (p, w) <- writes']
+  let lockMap = Map.fromList $ [(p, reLock r) | (p, r) <- reads'] ++ [(p, weLock w) | (p, w) <- writes']
       locks = sortBy (comparing fst) (Map.toList lockMap)
 
   withLocks locks $ do
@@ -217,8 +154,7 @@ commit tr = do
       then pure Conflict
       else do
         -- Flush writes to disk (atomic per file), in sorted order.
-        forM_ (sortBy (comparing fst) writes') $ \(p, w) ->
-          atomicWriteFile p (weBytes w)
+        forM_ (sortBy (comparing fst) writes') $ \(p, w) -> atomicWriteFile p (weBytes w)
         -- All durable; now make the in-memory caches reflect the new versions.
         forM_ writes' $ \(_, w) -> weBump w
         pure Success
@@ -228,19 +164,11 @@ commit tr = do
 -- locks are held simultaneously during validate+commit.
 withLocks :: [(FilePath, MVar ())] -> IO r -> IO r
 withLocks [] act = act
-withLocks ((p, m) : rest) act =
-  bracket_ (takeMVar m) (putMVar m ()) $
-    withOSLock p $
-      withLocks rest act
+withLocks ((p, m) : rest) act = bracket_ (takeMVar m) (putMVar m ()) $ withOSLock p $ withLocks rest act
 
 -- | Whole-file fcntl write lock for the duration of the action.
 withOSLock :: FilePath -> IO r -> IO r
-withOSLock path act =
-  bracket (openFd path ReadWrite defaultFileFlags) closeFd $ \fd ->
-    bracket_
-      (waitToSetLock fd (WriteLock, AbsoluteSeek, 0, 0))
-      (setLock fd (Unlock, AbsoluteSeek, 0, 0))
-      act
+withOSLock path act = bracket (openFd path ReadWrite defaultFileFlags) closeFd $ \fd -> bracket_ (waitToSetLock fd (WriteLock, AbsoluteSeek, 0, 0)) (setLock fd (Unlock, AbsoluteSeek, 0, 0)) act
 
 -- ---------------------------------------------------------------------------
 -- Atomic, durable single-file write
@@ -256,12 +184,7 @@ atomicWriteFile path content = do
   bracket (openFd tmp WriteOnly defaultFileFlags) closeFd fileSynchronise
   rename tmp path
   -- Directory fsync; ignore failure on filesystems that disallow it.
-  ( bracket
-      (openFd (takeDirectory path) ReadOnly defaultFileFlags)
-      closeFd
-      fileSynchronise
-    )
-    `catch` \(_ :: SomeException) -> pure ()
+  (bracket (openFd (takeDirectory path) ReadOnly defaultFileFlags) closeFd fileSynchronise) `catch` \(_ :: SomeException) -> pure ()
 
 -- ---------------------------------------------------------------------------
 -- Running a transaction (with conflict retry)
@@ -368,12 +291,7 @@ allM p (x : xs) = do
 
 -- | Variant of 'atomicallyFile' that logs each conflict to a Chan instead of
 -- silently retrying, so the caller can observe contention in real time.
-atomicallyFileLogged ::
-  Chan String ->
-  Int ->
-  IORef Int ->
-  FileTM a ->
-  IO a
+atomicallyFileLogged :: Chan String -> Int -> IORef Int -> FileTM a -> IO a
 atomicallyFileLogged logChan tid retries tx = go (1 :: Int)
   where
     go attempt = do
@@ -384,13 +302,10 @@ atomicallyFileLogged logChan tid retries tx = go (1 :: Int)
         Success -> pure a
         Conflict -> do
           atomicModifyIORef' retries (\n -> (n + 1, ()))
-          writeChan logChan $
-            "  [thread "
-              ++ show tid
-              ++ "] conflict on attempt "
-              ++ show attempt
-              ++ " — retrying"
-          threadDelay 100
+          writeChan logChan $ "  [thread " ++ show tid ++ "] conflict on attempt " ++ show attempt ++ " — retrying"
+          -- Randomised jitter (50–100μs) so threads don't stay in lockstep.
+          jitter <- randomRIO (50, 100)
+          threadDelay jitter
           go (attempt + 1)
 
 -- | Spin up two threads that each increment a shared file-backed counter
