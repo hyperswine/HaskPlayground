@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.38.0.
+-- This file has been generated from package.yaml by hpack version 0.38.1.
 --
 -- see: https://github.com/sol/hpack
 
@@ -32,6 +32,7 @@ library
       CPURiscVSimple
       CPURiscVTop
       CRPBC
+      CryptSim
       DirectLang
       EncDecClash
       ExActors
