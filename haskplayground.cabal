@@ -54,6 +54,7 @@ library
       MyClash
       MyHardware
       Pipeline
+      PipelinePrime
       Processor
       Proto
       QuantUI
