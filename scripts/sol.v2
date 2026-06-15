@@ -1,0 +1,60 @@
+# Module name e.g. myscript.sol
+# would become myscript module name, can be included with myscript = use "myscript". if its in the current dir or package
+# otherwise specify use "myscript#hash" to get the "non local namespace" which has a certain resolution order: cache -> registry
+# searches cache first, typically ~/.sol/cache, if not there, go to ~/.sol/registry.json and go to the registries specified and look through them
+# If there is a local sol.json in the current dir/package it would actually look at that first
+
+# in the repl it should look like with bindings
+# So it does > which means x = with (...)
+# so when you do x = ...
+# that means x = with ...
+
+# big deals are the Map with the string traversals and Results everywhere
+# Files are all linear so you cant "forget" to use them
+# dont have to use with if you just start off with a single linear producer
+# if you have multiple then you kind of have to
+
+# read is not expected to fail, just either block due to lock or etc.
+
+HOME = std.home_dir (). # call the function, might change so needs an actual function
+
+# f1 : (File 1, Result a)
+f1 = read' "{HOME}/a.json".
+(f2, Ok b) = read' "{HOME}/b.json". # b now read, if PM fail then fail
+
+default_file_error = error "Could not read file".
+
+# manually extract
+(f1, b) = case f1 of
+  (File 1 f1, Ok a) -> (f1, a)
+| _ -> default_file_error.
+
+# shadow previous a
+a = JSON.parse a?. # ? just means unwrap
+b = JSON.parse b?.
+
+# Lens -> setter for Map. Note set actually returns Result for Map. unwrap fails like the typical error "..."
+merge a b = set a "authors" b.authors?.
+
+c = merge a b.
+
+# mostly care about smart pipeline |> here and linear types and STM on per file /home/stuff, which need to be tracked
+# across the entire script
+# because read and write both modify the read and write sets of the stuff of the Path that the File handle points to
+# rather than the actual path
+
+write' "{HOME}/x.json". # write' = write + close, so no need to manually close
+
+close f1.
+close f2. # if we dont close these handles somewhere, it should error at compile time
+
+# Note, typical things are basically just Maps, Strings, Records
+# custom types can be done but typically not recommended over builtin stuff and Result or Maybe types
+
+# No if expressions, always use pattern matching.
+
+# Using smart pipeline on the most common forms in statement context
+# Note, uses the same read set from a.json above
+read' "{HOME}/a.json" |> JSON.parse |> MyRecord.from |> set .author "Jack" |> write' "{HOME}/a.json".
+# so using |> threads through File 1 and Result and just `unwraps` them if the next function expects a instead of Result
+# If a thing returns File 1, it would also thread that through like normal, like a typical a type
