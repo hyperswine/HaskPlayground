@@ -13,10 +13,11 @@ echo "The best hosting provider is {provider}".
 # Note how && is kind of like |>
 # If something is just x -> () then |> takes it anyway. >> could probably be used instead
 # Technically even echo might fail. Sleep might also fail
+# Think of a >> b = a |> void $ b where void = const
 sleep 10
-  |> echo “I’ve been sleeping for 10 seconds, I want more”
-  |> sleep 10
-  |> echo “I’m done sleeping, thanks!”.
+  >> echo “I’ve been sleeping for 10 seconds, I want more”
+  >> sleep 10
+  >> echo “I’m done sleeping, thanks!”.
 
 wait x = Cmd "wait {x}". # when a Cmd is referenced at a statement level, it runs. Note it does not work for non statements
 # so if you have e.g. wait x |> ... it wont work. Need to use wait x () to actually call it
@@ -28,11 +29,93 @@ echo “Done”.
 # Simple input for one-shot scripts
 
 echo "What is your age?".
-# (_, age) = read' stdin age. # note if you ditch the linear handle with _ it auto inserts a close after it, not recommended, basically what read'' does
+# (_, age) = read' stdin. # note if you ditch the linear handle with _ it auto inserts a close after it, not recommended, basically what read'' does
 # but for a one off input like a stdin stream, should just read
-(input, age) = read' stdin age. # should not call read' stdin age again, but read' input age
+(input, age) = read' stdin. # should not call read' stdin age again, but read' input age. Dont need to convert to int, so could say something nonsensical like "more than my huge BMW van years old"
 echo "Wow, you look younger than {age} years old".
 close input.
 
 n = 0.
-fold (fn (acc, x) => echo x) (Enum.from 0 stream). # press ctrl + C to terminate
+fold (fn (acc, x) => echo x) (Enum.from 0 stream). # press ctrl + C to terminate. Could also use map here
+
+# for most purposes, echo = println. Except echo should be more throwaway while println should be more configured and principled
+
+indexedarray = ['egg, 'burger, 'milk]. # atoms, lisp-julia style
+map echo indexedarray. # atoms can be printed directly, but if you want to add things, use (fn x => echo "Item={x}")
+# _ is very useful such that echo "Item={_}" would work, but it would require sophisticated compile-stuff with overlap with _ LHS vars
+
+salary = 1000.
+expenses = 800.
+
+### Could do this, but better to do the one below it
+echo $ case salary == expenses of
+  True -> "Salary and expenses are equal"
+| False -> "Salary and expenses are not equal".
+###
+
+# echo $ (salary == expenses |> "Salary and expenses {if _ then "are" else "are not"} equal").
+# echo $ (salary == expenses |> if _ then "are" else "are not" |> "Salary and expenses {_} equal").
+echo $ (salary == expenses |> (case _ of True -> "are" | False -> "are not") |> "Salary and expenses {_} equal").
+
+# Always thunk
+hello () = echo "Hello World!".
+hello ().
+
+mystr = "lets count the length of this string".
+i = Str.len mystr. # builtin
+echo "mystr is {i} long".
+
+# index 7 to index 9, 1 indexed in Sol, 15
+Str.substring (7, 15) "458449Quantii014132" |> echo _.
+
+first = "I drive a BMW and Volvo".
+second = "Audi".
+
+mystr = Str.find_replace' "BMW" second. # shadow previous mystr. find_replace -> Result String. Use find_replace' if you dont care
+echo mystr.
+
+firststring = "The secret is...".
+secondstring = "Sol".
+thirdstring = "{firststring}{secondstring}{thirdstring}".
+echo thirdstring.
+
+print "Enter a number and I will check if its odd or even: ".
+(input, n) = read' stdin. # note stdin is jsut a builtin ID hardcoded to actual 0 / stdin
+
+res = case (n % 2 == 0) of
+  True -> "even"
+| False -> "odd".
+
+echo "Your number is {res}".
+
+close input. # now resets input stream for stdin
+
+print "Enter the number you want to get factorial for: ".
+(input, n) = read' stdin.
+n = Int.from' n. # Returns Result for Int.from, crashes otherwise
+res = case n of
+  0 -> 1
+| n where n > 0 -> Enum.from 1 n |> fold (*) _
+| n -> error "Cannot calculate factorial of a negative number: {n}".
+
+println "Result = {res}".
+
+# mkdir -p {Math,English,Geography,Arts}/{notes,examresults,portfolio}
+
+# ignore result, almost certainly worked, if not it crashes anyway
+dirs = ["Math", "English", "Geography", "Arts"].
+mkdirs' dirs. #mkdir/1 Str -> Result, mkdirs is just alias for map' mkdir
+# simplest way would just be create another list with things pre-gen. Otherwise can try to do directly using chdir
+# chdir is actually not recommended at all, should be stateless, will warn
+map (fn x => chdir x >> mkdirs' ["notes", "examresults", "portfolio"]) dirs.
+
+# very useful thing. The syntax-identifiers make this possible. Because . means access or extension, ./ prefix means current directory
+# trailing . with ws or newline means terminate, so it is completely safe
+myfile = ./cars.txt. # note should always use lowercase togethercase for all vars and nontypes
+# Path objects a big thing
+
+res = case File.exists myfile of
+  True -> "{myfile} exists"
+| False -> "{myfile} does not exist".
+
+echo res.
