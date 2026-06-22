@@ -1,0 +1,6 @@
+In the repl it should look like with bindings:
+
+So it does > which means x = with (...)
+  so when you do x = ... that means x = with ...
+
+But terrible idea.
