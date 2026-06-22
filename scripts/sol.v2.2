@@ -1,0 +1,38 @@
+#!$HOME/.sol/sol
+
+# translated from hostinger bash tutorial
+
+# Note how similar it is
+
+learningsol = "Hello Sol".
+echo learningsol.
+
+provider = "Sol.index".
+echo "The best hosting provider is {provider}".
+
+# Note how && is kind of like |>
+# If something is just x -> () then |> takes it anyway. >> could probably be used instead
+# Technically even echo might fail. Sleep might also fail
+sleep 10
+  |> echo “I’ve been sleeping for 10 seconds, I want more”
+  |> sleep 10
+  |> echo “I’m done sleeping, thanks!”.
+
+wait x = Cmd "wait {x}". # when a Cmd is referenced at a statement level, it runs. Note it does not work for non statements
+# so if you have e.g. wait x |> ... it wont work. Need to use wait x () to actually call it
+
+# Sequential things work
+wait 1234. # calls wait/1, wrapper for UNIX wait
+echo “Done”.
+
+# Simple input for one-shot scripts
+
+echo "What is your age?".
+# (_, age) = read' stdin age. # note if you ditch the linear handle with _ it auto inserts a close after it, not recommended, basically what read'' does
+# but for a one off input like a stdin stream, should just read
+(input, age) = read' stdin age. # should not call read' stdin age again, but read' input age
+echo "Wow, you look younger than {age} years old".
+close input.
+
+n = 0.
+fold (fn (acc, x) => echo x) (Enum.from 0 stream). # press ctrl + C to terminate
