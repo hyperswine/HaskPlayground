@@ -99,23 +99,19 @@ prop_step_lightUnchangedAboveOne = property $ do
 
 -- After exactly `duration Red` steps from initial, the light is Green.
 prop_fullRedPhase :: Property
-prop_fullRedPhase = property $
-  tlLight (stepN redDuration initial) === Green
+prop_fullRedPhase = property $ tlLight (stepN redDuration initial) === Green
 
 -- After red + green steps from initial, the light is Yellow.
 prop_fullGreenPhase :: Property
-prop_fullGreenPhase = property $
-  tlLight (stepN (redDuration + greenDuration) initial) === Yellow
+prop_fullGreenPhase = property $ tlLight (stepN (redDuration + greenDuration) initial) === Yellow
 
 -- After a complete cycle (R+G+Y) from initial, the light is Red again.
 prop_fullCycle_returnsToRed :: Property
-prop_fullCycle_returnsToRed = property $
-  tlLight (stepN (redDuration + greenDuration + yellowDuration) initial) === Red
+prop_fullCycle_returnsToRed = property $ tlLight (stepN (redDuration + greenDuration + yellowDuration) initial) === Red
 
 -- After a complete cycle from initial the full state matches initial.
 prop_fullCycle_stateRestored :: Property
-prop_fullCycle_stateRestored = property $
-  stepN (redDuration + greenDuration + yellowDuration) initial === initial
+prop_fullCycle_stateRestored = property $ stepN (redDuration + greenDuration + yellowDuration) initial === initial
 
 -- All three lights are seen when running for one full cycle.
 prop_allLightsSeen :: Property
@@ -148,24 +144,23 @@ prop_stepN_additive = property $ do
 -- Test group
 -- ---------------------------------------------------------------------------
 
-trafficLightGroup :: Group
-trafficLightGroup =
-  Group
-    "TrafficLight"
-    [ ("timer: decrements each step", prop_timer_decrements),
-      ("timer: resets on transition", prop_timer_resetsOnTransition),
-      ("timer: always positive", prop_timer_alwaysPositive),
-      ("timer: within duration of current light", prop_timer_withinDuration),
-      ("transition: order Red→Green→Yellow→Red", prop_transition_order),
-      ("transition: 3-cycle identity", prop_transition_threeCycle),
-      ("step: switches light at timer=1", prop_step_switchesAtTimerOne),
-      ("step: light unchanged when timer>1", prop_step_lightUnchangedAboveOne),
-      ("full-cycle: red phase ends at Green", prop_fullRedPhase),
-      ("full-cycle: green phase ends at Yellow", prop_fullGreenPhase),
-      ("full-cycle: returns to Red", prop_fullCycle_returnsToRed),
-      ("full-cycle: state fully restored", prop_fullCycle_stateRestored),
-      ("full-cycle: all lights seen", prop_allLightsSeen),
-      ("stepN 0: identity", prop_stepN_zero),
-      ("stepN: additive", prop_stepN_additive)
-    ]
+ts =
+  [ ("timer: decrements each step", prop_timer_decrements),
+    ("timer: resets on transition", prop_timer_resetsOnTransition),
+    ("timer: always positive", prop_timer_alwaysPositive),
+    ("timer: within duration of current light", prop_timer_withinDuration),
+    ("transition: order Red→Green→Yellow→Red", prop_transition_order),
+    ("transition: 3-cycle identity", prop_transition_threeCycle),
+    ("step: switches light at timer=1", prop_step_switchesAtTimerOne),
+    ("step: light unchanged when timer>1", prop_step_lightUnchangedAboveOne),
+    ("full-cycle: red phase ends at Green", prop_fullRedPhase),
+    ("full-cycle: green phase ends at Yellow", prop_fullGreenPhase),
+    ("full-cycle: returns to Red", prop_fullCycle_returnsToRed),
+    ("full-cycle: state fully restored", prop_fullCycle_stateRestored),
+    ("full-cycle: all lights seen", prop_allLightsSeen),
+    ("stepN 0: identity", prop_stepN_zero),
+    ("stepN: additive", prop_stepN_additive)
+  ]
 
+trafficLightGroup :: Group
+trafficLightGroup = Group "TrafficLight" ts

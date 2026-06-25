@@ -1,6 +1,9 @@
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+
 module DumpAsm where
-import FPL1 (runCompiler)
+
 import qualified Data.Text.IO as TIO
+import FPL1 (runCompiler)
 
 main :: IO ()
 main = do
