@@ -55,6 +55,7 @@ echo $ case salary == expenses of
 
 # echo $ (salary == expenses |> "Salary and expenses {if _ then "are" else "are not"} equal").
 # echo $ (salary == expenses |> if _ then "are" else "are not" |> "Salary and expenses {_} equal").
+# Recommended style, use case and bind subexpressions in order without too much nesting, can be written as a single line for REPL
 echo $ (salary == expenses |> (case _ of True -> "are" | False -> "are not") |> "Salary and expenses {_} equal").
 
 # Always thunk
