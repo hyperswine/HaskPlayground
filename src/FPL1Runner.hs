@@ -1,11 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
--- | FPL1 file runner: parse a .fpl source file, emit RISC-V assembly,
--- compile with riscv64-unknown-elf-gcc, and execute under spike + pk.
---
--- Usage:
---   haskplayground-exe path/to/program.fpl
+-- | FPL1 file runner: parse a .fpl source file, emit RISC-V assembly, compile with riscv64-unknown-elf-gcc, and execute under spike + pk.
+-- Usage: haskplayground-exe path/to/program.fpl
 module FPL1Runner where
 
 import qualified Data.Text.IO as TIO

@@ -3,7 +3,7 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
-module FPL1Main where
+module FPL1Examples where
 
 import qualified Data.Text as T
 import qualified Data.Text.IO as TIO

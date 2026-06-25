@@ -90,7 +90,7 @@ data ParamKind
   | PBool
   | PFnPtr
   | PActor
-  | PLet  -- let-bound value: stored in callee-saved reg s1..s8 (idx selects which)
+  | PLet -- let-bound value: stored in callee-saved reg s1..s8 (idx selects which)
   deriving (Show, Eq)
 
 -- Expressions
@@ -299,11 +299,17 @@ pLetExpr = do
   depth <- gets csLetDepth
   if depth >= 8 then warn ("too many nested lets (>8); " <> name <> " may alias s8") else return ()
   modify (\s -> s {csLetDepth = depth + 1})
-  let letReg = "s" <> T.pack (show (depth + 1))  -- s1..s8
+  let letReg = "s" <> T.pack (show (depth + 1)) -- s1..s8
   -- Extend env: let-bound variable looks up depth in PLet logic of pVarOrAccess
-  body <- local (\e -> e { envVars = M.insert name (depth, PLet) (envVars e)
-                          , envLetTypes = M.insert name (atType rhs) (envLetTypes e)
-                          }) pExpr
+  body <-
+    local
+      ( \e ->
+          e
+            { envVars = M.insert name (depth, PLet) (envVars e),
+              envLetTypes = M.insert name (atType rhs) (envLetTypes e)
+            }
+      )
+      pExpr
   modify (\s -> s {csLetDepth = depth})
   let code =
         atCode rhs
@@ -503,7 +509,7 @@ pVarOrAccess = do
       case M.lookup name (envVars env) of
         Just (idx, PLet) ->
           -- let-binding stored in callee-saved reg s{idx+1}; preserve original type
-          let letReg  = "s" <> T.pack (show (idx + 1))
+          let letReg = "s" <> T.pack (show (idx + 1))
               letType = fromMaybe TInt (M.lookup name (envLetTypes env))
            in return $ Attr ["  mv   a0, " <> letReg] "a0" letType
         Just (idx, kind) -> return $ emitParamLoad name idx kind
@@ -511,8 +517,9 @@ pVarOrAccess = do
           case M.lookup name (envFns env) of
             -- 0-param functions: emit a direct call rather than loading the fn ptr.
             -- This lets them be used as expressions (thunks) without explicit ().
-            Just sig | null (fnParams sig) ->
-              return $ Attr ["  call fn_" <> name] "a0" (fnRetType sig)
+            Just sig
+              | null (fnParams sig) ->
+                  return $ Attr ["  call fn_" <> name] "a0" (fnRetType sig)
             Just _ -> return $ Attr ["  la a0, fn_" <> name] "a0" TFnPtr
             Nothing -> return $ Attr ["  # unresolved: " <> name, "  li a0, 0"] "a0" TInt
 
@@ -558,13 +565,13 @@ pFixExpr = do
     _ -> warn $ "fix " <> fname <> ": ensure this is in tail position"
   -- Load updated params into a0..aN, then jump to the entry label (after frame
   -- setup) so the function re-saves params to its frame without re-adjusting sp.
-  let numArgs  = length args
+  let numArgs = length args
       pushArg a = atCode a ++ ["  addi sp, sp, -8", "  sd   a0, 0(sp)"]
-      popArg i  = "  ld   a" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
-      pushCode  = concatMap pushArg args
-      popCode   = map popArg [0 .. numArgs - 1]
-      cleanup   = ["  addi sp, sp, " <> T.pack (show (numArgs * 8))]
-      jumpCode  = ["  j fn_" <> fname <> "_entry  # fix tail-jump"]
+      popArg i = "  ld   a" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
+      pushCode = concatMap pushArg args
+      popCode = map popArg [0 .. numArgs - 1]
+      cleanup = ["  addi sp, sp, " <> T.pack (show (numArgs * 8))]
+      jumpCode = ["  j fn_" <> fname <> "_entry  # fix tail-jump"]
   return $ Attr (pushCode ++ popCode ++ cleanup ++ jumpCode) "a0" TUnit
 
 -- spawn actor_fn arg1 arg2
@@ -652,47 +659,47 @@ emitPrint :: Text -> Code -> FPType -> Env -> Parser Code
 emitPrint _ argCode TInt _ =
   return $
     argCode
-      ++ [ "  mv   a1, a0"
-         , "  la   a0, fpr_fmt_int"
-         , "  call printf"
+      ++ [ "  mv   a1, a0",
+           "  la   a0, fpr_fmt_int",
+           "  call printf"
          ]
 emitPrint _ argCode TFloat _ =
   return $
     argCode
-      ++ [ "  la   a0, fpr_fmt_float"
-         , "  call printf"
+      ++ [ "  la   a0, fpr_fmt_float",
+           "  call printf"
          ]
 emitPrint ns argCode TBool _ =
   return $
     argCode
-      ++ [ "  beqz a0, .Lpbf_" <> ns
-         , "  la   a0, fpr_fmt_true"
-         , "  call printf"
-         , "  j    .Lpbe_" <> ns
-         , ".Lpbf_" <> ns <> ":"
-         , "  la   a0, fpr_fmt_false"
-         , "  call printf"
-         , ".Lpbe_" <> ns <> ":"
+      ++ [ "  beqz a0, .Lpbf_" <> ns,
+           "  la   a0, fpr_fmt_true",
+           "  call printf",
+           "  j    .Lpbe_" <> ns,
+           ".Lpbf_" <> ns <> ":",
+           "  la   a0, fpr_fmt_false",
+           "  call printf",
+           ".Lpbe_" <> ns <> ":"
          ]
 emitPrint _ argCode TUnit _ =
   return $
     argCode
-      ++ [ "  la   a0, fpr_fmt_unit"
-         , "  call printf"
+      ++ [ "  la   a0, fpr_fmt_unit",
+           "  call printf"
          ]
 emitPrint ns argCode (TUnion tyname) env =
   case M.lookup tyname (envTypes env) of
     Just (TDUnion variants) -> do
-      let ptrReg = "s9"  -- callee-saved; printf will not clobber it
-          endL   = ".Lpe_" <> ns
+      let ptrReg = "s9" -- callee-saved; printf will not clobber it
+          endL = ".Lpe_" <> ns
           emitVariant (i, Variant vname fields) = do
-            let nextL    = ".Lpv_" <> ns <> "_" <> T.pack (show (i + 1 :: Int))
-                fmtL     = ".Lfmt_pv_" <> ns <> "_" <> T.pack (show (i :: Int))
-                nameStr  = vname <> if null fields then "\\n" else "("
+            let nextL = ".Lpv_" <> ns <> "_" <> T.pack (show (i + 1 :: Int))
+                fmtL = ".Lfmt_pv_" <> ns <> "_" <> T.pack (show (i :: Int))
+                nameStr = vname <> if null fields then "\\n" else "("
                 tagCheck =
-                  [ "  lw   t0, 0(" <> ptrReg <> ")  # union tag"
-                  , "  li   t1, " <> T.pack (show i)
-                  , "  bne  t0, t1, " <> nextL
+                  [ "  lw   t0, 0(" <> ptrReg <> ")  # union tag",
+                    "  li   t1, " <> T.pack (show i),
+                    "  bne  t0, t1, " <> nextL
                   ]
                 printName = ["  la   a0, " <> fmtL, "  call printf"]
                 printFlds = concatMap (emitFieldPrint ptrReg) (zip [0 ..] fields)
@@ -704,44 +711,44 @@ emitPrint ns argCode (TUnion tyname) env =
             addData fmtL (".string \"" <> nameStr <> "\"")
             return $ tagCheck ++ printName ++ printFlds ++ closeParen ++ done
       variantCodes <- mapM emitVariant (zip [0 ..] variants)
-      let lastNext  = ".Lpv_" <> ns <> "_" <> T.pack (show (length variants))
+      let lastNext = ".Lpv_" <> ns <> "_" <> T.pack (show (length variants))
           unknownFall =
-            [ lastNext <> ":"
-            , "  la   a0, fpr_fmt_unknown"
-            , "  call printf"
+            [ lastNext <> ":",
+              "  la   a0, fpr_fmt_unknown",
+              "  call printf"
             ]
       return $ argCode ++ ["  mv   " <> ptrReg <> ", a0"] ++ concat variantCodes ++ unknownFall ++ [endL <> ":"]
     _ ->
       return $
         argCode
-          ++ [ "  mv   a1, a0"
-             , "  la   a0, fpr_fmt_int"
-             , "  call printf"
+          ++ [ "  mv   a1, a0",
+               "  la   a0, fpr_fmt_int",
+               "  call printf"
              ]
 emitPrint _ argCode _ _ =
   return $
     argCode
-      ++ [ "  mv   a1, a0"
-         , "  la   a0, fpr_fmt_int"
-         , "  call printf"
+      ++ [ "  mv   a1, a0",
+           "  la   a0, fpr_fmt_int",
+           "  call printf"
          ]
 
 emitFieldPrint :: Text -> (Int, Field) -> Code
 emitFieldPrint ptrReg (i, Field _fname fty) =
-  let offset = 8 + i * 8  -- tag at byte 0; fields from byte 8
+  let offset = 8 + i * 8 -- tag at byte 0; fields from byte 8
       sep
-        | i == 0    = []
+        | i == 0 = []
         | otherwise = ["  la   a0, fpr_fmt_comma", "  call printf"]
       body = case fty of
         TFloat ->
-          [ "  fld  fa0, " <> T.pack (show offset) <> "(" <> ptrReg <> ")"
-          , "  la   a0, fpr_fmt_float"
-          , "  call printf"
+          [ "  fld  fa0, " <> T.pack (show offset) <> "(" <> ptrReg <> ")",
+            "  la   a0, fpr_fmt_float",
+            "  call printf"
           ]
         _ ->
-          [ "  ld   a1, " <> T.pack (show offset) <> "(" <> ptrReg <> ")"
-          , "  la   a0, fpr_fmt_intfld"
-          , "  call printf"
+          [ "  ld   a1, " <> T.pack (show offset) <> "(" <> ptrReg <> ")",
+            "  la   a0, fpr_fmt_intfld",
+            "  call printf"
           ]
    in sep ++ body
 
@@ -813,14 +820,15 @@ emitCall fn args = do
             "  fld  fa" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
         | otherwise =
             "  ld   a" <> T.pack (show (i :: Int)) <> ", " <> T.pack (show ((numArgs - 1 - i) * 8)) <> "(sp)"
-      pushCode  = concatMap pushArg args
-      popCode   = map popArg (zip [0 ..] args)
+      pushCode = concatMap pushArg args
+      popCode = map popArg (zip [0 ..] args)
       cleanupSp = ["  addi sp, sp, " <> T.pack (show (numArgs * 8))]
-      argSetup  = pushCode ++ popCode ++ cleanupSp
+      argSetup = pushCode ++ popCode ++ cleanupSp
   let callCode =
         case atCode fn of
           -- Direct named call: fn_XXX is statically known
-          [t] | "  la a0, fn_" `T.isPrefixOf` t ->
+          [t]
+            | "  la a0, fn_" `T.isPrefixOf` t ->
                 let target = T.drop (T.length "  la a0, ") t
                  in argSetup ++ ["  call " <> target]
           -- Indirect fn-ptr call: address computed into a0
@@ -933,7 +941,7 @@ pFnDecl = do
   let paramMap = M.fromList [(pname, (idx, kind)) | (idx, (pname, kind)) <- zip [0 ..] params]
       innerEnv = env {envVars = M.union paramMap (envVars env), envFns = M.insert name (FnSig params retTy) (envFns env), envCurrentFn = Just name}
   outerLetDepth <- gets csLetDepth
-  modify (\s -> s {csLetDepth = 0})  -- fresh let-reg scope for this function
+  modify (\s -> s {csLetDepth = 0}) -- fresh let-reg scope for this function
   bodyAttr <- local (const innerEnv) pExpr
   modify (\s -> s {csLetDepth = outerLetDepth})
   symbol "."
@@ -943,49 +951,50 @@ pFnDecl = do
   --   s0 + n*8                          : saved s0
   --   s0 + (n+1)*8                      : saved ra
   -- Frame size is rounded up to 16-byte alignment.
-  let numParams  = length params
+  let numParams = length params
       -- Frame saves: ra + s0..s8 = 10 slots; plus param slots
-      numSaved   = 10  -- ra, s0, s1..s8
-      rawSize    = (numParams + numSaved) * 8
-      frameSize  = ((rawSize + 15) `div` 16) * 16
-      raOff      = frameSize - 8
+      numSaved = 10 -- ra, s0, s1..s8
+      rawSize = (numParams + numSaved) * 8
+      frameSize = ((rawSize + 15) `div` 16) * 16
+      raOff = frameSize - 8
       -- Saved register offsets from sp (= s0 at entry)
       -- ra at raOff, s0 at raOff-8, s1 at raOff-16, ..., s8 at raOff-72
-      savedRegs  = ["s0","s1","s2","s3","s4","s5","s6","s7","s8"]
+      savedRegs = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]
 
       -- Prologue: allocate frame, save ra + s0-s8, set s0 = sp.
       prologue =
-        ["  addi sp, sp, -" <> T.pack (show frameSize),
-         "  sd   ra, " <> T.pack (show raOff) <> "(sp)"
+        [ "  addi sp, sp, -" <> T.pack (show frameSize),
+          "  sd   ra, " <> T.pack (show raOff) <> "(sp)"
         ]
-        ++ [ "  sd   " <> reg <> ", " <> T.pack (show (raOff - (i + 1) * 8)) <> "(sp)"
-           | (i, reg) <- zip [0 ..] savedRegs
-           ]
-        ++ ["  mv   s0, sp"]
+          ++ [ "  sd   " <> reg <> ", " <> T.pack (show (raOff - (i + 1) * 8)) <> "(sp)"
+               | (i, reg) <- zip [0 ..] savedRegs
+             ]
+          ++ ["  mv   s0, sp"]
 
       -- fn_name_entry: label for fix tail-jumps (frame already set up).
       -- Re-saves updated params from incoming a0..aN.
-      entryLabel  = ["fn_" <> name <> "_entry:"]
-      paramSaves  =
+      entryLabel = ["fn_" <> name <> "_entry:"]
+      paramSaves =
         [ case k of
             PFloat -> "  fsd  fa" <> T.pack (show i) <> ", " <> T.pack (show (i * 8)) <> "(s0)"
-            _      -> "  sd   a"  <> T.pack (show i) <> ", " <> T.pack (show (i * 8)) <> "(s0)"
-        | (i, (_, k)) <- zip [(0 :: Int) ..] params
+            _ -> "  sd   a" <> T.pack (show i) <> ", " <> T.pack (show (i * 8)) <> "(s0)"
+          | (i, (_, k)) <- zip [(0 :: Int) ..] params
         ]
 
       -- Epilogue: restore all saved regs via the stable s0.
       epilogue =
-        ["  ld   ra, " <> T.pack (show raOff) <> "(s0)",
-         "  addi sp, s0, " <> T.pack (show frameSize)
+        [ "  ld   ra, " <> T.pack (show raOff) <> "(s0)",
+          "  addi sp, s0, " <> T.pack (show frameSize)
         ]
-        ++ [ "  ld   " <> reg <> ", -" <> T.pack (show ((i + 2) * 8)) <> "(sp)"
-           | (i, reg) <- zip [0 ..] savedRegs
-           ]
+          ++ [ "  ld   " <> reg <> ", -" <> T.pack (show ((i + 2) * 8)) <> "(sp)"
+               | (i, reg) <- zip [0 ..] savedRegs
+             ]
 
       block =
         ["", "fn_" <> name <> ":"]
           ++ prologue
-          ++ [""] ++ entryLabel
+          ++ [""]
+          ++ entryLabel
           ++ paramSaves
           ++ ["  # params: " <> T.intercalate ", " (map (\(p, k) -> p <> ":" <> showKind k) params)]
           ++ atCode bodyAttr
@@ -1066,8 +1075,7 @@ pProgram = do
 
   (declCode, _ws, declData, finalEnv) <- parseDecls env0
 
-  -- Main expression (entry point) — parsed in the fully-extended env so all
-  -- declared functions are in scope.
+  -- Main expression (entry point) — parsed in the fully-extended env so all declared functions are in scope.
   mainAttr <- local (const finalEnv) pExpr
   optional (symbol ".")
   eof
@@ -1121,39 +1129,39 @@ pProgram = do
 
       -- main: full callee-saved frame so let-bindings in s1-s8 survive calls.
       -- Frame: ra + s0..s8 = 10 * 8 = 80, rounded to 96 for alignment.
-      mainSavedRegs = ["s0","s1","s2","s3","s4","s5","s6","s7","s8"]
-      mainFrameSize = 96  -- 9 saved regs * 8 + ra * 8 = 80, padded to 96
-      mainRaOff     = mainFrameSize - 8  -- 88
+      mainSavedRegs = ["s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"]
+      mainFrameSize = 96 -- 9 saved regs * 8 + ra * 8 = 80, padded to 96
+      mainRaOff = mainFrameSize - 8 -- 88
       mainBlock =
-        [ ""
-        , "main:"
-        , "  addi sp, sp, -" <> T.pack (show mainFrameSize)
-        , "  sd   ra, " <> T.pack (show mainRaOff) <> "(sp)"
+        [ "",
+          "main:",
+          "  addi sp, sp, -" <> T.pack (show mainFrameSize),
+          "  sd   ra, " <> T.pack (show mainRaOff) <> "(sp)"
         ]
-        ++ [ "  sd   " <> reg <> ", " <> T.pack (show (mainRaOff - (i + 1) * 8)) <> "(sp)"
-           | (i, reg) <- zip [0 ..] mainSavedRegs
-           ]
-        ++ ["  mv   s0, sp"]
-        ++ atCode mainAttr
-        ++ ["  ld   ra, " <> T.pack (show mainRaOff) <> "(s0)"
-           , "  addi sp, s0, " <> T.pack (show mainFrameSize)
-           ]
-        ++ [ "  ld   " <> reg <> ", -" <> T.pack (show ((i + 2) * 8)) <> "(sp)"
-           | (i, reg) <- zip [0 ..] mainSavedRegs
-           ]
-        ++ ["  li   a0, 0", "  ret"]
+          ++ [ "  sd   " <> reg <> ", " <> T.pack (show (mainRaOff - (i + 1) * 8)) <> "(sp)"
+               | (i, reg) <- zip [0 ..] mainSavedRegs
+             ]
+          ++ ["  mv   s0, sp"]
+          ++ atCode mainAttr
+          ++ [ "  ld   ra, " <> T.pack (show mainRaOff) <> "(s0)",
+               "  addi sp, s0, " <> T.pack (show mainFrameSize)
+             ]
+          ++ [ "  ld   " <> reg <> ", -" <> T.pack (show ((i + 2) * 8)) <> "(sp)"
+               | (i, reg) <- zip [0 ..] mainSavedRegs
+             ]
+          ++ ["  li   a0, 0", "  ret"]
 
       -- Always-present format strings for the print builtin
       printFmts =
-        [ "fpr_fmt_int:        .string \"%ld\\n\""
-        , "fpr_fmt_float:      .string \"%f\\n\""
-        , "fpr_fmt_true:       .string \"true\\n\""
-        , "fpr_fmt_false:      .string \"false\\n\""
-        , "fpr_fmt_unit:       .string \"()\\n\""
-        , "fpr_fmt_unknown:    .string \"<unknown>\\n\""
-        , "fpr_fmt_comma:      .string \", \""
-        , "fpr_fmt_closeparen: .string \")\\n\""
-        , "fpr_fmt_intfld:     .string \"%ld\""
+        [ "fpr_fmt_int:        .string \"%ld\\n\"",
+          "fpr_fmt_float:      .string \"%f\\n\"",
+          "fpr_fmt_true:       .string \"true\\n\"",
+          "fpr_fmt_false:      .string \"false\\n\"",
+          "fpr_fmt_unit:       .string \"()\\n\"",
+          "fpr_fmt_unknown:    .string \"<unknown>\\n\"",
+          "fpr_fmt_comma:      .string \", \"",
+          "fpr_fmt_closeparen: .string \")\\n\"",
+          "fpr_fmt_intfld:     .string \"%ld\""
         ]
 
       assembly =
