@@ -32,13 +32,8 @@ import System.Random (randomRIO)
 type Version = Int
 
 -- | A version-stamped, file-backed transactional variable.
---
 --  * 'ftvCell'       — in-memory cache: the current (version, value).
---  * 'ftvCommitLock' — an in-process mutex. fcntl locks are per-PID, so two
---                      threads in the SAME process do not exclude each other
---                      via the OS lock alone; this MVar provides intra-process
---                      mutual exclusion. The fcntl lock (see 'withOSLock')
---                      handles the cross-process case.
+--  * 'ftvCommitLock' — an in-process mutex. fcntl locks are per-PID, so two threads in the SAME process do not exclude each other via the OS lock alone; this MVar provides intra-process mutual exclusion. The fcntl lock (see 'withOSLock') handles the cross-process case.
 data FileTVar a = FileTVar {ftvPath :: FilePath, ftvCell :: MVar (Version, a), ftvCommitLock :: MVar (), ftvSerialise :: a -> ByteString, ftvParse :: ByteString -> a}
 
 -- | A logged read: the version we observed, plus a way to re-read the current version at validation time, plus the commit lock for this variable.

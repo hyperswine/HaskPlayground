@@ -1,4 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unused-do-bind #-}
 
 module Civ4x where
 
@@ -8,10 +10,9 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
 import Data.Array (Array, listArray, (!))
 import Data.Bits (shiftR, xor)
-import Data.List (find)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, listToMaybe)
+import Data.Maybe (listToMaybe)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as V
 
@@ -27,14 +28,7 @@ data Terrain = Plains | Hills | Forest | Water | Mountain
 data UnitType = Settler | Warrior | Scout
   deriving (Eq, Show)
 
-data Unit = Unit
-  { unitId :: Int,
-    unitPos :: Pos,
-    unitType :: UnitType,
-    unitMoves :: Int,
-    unitOwner :: Int
-  }
-  deriving (Eq, Show)
+data Unit = Unit {unitId :: Int, unitPos :: Pos, unitType :: UnitType, unitMoves :: Int, unitOwner :: Int} deriving (Eq, Show)
 
 data BuildItem = BuildWarrior
   deriving (Eq, Show)
@@ -45,29 +39,12 @@ buildCost BuildWarrior = 2
 buildName :: BuildItem -> String
 buildName BuildWarrior = "Warrior"
 
-data City = City
-  { cityId :: Int,
-    cityPos :: Pos,
-    cityName :: String,
-    buildQueue :: Maybe (BuildItem, Int)
-  }
-  deriving (Eq, Show)
+data City = City {cityId :: Int, cityPos :: Pos, cityName :: String, buildQueue :: Maybe (BuildItem, Int)} deriving (Eq, Show)
 
 data Selection = SelUnit Int | SelCity Int
   deriving (Eq, Show)
 
-data GameState = GameState
-  { worldMap :: Array Pos Terrain,
-    units :: Map Int Unit,
-    cities :: Map Int City,
-    selection :: Maybe Selection,
-    camPos :: Pos,
-    turn :: Int,
-    animTick :: Int,
-    msgLog :: [String],
-    nextUnitId :: Int,
-    nextCityId :: Int
-  }
+data GameState = GameState {worldMap :: Array Pos Terrain, units :: Data.Map.Strict.Map Int Unit, cities :: Data.Map.Strict.Map Int City, selection :: Maybe Selection, camPos :: Pos, turn :: Int, animTick :: Int, msgLog :: [String], nextUnitId :: Int, nextCityId :: Int}
 
 data AppEvent = AnimTick
 
@@ -94,15 +71,13 @@ spriteToImgRows :: Sprite -> [V.Image]
 spriteToImgRows = map rowToImg
   where
     rowToImg cells = V.horizCat $ map cellToImg cells
-    cellToImg (SCell ch (r, g, b)) =
-      V.char (V.withForeColor V.defAttr (V.rgbColor r g b)) ch
+    cellToImg (SCell ch (r, g, b)) = V.char (V.withForeColor V.defAttr (V.rgbColor r g b)) ch
 
 -- Highlight: lighten all cells
 highlight :: Sprite -> Sprite
 highlight = map (map lighten)
   where
-    lighten (SCell ch (r, g, b)) =
-      SCell ch (min 255 (r + 70), min 255 (g + 70), min 255 (b + 70))
+    lighten (SCell ch (r, g, b)) = SCell ch (min 255 (r + 70), min 255 (g + 70), min 255 (b + 70))
 
 -- ---------------------------------------------------------------------------
 -- Terrain sprites
@@ -244,23 +219,11 @@ smoothNoise scale x y =
       gy = y `div` scale
       tx = (x `mod` scale) * 1000 `div` scale
       ty = (y `mod` scale) * 1000 `div` scale
-   in bilerp
-        (valueNoise gx gy)
-        (valueNoise (gx + 1) gy)
-        (valueNoise gx (gy + 1))
-        (valueNoise (gx + 1) (gy + 1))
-        tx
-        ty
+   in bilerp (valueNoise gx gy) (valueNoise (gx + 1) gy) (valueNoise gx (gy + 1)) (valueNoise (gx + 1) (gy + 1)) tx ty
 
 fbm :: Int -> Int -> Int
 fbm x y =
-  clamp 0 1000 $
-    ( smoothNoise 10 x y * 512
-        + smoothNoise 5 x y * 256
-        + smoothNoise 3 x y * 128
-        + smoothNoise 2 x y * 64
-    )
-      `div` 960
+  clamp 0 1000 $ (smoothNoise 10 x y * 512 + smoothNoise 5 x y * 256 + smoothNoise 3 x y * 128 + smoothNoise 2 x y * 64) `div` 960
 
 detailNoise :: Int -> Int -> Int
 detailNoise x y = smoothNoise 4 (x + 73) (y + 151)
@@ -289,40 +252,16 @@ genTerrain x y =
                             else Plains
 
 buildWorldMap :: Array Pos Terrain
-buildWorldMap =
-  listArray
-    ((0, 0), (mapW - 1, mapH - 1))
-    [genTerrain x y | y <- [0 .. mapH - 1], x <- [0 .. mapW - 1]]
+buildWorldMap = listArray ((0, 0), (mapW - 1, mapH - 1)) [genTerrain x y | y <- [0 .. mapH - 1], x <- [0 .. mapW - 1]]
 
 startPos :: Array Pos Terrain -> Pos
-startPos wm =
-  head
-    [ (x, y) | y <- [mapH `div` 3 .. 2 * mapH `div` 3], x <- [mapW `div` 3 .. 2 * mapW `div` 3], let t = wm ! (x, y), t == Plains || t == Hills
-    ]
+startPos wm = head [(x, y) | y <- [mapH `div` 3 .. 2 * mapH `div` 3], x <- [mapW `div` 3 .. 2 * mapW `div` 3], let t = wm ! (x, y), t == Plains || t == Hills]
 
 initialState :: GameState
 initialState =
   let wm = buildWorldMap
       (sx, sy) = startPos wm
-   in GameState
-        { worldMap = wm,
-          units =
-            Map.fromList
-              [ (0, Unit 0 (sx, sy) Settler 2 0),
-                (1, Unit 1 (sx + 1, sy) Warrior 2 0)
-              ],
-          cities = Map.empty,
-          selection = Just (SelUnit 0),
-          camPos =
-            ( clamp 0 (mapW - tilesW) (sx - tilesW `div` 2),
-              clamp 0 (mapH - tilesH) (sy - tilesH `div` 2)
-            ),
-          turn = 1,
-          animTick = 0,
-          msgLog = ["Arrows:scroll  WASD:move  Tab:cycle  f:found  b:build  Enter:end turn  q:quit"],
-          nextUnitId = 2,
-          nextCityId = 0
-        }
+   in GameState {worldMap = wm, units = Map.fromList [(0, Unit 0 (sx, sy) Settler 2 0), (1, Unit 1 (sx + 1, sy) Warrior 2 0)], cities = Map.empty, selection = Just (SelUnit 0), camPos = (clamp 0 (mapW - tilesW) (sx - tilesW `div` 2), clamp 0 (mapH - tilesH) (sy - tilesH `div` 2)), turn = 1, animTick = 0, msgLog = ["Arrows:scroll  WASD:move  Tab:cycle  f:found  b:build  Enter:end turn  q:quit"], nextUnitId = 2, nextCityId = 0}
 
 -- ---------------------------------------------------------------------------
 -- Rendering
@@ -340,10 +279,7 @@ renderMap :: GameState -> V.Image
 renderMap gs =
   let (cvx, cvy) = camPos gs
       tick = animTick gs
-   in V.vertCat
-        [ buildSpriteRow gs tick cvx (cvy + ty)
-          | ty <- [0 .. tilesH - 1]
-        ]
+   in V.vertCat [buildSpriteRow gs tick cvx (cvy + ty) | ty <- [0 .. tilesH - 1]]
 
 -- Build one full-height strip of sprites for a given world-y
 buildSpriteRow :: GameState -> Int -> Int -> Int -> V.Image
@@ -353,8 +289,7 @@ buildSpriteRow gs tick cvx wy =
    in V.vertCat $ map (V.horizCat . map rowImg) rowsPerSprite
   where
     rowImg cells = V.horizCat $ map cellImg cells
-    cellImg (SCell ch (r, g, b)) =
-      V.char (V.withForeColor V.defAttr (V.rgbColor r g b)) ch
+    cellImg (SCell ch (r, g, b)) = V.char (V.withForeColor V.defAttr (V.rgbColor r g b)) ch
 
 getTileSprite :: GameState -> Int -> Int -> Int -> Sprite
 getTileSprite gs tick wx wy
@@ -391,53 +326,22 @@ renderSidebar gs =
       sep = V.string dim (replicate sideW '─')
       blank = V.string V.defAttr ""
 
-      hdr =
-        V.string
-          (bold (fg 200 200 220))
-          (" ◆ CIVLIKE  Turn " ++ show (turn gs))
+      hdr = V.string (bold (fg 200 200 220)) (" ◆ CIVLIKE  Turn " ++ show (turn gs))
 
       selPanel = case selection gs of
         Nothing -> [V.string dim "  nothing selected"]
         Just (SelUnit uid) -> case Map.lookup uid (units gs) of
           Nothing -> [V.string dim "  (unit gone)"]
-          Just u ->
-            [ V.string yel ("  ▸ " ++ show (unitType u) ++ " #" ++ show uid),
-              V.string V.defAttr ("    pos " ++ showPos (unitPos u)),
-              V.string V.defAttr ("    moves " ++ show (unitMoves u)),
-              V.string dim "    WASD move · f found"
-            ]
+          Just u -> [V.string yel ("  ▸ " ++ show (unitType u) ++ " #" ++ show uid), V.string V.defAttr ("    pos " ++ showPos (unitPos u)), V.string V.defAttr ("    moves " ++ show (unitMoves u)), V.string dim "    WASD move · f found"]
         Just (SelCity cid) -> case Map.lookup cid (cities gs) of
           Nothing -> [V.string dim "  (city gone)"]
           Just c ->
             let bstr = case buildQueue c of
                   Nothing -> V.string dim "    queue (empty)"
-                  Just (bi, n) ->
-                    V.string cyn $
-                      "    building: "
-                        ++ buildName bi
-                        ++ " ("
-                        ++ show n
-                        ++ "t)"
-             in [ V.string yel ("  ▸ " ++ cityName c),
-                  V.string V.defAttr ("    pos " ++ showPos (cityPos c)),
-                  bstr,
-                  V.string dim "    b: queue warrior"
-                ]
+                  Just (bi, n) -> V.string cyn $ "    building: " ++ buildName bi ++ " (" ++ show n ++ "t)"
+             in [V.string yel ("  ▸ " ++ cityName c), V.string V.defAttr ("    pos " ++ showPos (cityPos c)), bstr, V.string dim "    b: queue warrior"]
 
-      cityPanel =
-        V.string (bold V.defAttr) " Cities"
-          : if Map.null (cities gs)
-            then [V.string dim "  (none yet)"]
-            else
-              [ V.string V.defAttr $
-                  "  "
-                    ++ cityName c
-                    ++ maybe
-                      ""
-                      (\(bi, n) -> " [" ++ buildName bi ++ " " ++ show n ++ "t]")
-                      (buildQueue c)
-                | c <- Map.elems (cities gs)
-              ]
+      cityPanel = V.string (bold V.defAttr) " Cities" : if Map.null (cities gs) then [V.string dim "  (none yet)"] else [V.string V.defAttr $ "  " ++ cityName c ++ maybe "" (\(bi, n) -> " [" ++ buildName bi ++ " " ++ show n ++ "t]") (buildQueue c) | c <- Map.elems (cities gs)]
 
       keyPanel =
         [ V.string (bold V.defAttr) " Keys",
@@ -450,27 +354,16 @@ renderSidebar gs =
           V.string V.defAttr "  q     quit"
         ]
 
-      logPanel =
-        V.string (bold V.defAttr) " Log"
-          : map (\l -> V.string dim ("  " ++ take (sideW - 3) l)) (take 5 (msgLog gs))
+      logPanel = V.string (bold V.defAttr) " Log" : map (\l -> V.string dim ("  " ++ take (sideW - 3) l)) (take 5 (msgLog gs))
 
-      all' =
-        [hdr, sep]
-          ++ selPanel
-          ++ [blank, sep]
-          ++ cityPanel
-          ++ [blank, sep]
-          ++ keyPanel
-          ++ [sep]
-          ++ logPanel
+      all' = [hdr, sep] ++ selPanel ++ [blank, sep] ++ cityPanel ++ [blank, sep] ++ keyPanel ++ [sep] ++ logPanel
    in V.vertCat all'
 
 showPos :: Pos -> String
 showPos (x, y) = "(" ++ show x ++ "," ++ show y ++ ")"
 
 renderGame :: GameState -> [Widget Name]
-renderGame gs =
-  [raw $ V.horizCat [renderMap gs, V.char V.defAttr ' ', renderSidebar gs]]
+renderGame gs = [raw $ V.horizCat [renderMap gs, V.char V.defAttr ' ', renderSidebar gs]]
 
 -- ---------------------------------------------------------------------------
 -- Game logic
@@ -502,14 +395,14 @@ moveUnit (dx, dy) gs = case selectedUnit gs of
         newPos = (nx, ny)
         t = worldMap gs ! newPos
      in if unitMoves u <= 0
-          then addMsg "No moves left this turn." gs
+          then
+            addMsg "No moves left this turn." gs
           else
             if t == Mountain || t == Water
-              then addMsg ("Can't enter " ++ show t ++ ".") gs
+              then
+                addMsg ("Can't enter " ++ show t ++ ".") gs
               else
-                let u' = u {unitPos = newPos, unitMoves = unitMoves u - 1}
-                 in centerOn newPos $
-                      gs {units = Map.insert (unitId u) u' (units gs)}
+                let u' = u {unitPos = newPos, unitMoves = unitMoves u - 1} in centerOn newPos $ gs {units = Map.insert (unitId u) u' (units gs)}
 
 settleCity :: GameState -> GameState
 settleCity gs = case selectedUnit gs of
@@ -525,13 +418,7 @@ settleCity gs = case selectedUnit gs of
                 let cid = nextCityId gs
                     name = "City " ++ show (cid + 1)
                     c = City cid pos name Nothing
-                 in addMsg ("Founded " ++ name ++ "!") $
-                      gs
-                        { cities = Map.insert cid c (cities gs),
-                          units = Map.delete (unitId u) (units gs),
-                          selection = Just (SelCity cid),
-                          nextCityId = cid + 1
-                        }
+                 in addMsg ("Founded " ++ name ++ "!") $ gs {cities = Map.insert cid c (cities gs), units = Map.delete (unitId u) (units gs), selection = Just (SelCity cid), nextCityId = cid + 1}
 
 buildInCity :: GameState -> GameState
 buildInCity gs = case selectedCity gs of
@@ -541,8 +428,7 @@ buildInCity gs = case selectedCity gs of
       Just _ -> addMsg (cityName c ++ " is already building something.") gs
       Nothing ->
         let c' = c {buildQueue = Just (BuildWarrior, buildCost BuildWarrior)}
-         in addMsg ("Queued " ++ buildName BuildWarrior ++ " in " ++ cityName c ++ ".") $
-              gs {cities = Map.insert (cityId c) c' (cities gs)}
+         in addMsg ("Queued " ++ buildName BuildWarrior ++ " in " ++ cityName c ++ ".") $ gs {cities = Map.insert (cityId c) c' (cities gs)}
 
 cycleSelection :: GameState -> GameState
 cycleSelection gs =
@@ -562,14 +448,9 @@ cycleSelection gs =
 
 endTurn :: GameState -> GameState
 endTurn gs =
-  let gs1 =
-        gs
-          { turn = turn gs + 1,
-            units = Map.map resetMoves (units gs)
-          }
+  let gs1 = gs {turn = turn gs + 1, units = Map.map resetMoves (units gs)}
       (gs2, msgs) = Map.foldlWithKey' tickCity (gs1, []) (cities gs1)
-   in addMsg ("─── Turn " ++ show (turn gs2) ++ " ───") $
-        foldr addMsg gs2 msgs
+   in addMsg ("─── Turn " ++ show (turn gs2) ++ " ───") $ foldr addMsg gs2 msgs
   where
     resetMoves u = u {unitMoves = case unitType u of Scout -> 3; _ -> 2}
 
@@ -582,13 +463,7 @@ tickCity (gs, msgs) cid city =
           newU = Unit uid (cityPos city) Warrior 2 0
           city' = city {buildQueue = Nothing}
           msg = cityName city ++ " produced a " ++ buildName item ++ "!"
-       in ( gs
-              { cities = Map.insert cid city' (cities gs),
-                units = Map.insert uid newU (units gs),
-                nextUnitId = uid + 1
-              },
-            msg : msgs
-          )
+       in (gs {cities = Map.insert cid city' (cities gs), units = Map.insert uid newU (units gs), nextUnitId = uid + 1}, msg : msgs)
     Just (item, n) ->
       let city' = city {buildQueue = Just (item, n - 1)}
        in (gs {cities = Map.insert cid city' (cities gs)}, msgs)
@@ -596,21 +471,10 @@ tickCity (gs, msgs) cid city =
 scrollMap :: (Int, Int) -> GameState -> GameState
 scrollMap (dx, dy) gs =
   let (vx, vy) = camPos gs
-   in gs
-        { camPos =
-            ( clamp 0 (mapW - tilesW) (vx + dx),
-              clamp 0 (mapH - tilesH) (vy + dy)
-            )
-        }
+   in gs {camPos = (clamp 0 (mapW - tilesW) (vx + dx), clamp 0 (mapH - tilesH) (vy + dy))}
 
 centerOn :: Pos -> GameState -> GameState
-centerOn (x, y) gs =
-  gs
-    { camPos =
-        ( clamp 0 (mapW - tilesW) (x - tilesW `div` 2),
-          clamp 0 (mapH - tilesH) (y - tilesH `div` 2)
-        )
-    }
+centerOn (x, y) gs = gs {camPos = (clamp 0 (mapW - tilesW) (x - tilesW `div` 2), clamp 0 (mapH - tilesH) (y - tilesH `div` 2))}
 
 -- ---------------------------------------------------------------------------
 -- Event handling
@@ -640,14 +504,7 @@ handleEvent _ = pure ()
 -- ---------------------------------------------------------------------------
 
 app :: App GameState AppEvent Name
-app =
-  App
-    { appDraw = renderGame,
-      appChooseCursor = neverShowCursor,
-      appHandleEvent = handleEvent,
-      appStartEvent = pure (),
-      appAttrMap = const (attrMap V.defAttr [])
-    }
+app = App {appDraw = renderGame, appChooseCursor = neverShowCursor, appHandleEvent = handleEvent, appStartEvent = pure (), appAttrMap = const (attrMap V.defAttr [])}
 
 main :: IO ()
 main = do
