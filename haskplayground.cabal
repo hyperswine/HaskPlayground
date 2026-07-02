@@ -71,6 +71,7 @@ library
       TerraII.Types
       TerraII.World
       TrafficLight
+      VListDual
       VListFP
       VM
       WindowSystem
