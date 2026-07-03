@@ -1,18 +1,14 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 
 module Clash3X where
 
@@ -29,10 +25,8 @@ counter enable = q
   where
     q = regEn 0 enable (q + 1)
 
-saturatingCounter ::
-  (HiddenClockResetEnable dom) =>
-  Signal dom Bool -> -- Count enable
-  Signal dom (Unsigned 3)
+-- Signal dom Bool = Count enable. Same idea, if enabled then do the logic of the mux. The mux just checks if value is 7, if not then increment, else return current val (should be 7)
+saturatingCounter :: (HiddenClockResetEnable dom) => Signal dom Bool -> Signal dom (Unsigned 3)
 saturatingCounter en = q
   where
     q = regEn 0 en (mux (q .==. 7) q (q + 1))
@@ -40,7 +34,7 @@ saturatingCounter en = q
 -- A property to check that the counter never overflows past 7
 prop_never_overflows :: Property
 prop_never_overflows = property $ do
-  -- 1. Generate a list of boolean inputs (simulating 0 to 30 clock cycles)
+  -- 1. Generate a list of boolean inputs (simulating 0 to 30 clock cycles), for regenable
   simLength <- forAll $ Gen.int (Range.linear 0 30)
   inputs <- forAll $ Gen.list (Range.singleton simLength) Gen.bool
 
@@ -62,3 +56,7 @@ prop_never_overflows = property $ do
 main = do
   counterdone <- checkParallel $ Group "MyCounter" [("Never Overflows", prop_never_overflows)]
   unless counterdone exitFailure
+
+main' = do
+  ok <- checkParallel $$(discover)
+  if ok then putStrLn "All tests passed." else exitFailure
