@@ -27,6 +27,7 @@ library
   exposed-modules:
       BetterFiles
       Civ4x
+      Clash3X
       CPU3
       CPURiscV
       CPURiscVSimple
