@@ -1,5 +1,7 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE LambdaCase #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-type-defaults #-}
 
 -- gen_view MVU simulation
 --
@@ -23,7 +25,7 @@ module MVUMod where
 import Data.Bits (shiftR, xor)
 import Data.List (foldl', intercalate)
 import qualified Data.Map.Strict as M
-import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 
 type Key = Int
 
