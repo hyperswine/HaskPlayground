@@ -7,6 +7,8 @@ module Main where
 import qualified DumpAsm
 import qualified QuantUI
 import System.Environment (getArgs)
+import qualified ARC
+import qualified MailboxReponse
 
 main :: IO ()
 main = do
@@ -14,6 +16,8 @@ main = do
   case args of
     ["quantui"] -> QuantUI.main
     ["dumpasm"] -> DumpAsm.main
+    ["arc"] -> ARC.main
+    ["mailbox"] -> MailboxReponse.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
