@@ -55,6 +55,7 @@ library
       LinFile
       Lower
       MailboxReponse
+      MemoryModel
       MVUMod
       MVUModLiveView
       MyClash

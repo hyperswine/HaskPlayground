@@ -11,6 +11,7 @@ import qualified ARC
 import qualified MailboxReponse
 import qualified MVUModLiveView
 import qualified FullAST
+import qualified MemoryModel
 
 main :: IO ()
 main = do
@@ -22,6 +23,7 @@ main = do
     ["mailbox"] -> MailboxReponse.main
     ["mvu"] -> MVUModLiveView.main
     ["full"] -> FullAST.main
+    ["mem"] -> MemoryModel.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
