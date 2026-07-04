@@ -59,6 +59,7 @@ library
       MVUModLiveView
       MyClash
       MyHardware
+      ParserFull
       Pipeline
       PipelinePrime
       Processor
