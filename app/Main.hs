@@ -10,6 +10,7 @@ import System.Environment (getArgs)
 import qualified ARC
 import qualified MailboxReponse
 import qualified MVUModLiveView
+import qualified FullAST
 
 main :: IO ()
 main = do
@@ -20,6 +21,7 @@ main = do
     ["arc"] -> ARC.main
     ["mailbox"] -> MailboxReponse.main
     ["mvu"] -> MVUModLiveView.main
+    ["full"] -> FullAST.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
