@@ -46,6 +46,7 @@ library
       FPL1Examples
       FPL1Runner
       FPXSyn
+      FullAST
       Fusion
       Gameloop
       HuffmanClash
