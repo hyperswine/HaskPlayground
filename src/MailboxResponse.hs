@@ -31,7 +31,7 @@
 -- Metrics: input-to-photon latency (p50/p95/p99/max), frame time (p50/p99),
 -- jitter |ft[n]-ft[n-1]| (mean/p99), deadline misses (>16.7ms input-to-photon).
 
-module MailboxReponse where
+module MailboxResponse where
 
 import Data.List (foldl', maximumBy, nub, sort)
 import qualified Data.Map.Strict as M

@@ -131,10 +131,10 @@ instance FPR_Record Student where
 
   emptySoA _ = StudentSoA vnil vnil
 
-  -- | cons fans out to each column simultaneously.
+  -- \| cons fans out to each column simultaneously.
   consSoA s soa = StudentSoA {nameCol = vcons (studentName s) (nameCol soa), ageCol = vcons (studentAge s) (ageCol soa)}
 
-  -- | Column-split map. The PE analyses the lambda AST and finds that the two field updates are independent: new name depends only on old name, new age only on old age. It emits two separate column passes, each a SIMD candidate. The trick: we map each column by reconstructing a minimal dummy record containing only that field's value, apply f, then project the result. The PE does this symbolically (never evaluates f); here it is explicit. Note: this is ONLY correct when fields are independent. The PE verifies  this statically before emitting the split.
+  -- \| Column-split map. The PE analyses the lambda AST and finds that the two field updates are independent: new name depends only on old name, new age only on old age. It emits two separate column passes, each a SIMD candidate. The trick: we map each column by reconstructing a minimal dummy record containing only that field's value, apply f, then project the result. The PE does this symbolically (never evaluates f); here it is explicit. Note: this is ONLY correct when fields are independent. The PE verifies  this statically before emitting the split.
   mapSoA f soa = StudentSoA {nameCol = vmapSegs (\n -> studentName (f (Student n 0))) (nameCol soa), ageCol = vmapSegs (\a -> studentAge (f (Student "" a))) (ageCol soa)}
 
   filterSoA p (StudentSoA ns as) = let pairs = zip (vlistToList ns) (vlistToList as); kept = filter (uncurry (\n a -> p (Student n a))) pairs; (ns', as') = unzip kept in StudentSoA (fromListV ns') (fromListV as')

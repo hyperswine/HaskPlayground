@@ -54,7 +54,7 @@ library
       Linear
       LinFile
       Lower
-      MailboxReponse
+      MailboxResponse
       MemoryModel
       MVUMod
       MVUModLiveView
@@ -71,6 +71,7 @@ library
       RVAsm
       RVLang
       SMT
+      SPSCArc
       StreamFusion
       T2
       TerraII.AI

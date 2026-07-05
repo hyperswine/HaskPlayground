@@ -3,6 +3,7 @@
 -- Ports are resolved by the host via a PortTable
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use camelCase" #-}
 
 module Fir where

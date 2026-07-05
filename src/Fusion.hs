@@ -1,11 +1,8 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 -- Demonstrates producer/consumer fusion in ANF form. In ANF every intermediate collection is a named let-binding, making producer-consumer edges trivially visible:
-
 --   let xs = map f input     -- producer
 --       ys = map g xs        -- consumer of xs (xs used exactly once -> fuse)
-
 -- The pass walks the let-chain collecting a "pipeline context" (name -> Pipeline). When a binding is consumed by a single downstream combinator, it is fused in and the intermediate binding is erased. When used more than once, it must materialise.
-
 --   FUSED:   map.map, filter.map, map.filter, foldl.map, foldl.filter, take.map, range as source, long chains
 --   BLOCKED: use-count > 1, zip with opaque input, opaque function call
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -134,18 +131,21 @@ fusionPass (Program binds result) = let (outBinds, notes) = go binds result Map.
               (Nothing, Just _) -> let note = NBlocked "left input of zip is opaque" (x ++ " = " ++ show rhs) in go rest result ctx (Binding x rhs : out) (note : notes)
               _ -> let note = NThrough (x ++ " = " ++ show rhs ++ "  (both opaque)") in go rest result ctx (Binding x rhs : out) (note : notes)
             -- ── recognised pipeline node ──────────────────────────────────────────
-            _ | Just pl <- recognise ctx rhs ->
+            _
+              | Just pl <- recognise ctx rhs ->
                   -- Dead: drop the binding entirely
-                  if uc == 0 then
+                  if uc == 0
+                    then
                       let note = NBlocked "dead (use-count=0), dropped" (x ++ " = " ++ show rhs) in go rest result ctx out (note : notes)
-                  else
+                    else
                       -- Safe to fuse: suppress binding, record in ctx
-                      if uc == 1 then
+                      if uc == 1
+                        then
                           let note = NFused (x ++ " = " ++ show rhs) (ppPipeline pl)
                               ctx' = Map.insert x pl ctx
                            in go rest result ctx' out (note : notes)
-                      -- Must materialise: emit as a pipeline{...} call so it's clear. A single fused loop runs but the result list exists in memory
-                      else
+                        -- Must materialise: emit as a pipeline{...} call so it's clear. A single fused loop runs but the result list exists in memory
+                        else
                           let note = NBlocked ("use-count=" ++ show uc ++ ", must materialise as list") (x ++ " = " ++ show rhs)
                               outRhs = RCall ("pipeline{" ++ ppPipeline pl ++ "}") []
                            in go rest result ctx (Binding x outRhs : out) (note : notes)
