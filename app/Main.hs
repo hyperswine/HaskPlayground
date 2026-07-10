@@ -13,6 +13,7 @@ import qualified MVUModLiveView
 import qualified FullAST
 import qualified MemoryModel
 import qualified SPSCArc
+import qualified HaskSim1
 
 main :: IO ()
 main = do
@@ -26,6 +27,7 @@ main = do
     ["full"] -> FullAST.main
     ["mem"] -> MemoryModel.main
     ["spsc"] -> SPSCArc.main
+    ["sim1"] -> HaskSim1.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main

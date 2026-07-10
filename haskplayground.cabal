@@ -49,6 +49,7 @@ library
       FullAST
       Fusion
       Gameloop
+      HaskSim1
       HuffmanClash
       Lib
       Linear
