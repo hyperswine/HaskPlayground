@@ -20,7 +20,7 @@
 -- Full Sol lowers those in stage 1 (see the interpreter PoC); this driver
 -- deliberately keeps the typed pipeline's surface small.
 -- ============================================================================
-module Main where
+module SolcMain where
 
 import Control.Exception (SomeException, displayException, evaluate, try)
 import Data.List (foldl', intercalate)
@@ -45,10 +45,17 @@ import Text.Megaparsec (errorBundlePretty, parse)
 primArities :: M.Map SP.Name Int
 primArities =
   M.fromList
-    [ ("newHandle", 1), ("closeHandle", 1),
-      ("fromTo", 2), ("mapV", 2), ("sumV", 1),
-      ("zipV", 2), ("fstV", 1), ("sndV", 1),
-      ("mapFstV", 2), ("mapSndV", 2) ]
+    [ ("newHandle", 1),
+      ("closeHandle", 1),
+      ("fromTo", 2),
+      ("mapV", 2),
+      ("sumV", 1),
+      ("zipV", 2),
+      ("fstV", 1),
+      ("sndV", 1),
+      ("mapFstV", 2),
+      ("mapSndV", 2)
+    ]
 
 opPrim :: SP.Name -> Maybe SP.Name
 opPrim = \case
@@ -120,13 +127,18 @@ convSpine :: SExpr -> Either String Expr
 convSpine e0 = do
   let (h, args) = spine e0 []
   case h of
-    SVar p | Just ar <- M.lookup p primArities ->
-      if length args == ar
-        then EPrim p <$> mapM conv args
-        else
-          Left $
-            "primitive '" ++ p ++ "' expects " ++ show ar
-              ++ " argument(s), got " ++ show (length args)
+    SVar p
+      | Just ar <- M.lookup p primArities ->
+          if length args == ar
+            then EPrim p <$> mapM conv args
+            else
+              Left $
+                "primitive '"
+                  ++ p
+                  ++ "' expects "
+                  ++ show ar
+                  ++ " argument(s), got "
+                  ++ show (length args)
     _ -> do
       h' <- conv h
       as <- mapM conv args
@@ -141,7 +153,8 @@ convProgram tops = do
   let binds = [(n, ps, g, b) | TBind n ps g b <- tops]
       ignored =
         [ "signature/type/shape declarations ignored by the typed subset driver"
-        | any (\case TSig {} -> True; TType {} -> True; TShape {} -> True; _ -> False) tops ]
+          | any (\case TSig {} -> True; TType {} -> True; TShape {} -> True; _ -> False) tops
+        ]
   defs <- mapM oneClause binds
   let names = map (\(n, _, _) -> n) defs
   if length names /= length (M.keys (M.fromList (zip names (repeat ()))))
@@ -151,15 +164,21 @@ convProgram tops = do
         let others = reverse restRev
         Right
           ( foldr (\(n, ps, b) acc -> ELet n (foldr ELam b ps) acc) body others,
-            ignored )
+            ignored
+          )
       _ -> Left "expected a 0-parameter 'main' as the last definition"
   where
     oneClause (n, ps, g, b) = do
       case g of
         Just _ -> Left ("guards are outside the typed pipeline subset (in '" ++ n ++ "')")
         Nothing -> pure ()
-      names <- mapM (\case PVar v -> Right v
-                           _ -> Left ("only plain-name parameters in the typed subset (in '" ++ n ++ "')")) ps
+      names <-
+        mapM
+          ( \case
+              PVar v -> Right v
+              _ -> Left ("only plain-name parameters in the typed subset (in '" ++ n ++ "')")
+          )
+          ps
       b' <- conv b
       Right (n, names, b')
 
@@ -194,12 +213,13 @@ compileFile path = do
 run :: Expr -> IO ()
 run expr = do
   -- stage 2
-  s2 <- forced $
-    let (core2, mainTy, dlog) = stage2 expr
-     in unlines $
-          [ "definition-time types (snapshotted before use sites constrain them):" ]
-            ++ ["  " ++ n ++ " : " ++ pT t | (n, t) <- dlog]
-            ++ ["", "main : " ++ pT mainTy, "", "typed core (zonked):", pCore 0 core2]
+  s2 <-
+    forced $
+      let (core2, mainTy, dlog) = stage2 expr
+       in unlines $
+            ["definition-time types (snapshotted before use sites constrain them):"]
+              ++ ["  " ++ n ++ " : " ++ pT t | (n, t) <- dlog]
+              ++ ["", "main : " ++ pT mainTy, "", "typed core (zonked):", pCore 0 core2]
   case s2 of
     Left err -> putStrLn ("\n-- STAGE 2 (HM + rows): REJECTED: " ++ err)
     Right out2 -> do
@@ -207,13 +227,15 @@ run expr = do
       putStrLn out2
       let (core2, _, _) = stage2 expr
           (lenses, core3) = stage3 core2
-      s3 <- forced $
-        unlines $
-          ["generated lens definitions (raw proj/update live only here):"]
-            ++ concat
-              [ ["  " ++ n ++ " : " ++ pT t, "  " ++ n ++ " = " ++ pCore 2 c]
-                | (n, c, t) <- lenses ]
-            ++ ["", "core with r.f / {r | f = e} rewritten to lens calls:", pCore 0 core3]
+      s3 <-
+        forced $
+          unlines $
+            ["generated lens definitions (raw proj/update live only here):"]
+              ++ concat
+                [ ["  " ++ n ++ " : " ++ pT t, "  " ++ n ++ " = " ++ pCore 2 c]
+                  | (n, c, t) <- lenses
+                ]
+              ++ ["", "core with r.f / {r | f = e} rewritten to lens calls:", pCore 0 core3]
       case s3 of
         Left err -> putStrLn ("\n-- STAGE 3 (lenses): REJECTED: " ++ err)
         Right out3 -> do
@@ -224,9 +246,10 @@ run expr = do
             Left err -> putStrLn ("REJECTED: " ++ err ++ "\n\n(pipeline stops here)")
             Right oks -> do
               mapM_ putStrLn ("linearity OK:" : oks)
-              s5 <- forced $
-                let (fdefs, fmain) = stage5 lenses core3
-                 in unlines (map pFDef fdefs ++ ["main =", "  " ++ pFlat 2 fmain])
+              s5 <-
+                forced $
+                  let (fdefs, fmain) = stage5 lenses core3
+                   in unlines (map pFDef fdefs ++ ["main =", "  " ++ pFlat 2 fmain])
               case s5 of
                 Left err -> putStrLn ("\n-- STAGE 5 (flatten): REJECTED: " ++ err ++ "\n\n(pipeline stops here)")
                 Right out5 -> do
@@ -246,15 +269,15 @@ run expr = do
                   mapM_
                     ( \(n, ps, b) -> do
                         putStrLn $
-                          n ++ "("
+                          n
+                            ++ "("
                             ++ intercalate ", " [p ++ " : " ++ pT t | (p, t) <- ps]
                             ++ ") ="
                         putStrLn (pRC 2 b)
-                        putStrLn "" )
+                        putStrLn ""
+                    )
                     rcdefs
                   putStrLn "main =" >> putStrLn (pRC 2 rcmain)
 
-main :: IO ()
-main = do
-  args <- getArgs
-  mapM_ compileFile (if null args then ["demo.sol"] else args)
+main args = do
+  mapM_ compileFile (if null args then ["demo.sol"] else [args])

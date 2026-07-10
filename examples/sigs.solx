@@ -1,0 +1,48 @@
+# ML-style signatures & structures, per the Iso design:
+# a signature is just a (skipped) type annotation; a structure is just a
+# record; "opening" is aliasing; a "functor" is a function taking a record.
+
+Iso : Sig.
+Iso = {from_ : Int -> Int, to_ : Int -> Int}.
+
+# two competing structures implementing the same Iso -- naming IS the policy
+doubleIso = {from_ = fn x -> x * 2, to_ = fn x -> x / 2}.
+shiftIso  = {from_ = fn x -> x + 10, to_ = fn x -> x - 10}.
+
+# local open: alias the fields you want, then call them bare
+roundtrip i v =
+  from_ = i.from_;
+  to_ = i.to_;
+  to_ (from_ v).
+
+# a "functor": structure in, structure out (lambda captures i -> lifted)
+mk_scaler i = {scale = fn x -> i.from_ (i.from_ x)}.
+
+use_scaler =
+  s = mk_scaler doubleIso;
+  g = s.scale;
+  g 3.
+
+# operators are just names: shadow Prelude.(+) in a local scope
+weird_add =
+  (+) = fn a b -> a * b + 1;
+  2 + 3.
+
+# MySig-style structure whose op dispatches on typeid, let-it-crash fallback
+Val = Type (VInt Int | VStr String).
+
+myops = {plus = fn a b -> case (a, b) of
+    (VInt i, VInt j) -> VInt (i + j)
+  | (VStr s1, VStr s2) -> VInt (String.len s1 + String.len s2)
+  | _ -> error "cannot add incompatible variants"}.
+
+use_ops =
+  f = myops.plus;
+  case f (VStr "abc") (VStr "de") of VInt n -> n.
+
+main =
+  print "roundtrip doubleIso 21 = {roundtrip doubleIso 21}" >>
+  print "roundtrip shiftIso 21  = {roundtrip shiftIso 21}" >>
+  print "scaler doubleIso 3     = {use_scaler}" >>
+  print "shadowed (+): 2 + 3    = {weird_add}" >>
+  print "typeid plus strings    = {use_ops}".

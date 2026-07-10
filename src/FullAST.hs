@@ -56,7 +56,7 @@ data Type
   = TInt
   | TBool
   | TVec
-  | TVec2                           -- Vec (Int, Int): SoA-represented pair vector
+  | TVec2 -- Vec (Int, Int): SoA-represented pair vector
   | THandle
   | TFun Type Type
   | TVar Int
@@ -88,7 +88,7 @@ data Expr
   | EApp Expr Expr
   | ELet Name Expr Expr
   | ERec [(Name, Expr)]
-  | EUpd Expr [(Name, Expr)]        -- {m | f = e, ...}  single level
+  | EUpd Expr [(Name, Expr)] -- {m | f = e, ...}  single level
   | EProj Expr Name
   | EIf Expr Expr Expr
   | EPrim Name [Expr]
@@ -127,7 +127,7 @@ data Core
   | CApp Core Core
   | CLet (Name, Type) Core Core
   | CRec Type [(Name, Core)]
-  | CUpd Type Core [(Name, Core)]   -- annotated with the record's type
+  | CUpd Type Core [(Name, Core)] -- annotated with the record's type
   | CProj Type Core Name
   | CIf Core Core Core
   | CPrim Name [Core]
@@ -274,14 +274,15 @@ infer env = \case
   -- No type-changing update (the setter is  rec -> field -> rec).
   EUpd m fields -> do
     (tm, cm) <- infer env m
-    fcs <- mapM
-      ( \(f, e) -> do
-          (te, ce) <- infer env e
-          rho <- freshR
-          unify tm (TRec (RExt f te rho))
-          pure (f, ce)
-      )
-      fields
+    fcs <-
+      mapM
+        ( \(f, e) -> do
+            (te, ce) <- infer env e
+            rho <- freshR
+            unify tm (TRec (RExt f te rho))
+            pure (f, ce)
+        )
+        fields
     pure (tm, CUpd tm cm fcs)
   EProj e f -> do
     (te, ce) <- infer env e
@@ -392,9 +393,12 @@ stage3 core = (getterDefs ++ setterDefs, rewrite core)
       ]
     setterDefs =
       [ ( nameFor "set" recTy f,
-          CLam ("r", recTy)
-            (CLam ("v", fieldTy recTy f)
-               (CUpd recTy (CVar "r") [(f, CVar "v")])),
+          CLam
+            ("r", recTy)
+            ( CLam
+                ("v", fieldTy recTy f)
+                (CUpd recTy (CVar "r") [(f, CVar "v")])
+            ),
           TFun recTy (TFun (fieldTy recTy f) recTy)
         )
         | (recTy, f) <- usites
@@ -449,9 +453,13 @@ countL n = go
         if ct /= ce
           then
             Left $
-              "linear variable '" ++ n
+              "linear variable '"
+                ++ n
                 ++ "' used unevenly across if-branches ("
-                ++ show ct ++ " vs " ++ show ce ++ ")"
+                ++ show ct
+                ++ " vs "
+                ++ show ce
+                ++ ")"
           else Right (cc + ct)
       CPrim _ as -> sum <$> mapM go as
 
@@ -466,8 +474,11 @@ stage4 defs core = concat <$> mapM checkTop (map (\(_, c, _) -> c) defs ++ [core
             if c /= 1
               then
                 Left $
-                  "linear variable '" ++ x ++ "' used "
-                    ++ show c ++ " time(s), expected exactly 1"
+                  "linear variable '"
+                    ++ x
+                    ++ "' used "
+                    ++ show c
+                    ++ " time(s), expected exactly 1"
               else
                 (("  '" ++ x ++ "' : Handle consumed exactly once on every path") :)
                   <$> ((++) <$> go r <*> go b)
@@ -506,7 +517,7 @@ data FDef = FDef {fdName :: Name, fdParams :: [(Name, Type)], fdBody :: Flat, fd
 trT :: Type -> Type
 trT = \case
   TRec row -> TTuple (map (trT . snd) (sortedFields row))
-  TVec2 -> TTuple [TVec, TVec]      -- SoA dual: pair-vector = tuple of columns
+  TVec2 -> TTuple [TVec, TVec] -- SoA dual: pair-vector = tuple of columns
   TFun a b -> TFun (trT a) (trT b)
   TTuple ts -> TTuple (map trT ts)
   t -> t
@@ -597,7 +608,10 @@ flatten globals env core = case core of
     if not (S.null fvs)
       then
         error $
-          "closure detected lifting '" ++ f ++ "' over " ++ show (S.toList fvs)
+          "closure detected lifting '"
+            ++ f
+            ++ "' over "
+            ++ show (S.toList fvs)
             ++ " (no closures: Sol requires closed lambdas)"
       else do
         flattenDef globals f lam tf
@@ -626,8 +640,13 @@ flatten globals env core = case core of
                 FCall f <$> mapM (flatten globals env) args
           Just ar ->
             error $
-              "partial/over application of '" ++ f ++ "' (arity "
-                ++ show ar ++ ", got " ++ show (length args) ++ ")"
+              "partial/over application of '"
+                ++ f
+                ++ "' (arity "
+                ++ show ar
+                ++ ", got "
+                ++ show (length args)
+                ++ ")"
           Nothing -> error $ "higher-order local call to '" ++ f ++ "' unsupported"
       _ -> error "call head is not a top-level function"
     where
@@ -746,8 +765,11 @@ freshA :: AnfM Name
 freshA = do n <- getS; putS (n + 1); pure ("t" ++ show n)
 
 anf ::
-  M.Map Name Type -> M.Map Name Type -> Flat ->
-  (M.Map Name Type -> Atom -> AnfM ANF) -> AnfM ANF
+  M.Map Name Type ->
+  M.Map Name Type ->
+  Flat ->
+  (M.Map Name Type -> Atom -> AnfM ANF) ->
+  AnfM ANF
 anf gsigs env fl k = case fl of
   FVar x -> k env (AVar x)
   FLit n -> k env (ALit n)
@@ -760,8 +782,13 @@ anf gsigs env fl k = case fl of
     bindNamed gsigs env x t other (\env' -> k env' (AVar x))
 
 bindNamed ::
-  M.Map Name Type -> M.Map Name Type -> Name -> Type -> Flat ->
-  (M.Map Name Type -> AnfM ANF) -> AnfM ANF
+  M.Map Name Type ->
+  M.Map Name Type ->
+  Name ->
+  Type ->
+  Flat ->
+  (M.Map Name Type -> AnfM ANF) ->
+  AnfM ANF
 bindNamed gsigs env x t fl kont = case fl of
   FVar y -> ALet (x, t) (RAtom (AVar y)) <$> kont (M.insert x t env)
   FLit n -> ALet (x, t) (RAtom (ALit n)) <$> kont (M.insert x t env)
@@ -781,16 +808,22 @@ bindNamed gsigs env x t fl kont = case fl of
     bindNamed gsigs env1 x t b kont
 
 atom ::
-  M.Map Name Type -> M.Map Name Type -> Flat ->
-  (M.Map Name Type -> Atom -> AnfM ANF) -> AnfM ANF
+  M.Map Name Type ->
+  M.Map Name Type ->
+  Flat ->
+  (M.Map Name Type -> Atom -> AnfM ANF) ->
+  AnfM ANF
 atom gsigs env fl k = case fl of
   FVar x -> k env (AVar x)
   FLit n -> k env (ALit n)
   _ -> anf gsigs env fl k
 
 atoms ::
-  M.Map Name Type -> M.Map Name Type -> [Flat] ->
-  (M.Map Name Type -> [Atom] -> AnfM ANF) -> AnfM ANF
+  M.Map Name Type ->
+  M.Map Name Type ->
+  [Flat] ->
+  (M.Map Name Type -> [Atom] -> AnfM ANF) ->
+  AnfM ANF
 atoms _ env [] k = k env []
 atoms gsigs env (f : fs) k = atom gsigs env f $ \env1 a ->
   atoms gsigs env1 fs (\env2 as -> k env2 (a : as))
@@ -919,7 +952,8 @@ tupleProp = go M.empty
     go env = \case
       ALet (x, t) r@(RTuple as) rest -> ALet (x, t) r (go (M.insert x as env) rest)
       ALet (x, t) (RProj i (AVar v)) rest
-        | Just as <- M.lookup v env, i < length as ->
+        | Just as <- M.lookup v env,
+          i < length as ->
             ALet (x, t) (RAtom (as !! i)) (go env rest)
       ALet b r rest -> ALet b r (go env rest)
       AIf a t e -> AIf a (go env t) (go env e)
@@ -928,7 +962,7 @@ tupleProp = go M.empty
 stage7 :: [ADef] -> ANF -> ([ADef], ANF)
 stage7 adefs amain =
   let simp1 = dce . copyProp . tupleProp . copyProp
-      simp = simp1 . simp1        -- forwarding can cascade; two rounds suffice here
+      simp = simp1 . simp1 -- forwarding can cascade; two rounds suffice here
       (mains, FuseS _ newDefs) = runSt (fusePass (simp amain)) (FuseS 0 [])
       clean = dce . copyProp
    in ( [d {adBody = clean (simp (adBody d))} | d <- adefs] ++ newDefs,
@@ -1032,17 +1066,34 @@ pCore i = \case
   CLam (x, t) b -> "\\(" ++ x ++ " : " ++ pT t ++ ") -> " ++ pCore i b
   CApp f a -> pCoreA i f ++ " " ++ pCoreA i a
   CLet (x, t) r b ->
-    "let " ++ x ++ " : " ++ pT t ++ " = " ++ pCore (i + 2) r ++ " in\n"
-      ++ ind i ++ pCore i b
+    "let "
+      ++ x
+      ++ " : "
+      ++ pT t
+      ++ " = "
+      ++ pCore (i + 2) r
+      ++ " in\n"
+      ++ ind i
+      ++ pCore i b
   CRec _ fs -> "{" ++ intercalate ", " [f ++ " = " ++ pCore i c | (f, c) <- fs] ++ "}"
   CUpd _ m fs ->
-    "{" ++ pCore i m ++ " | "
-      ++ intercalate ", " [f ++ " = " ++ pCore i c | (f, c) <- fs] ++ "}"
+    "{"
+      ++ pCore i m
+      ++ " | "
+      ++ intercalate ", " [f ++ " = " ++ pCore i c | (f, c) <- fs]
+      ++ "}"
   CProj _ e f -> pCoreA i e ++ "." ++ f
   CIf c t e ->
-    "if " ++ pCore i c ++ "\n"
-      ++ ind (i + 2) ++ "then " ++ pCore (i + 2) t ++ "\n"
-      ++ ind (i + 2) ++ "else " ++ pCore (i + 2) e
+    "if "
+      ++ pCore i c
+      ++ "\n"
+      ++ ind (i + 2)
+      ++ "then "
+      ++ pCore (i + 2) t
+      ++ "\n"
+      ++ ind (i + 2)
+      ++ "else "
+      ++ pCore (i + 2) e
   CPrim p as -> p ++ "(" ++ intercalate ", " (map (pCore i) as) ++ ")"
   where
     pCoreA j e = case e of
@@ -1055,12 +1106,26 @@ pFlat i = \case
   FVar x -> x
   FLit n -> show n
   FLet (x, t) r b ->
-    "let " ++ x ++ " : " ++ pT t ++ " = " ++ pFlat (i + 2) r ++ " in\n"
-      ++ ind i ++ pFlat i b
+    "let "
+      ++ x
+      ++ " : "
+      ++ pT t
+      ++ " = "
+      ++ pFlat (i + 2) r
+      ++ " in\n"
+      ++ ind i
+      ++ pFlat i b
   FIf c t e ->
-    "if " ++ pFlat i c ++ "\n"
-      ++ ind (i + 2) ++ "then " ++ pFlat (i + 2) t ++ "\n"
-      ++ ind (i + 2) ++ "else " ++ pFlat (i + 2) e
+    "if "
+      ++ pFlat i c
+      ++ "\n"
+      ++ ind (i + 2)
+      ++ "then "
+      ++ pFlat (i + 2) t
+      ++ "\n"
+      ++ ind (i + 2)
+      ++ "else "
+      ++ pFlat (i + 2) e
   FCall f as -> f ++ "(" ++ intercalate ", " (map (pFlat i) as) ++ ")"
   FPrim p as -> p ++ "(" ++ intercalate ", " (map (pFlat i) as) ++ ")"
   FMkTuple es -> "mktuple(" ++ intercalate ", " (map (pFlat i) es) ++ ")"
@@ -1068,8 +1133,13 @@ pFlat i = \case
 
 pFDef :: FDef -> String
 pFDef (FDef n ps b rt) =
-  n ++ "(" ++ intercalate ", " [p ++ " : " ++ pT t | (p, t) <- ps]
-    ++ ") : " ++ pT rt ++ " =\n  " ++ pFlat 2 b
+  n
+    ++ "("
+    ++ intercalate ", " [p ++ " : " ++ pT t | (p, t) <- ps]
+    ++ ") : "
+    ++ pT rt
+    ++ " =\n  "
+    ++ pFlat 2 b
 
 pAtom :: Atom -> String
 pAtom (AVar v) = v
@@ -1089,14 +1159,27 @@ pANF i = \case
   ALet (x, t) r b ->
     ind i ++ "let " ++ x ++ " : " ++ pT t ++ " = " ++ pRhs r ++ "\n" ++ pANF i b
   AIf a t e ->
-    ind i ++ "if " ++ pAtom a ++ "\n"
-      ++ ind i ++ "then\n" ++ pANF (i + 2) t ++ "\n"
-      ++ ind i ++ "else\n" ++ pANF (i + 2) e
+    ind i
+      ++ "if "
+      ++ pAtom a
+      ++ "\n"
+      ++ ind i
+      ++ "then\n"
+      ++ pANF (i + 2) t
+      ++ "\n"
+      ++ ind i
+      ++ "else\n"
+      ++ pANF (i + 2) e
 
 pADef :: ADef -> String
 pADef (ADef n ps b rt) =
-  n ++ "(" ++ intercalate ", " [p ++ " : " ++ pT t | (p, t) <- ps]
-    ++ ") : " ++ pT rt ++ " =\n" ++ pANF 2 b
+  n
+    ++ "("
+    ++ intercalate ", " [p ++ " : " ++ pT t | (p, t) <- ps]
+    ++ ") : "
+    ++ pT rt
+    ++ " =\n"
+    ++ pANF 2 b
 
 pRC :: Int -> RC -> String
 pRC i = \case
@@ -1104,8 +1187,16 @@ pRC i = \case
   RCLet (x, t) r b ->
     ind i ++ "let " ++ x ++ " : " ++ pT t ++ " = " ++ pRhs r ++ "\n" ++ pRC i b
   RCIf a t e ->
-    ind i ++ "if " ++ pAtom a ++ "\n"
-      ++ ind i ++ "then\n" ++ pRC (i + 2) t ++ "\n"
-      ++ ind i ++ "else\n" ++ pRC (i + 2) e
+    ind i
+      ++ "if "
+      ++ pAtom a
+      ++ "\n"
+      ++ ind i
+      ++ "then\n"
+      ++ pRC (i + 2) t
+      ++ "\n"
+      ++ ind i
+      ++ "else\n"
+      ++ pRC (i + 2) e
   RCDup v b -> ind i ++ "dup " ++ v ++ "\n" ++ pRC i b
   RCDrop v b -> ind i ++ "drop " ++ v ++ "\n" ++ pRC i b

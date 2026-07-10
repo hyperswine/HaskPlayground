@@ -1,0 +1,9 @@
+# Same field name `x` in two distinct record shapes: generated lenses
+# disambiguate with a shape suffix (get_x_s0 / get_x_s1, set_x_s0 / set_x_s1).
+
+main =
+  a = {x = 1, y = 2};
+  b = {x = 10, z = 3};
+  a2 = {a | x = 5};
+  b2 = {b | x = 50};
+  a2.x + b2.x + a.y + b.z.
