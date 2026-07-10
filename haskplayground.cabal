@@ -73,6 +73,8 @@ library
       RVAsm
       RVLang
       SMT
+      SolcMain
+      SolParser
       SPSCArc
       StreamFusion
       T2

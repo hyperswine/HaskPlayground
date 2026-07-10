@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-type-defaults #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Use isNothing" #-}
 
 -- RingSim: cycle-accurate simulation of a 4-node unidirectional slotted ring.
@@ -79,16 +80,10 @@ step pol lam warm st0 =
       rot = let xs = stSlots st0 in last xs : init xs
 
       -- 2. deliver at each position
-      (slots1, q1, done1, bin1, bend1) =
-        foldl'
-          deliver
-          (rot, stQueues st0, stDone st0, stBulkIn st0, stBulkEnd st0)
-          (zip [0 ..] rot)
+      (slots1, q1, done1, bin1, bend1) = foldl' deliver (rot, stQueues st0, stDone st0, stBulkIn st0, stBulkEnd st0) (zip [0 ..] rot)
         where
-          deliver acc@(sl, q, dn, bi, be) (pos, (_, mf)) =
-            case mf of
-              Just f
-                | fDst f == pos ->
+          deliver acc@(sl, q, dn, bi, be) (pos, (_, mf)) = case mf of
+              Just f | fDst f == pos ->
                     let sl' = setSlot pos Nothing sl
                      in case fKind f of
                           Resp -> (sl', q, rec dn f, bi, be)
@@ -99,13 +94,9 @@ step pol lam warm st0 =
                                 q' = M.adjust (|> resp) pos q
                              in (sl', q', dn, bi, be)
               _ -> acc
-          rec dn f
-            | fBorn f >= warm = (fDst f, cyc - fBorn f) : dn
-            | otherwise = dn
-          setSlot p v sl =
-            [ if i == p then (sid, v) else (sid, c)
-              | (i, (sid, c)) <- zip [0 ..] sl
-            ]
+          rec dn f | fBorn f >= warm = (fDst f, cyc - fBorn f) : dn
+                   | otherwise = dn
+          setSlot p v sl = [if i == p then (sid, v) else (sid, c) | (i, (sid, c)) <- zip [0 ..] sl]
 
       -- 3. injection
       (slots2, q2) = foldl' inject (slots1, q1) [0 .. nNodes - 1]
@@ -113,16 +104,11 @@ step pol lam warm st0 =
           inject (sl, q) pos =
             let (sid, mf) = sl !! pos
                 ok = mf == Nothing && (pol == OPP || sid == pos)
-             in if not ok
-                  then (sl, q)
-                  else case Sq.viewl (M.findWithDefault Sq.empty pos q) of
-                    EmptyL -> (sl, q)
-                    f :< fs ->
-                      ( [ if i == pos then (s, Just f) else (s, c)
-                          | (i, (s, c)) <- zip [0 ..] sl
-                        ],
-                        M.insert pos fs q
-                      )
+             in if not ok then
+                 (sl, q)
+                else case Sq.viewl (M.findWithDefault Sq.empty pos q) of
+                  EmptyL -> (sl, q)
+                  f :< fs -> ( [ if i == pos then (s, Just f) else (s, c) | (i, (s, c)) <- zip [0 ..] sl ], M.insert pos fs q )
 
       -- Maybe Flit lacks Eq via Flit; compare emptiness manually:
       -- (handled below by pattern instead)
@@ -133,57 +119,25 @@ step pol lam warm st0 =
         where
           gen (q, r, dn, is) node =
             let (p, r1) = nextR r
-             in if p >= lam
-                  then (q, r1, dn, is)
-                  else
+             in if p >= lam then
+                    (q, r1, dn, is)
+                else
                     let (c, r2) = nextR r1
                         dst = if c < 0.5 then uartNode else nicNode
                         is' = if cyc >= warm then is + 1 else is
-                     in if dst == node
-                          -- local access: bypass ring, fixed 2-cycle latency
-                          then
-                            ( q,
-                              r2,
-                              if cyc >= warm then (node, 2) : dn else dn,
-                              is'
-                            )
-                          else
-                            ( M.adjust (|> Flit Req node dst cyc) node q,
-                              r2,
-                              dn,
-                              is'
-                            )
-   in st0
-        { stCycle = cyc + 1,
-          stSlots = slots2,
-          stQueues = q3,
-          stDone = done2,
-          stBulkIn = bin1,
-          stBulkEnd = bend1,
-          stRng = rng',
-          stIssued = iss'
-        }
+                    -- local access: bypass ring, fixed 2-cycle latency
+                     in if dst == node then
+                          ( q, r2, if cyc >= warm then (node, 2) : dn else dn, is' )
+                      else
+                          ( M.adjust (|> Flit Req node dst cyc) node q, r2, dn, is' )
+   in st0 { stCycle = cyc + 1,   stSlots = slots2,   stQueues = q3,   stDone = done2,   stBulkIn = bin1,   stBulkEnd = bend1,   stRng = rng',   stIssued = iss' }
 
 -- Eq needed for `mf == Nothing` above
 instance Eq Flit where
-  a == b =
-    fBorn a == fBorn b
-      && fSrc a == fSrc b
-      && fDst a == fDst b
-      && fKind a == fKind b
+  a == b = fBorn a == fBorn b   && fSrc a == fSrc b   && fDst a == fDst b   && fKind a == fKind b
 
 initSt :: Word64 -> St
-initSt seed =
-  St
-    { stCycle = 0,
-      stSlots = [(i, Nothing) | i <- [0 .. nNodes - 1]],
-      stQueues = M.fromList [(i, Sq.empty) | i <- [0 .. nNodes - 1]],
-      stDone = [],
-      stBulkIn = 0,
-      stBulkEnd = Nothing,
-      stRng = seed,
-      stIssued = 0
-    }
+initSt seed = St   { stCycle = 0,     stSlots = [(i, Nothing) | i <- [0 .. nNodes - 1]],     stQueues = M.fromList [(i, Sq.empty) | i <- [0 .. nNodes - 1]],     stDone = [],     stBulkIn = 0,     stBulkEnd = Nothing,     stRng = seed,     stIssued = 0   }
 
 runSim :: Policy -> Double -> Int -> Int -> St
 runSim pol lam warm total = go (initSt 42) 0

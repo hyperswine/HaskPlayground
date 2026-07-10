@@ -1,0 +1,21 @@
+# The pipeline demo, now written in actual Sol syntax.
+# Row-poly getter, linear handle, 3-deep fusion chain, branch-local record.
+
+getx r = r.x.
+
+MyStuff : Sig.
+MyStuff = {x : Int, y : Int}.
+
+main =
+  rec1 = {x = 10, y = 20};
+  h = newHandle (getx rec1);
+  v1 = fromTo 1 rec1.y;
+  v2 = mapV (fn a -> a * 2) v1;
+  v3 = mapV (fn b -> b + 1) v2;
+  v4 = mapV (fn c -> c * 3) v3;
+  s = sumV v4;
+  w = {x = s + 1, y = 0};
+  t = case s <= 100 of
+    True -> getx rec1
+  | False -> getx rec1 + w.x;
+  t + closeHandle h.
