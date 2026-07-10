@@ -75,6 +75,7 @@ library
       SMT
       SolcMain
       SolParser
+      Solx
       SPSCArc
       StreamFusion
       T2

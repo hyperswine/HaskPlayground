@@ -9,9 +9,9 @@ mymax a b = case a <= b of True -> b | False -> a.
 double x = x * 2.
 
 # typical guarded clause, with a catch-all clause
-#describe n | n == 0 = "zero".
-#describe n | n < 0 = "neg".
-#describe _ = "pos".
+describe n | n == 0 = "zero".
+describe n | n < 0 = "neg".
+describe _ = "pos".
 
 safe_head xs = case xs of
     x :: _ -> Ok x
@@ -29,6 +29,4 @@ main =
   r = safe_head [1, 2] |>? fn x -> Ok (x * 100);    # monadic pipeline
   msg = "a={a} b={b} c={c} y'={box'.inner.y} idx={idx} sum={h1 + h2} v={v} rest={rest} lit=\{esc}";
 
-  # print msg >> print (describe (0 - 5)) >> print (case r of Ok k -> "ok {k}" | Err e -> e) >> print :done.
-
-  print :done.
+  print msg >> print (describe (0 - 5)) >> print (case r of Ok k -> "ok {k}" | Err e -> e) >> print :done.
