@@ -2,6 +2,7 @@
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Eta reduce" #-}
+{-# HLINT ignore "Use tuple-section" #-}
 
 -- LogFS: the persistence layer under UrlFs.
 --
@@ -35,11 +36,11 @@
 
 module URLFS where
 
-import Data.Bits (shiftL, xor)
+import Data.Bits (xor)
 import Data.Char (ord)
-import Data.List (foldl', intercalate, isPrefixOf)
+import Data.List (foldl', intercalate)
 import qualified Data.Map.Strict as M
-import Data.Maybe (fromMaybe, mapMaybe)
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import Data.Word (Word64)
 

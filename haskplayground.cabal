@@ -57,6 +57,7 @@ library
       Lower
       MailboxResponse
       MemoryModel
+      MVULog
       MVUMod
       MVUModLiveView
       MVUPipelineHardwareSim
