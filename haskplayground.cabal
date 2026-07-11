@@ -86,6 +86,7 @@ library
       TerraII.Types
       TerraII.World
       TrafficLight
+      URLFS
       VListDual
       VListFP
       VM

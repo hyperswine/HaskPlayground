@@ -663,6 +663,7 @@ dExpr = \case
 
   -- pipelines / operators
   SBin "|>" a f -> CApp <$> dExpr f <*> dExpr a
+  -- >> handles the void here
   SBin ">>" a b -> do
     a' <- dExpr a
     b' <- dExpr b
@@ -751,6 +752,7 @@ updateRecord scrut assigns = do
         (CErr "record update: no shape matched")
         arms
   where
+    -- records are just product types, need to be built into a tuple like thing with CMk. Also everything needs a typeid
     rebuild (fs, tid) = do
       let sorted = sort fs
       fields <- mapM (fieldValue tid) (zip [0 ..] sorted)
