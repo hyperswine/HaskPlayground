@@ -87,6 +87,7 @@ library
       TerraII.Types
       TerraII.World
       TrafficLight
+      TUIMVUProofOfConcept
       URLFS
       VListDual
       VListFP

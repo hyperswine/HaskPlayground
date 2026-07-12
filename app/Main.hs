@@ -16,6 +16,7 @@ import qualified SPSCArc
 import qualified SolcMain
 import qualified Solx
 import qualified MVULog
+import qualified TUIMVUProofOfConcept
 import System.Environment (getArgs)
 
 main :: IO ()
@@ -34,6 +35,7 @@ main = do
     ["solc", args] -> SolcMain.main args
     ["solx", args] -> Solx.main [args]
     ["mvulog"] -> MVULog.main
+    ["mvupoc"] -> TUIMVUProofOfConcept.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
