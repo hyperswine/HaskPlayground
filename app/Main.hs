@@ -6,21 +6,21 @@
 module Main where
 
 import qualified ARC
+import qualified AsmPlan
 import qualified DumpAsm
 import qualified HaskSim1
+import qualified MVULog
 import qualified MVUModLiveView
 import qualified MailboxResponse
 import qualified MemoryModel
+import qualified MiniBrowser
+import qualified PortSim
 import qualified QuantUI
 import qualified SPSCArc
 import qualified SolcMain
 import qualified Solx
-import qualified MVULog
-import qualified TUIMVUProofOfConcept
-import qualified AsmPlan
-import qualified MiniBrowser
-import qualified PortSim
 import System.Environment (getArgs)
+import qualified TUIMVUProofOfConcept
 
 main :: IO ()
 main = do
@@ -41,7 +41,7 @@ main = do
     ["mvupoc"] -> TUIMVUProofOfConcept.main
     ["asmplan"] -> AsmPlan.main
     ["minibrowser"] -> MiniBrowser.main
-    ["portsim"] -> PortSim.main
+    ["portsim", args] -> PortSim.main [args]
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
