@@ -44,6 +44,8 @@ main = do
     ["asmplan"] -> AsmPlan.main
     ["minibrowser"] -> MiniBrowser.main
     ["portsim", args] -> PortSim.main [args]
+    ["qosmodel"] -> QosModel.main
+    ["wasmmodel"] -> WasmModel.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
