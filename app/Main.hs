@@ -17,6 +17,9 @@ import qualified SolcMain
 import qualified Solx
 import qualified MVULog
 import qualified TUIMVUProofOfConcept
+import qualified AsmPlan
+import qualified MiniBrowser
+import qualified PortSim
 import System.Environment (getArgs)
 
 main :: IO ()
@@ -36,6 +39,9 @@ main = do
     ["solx", args] -> Solx.main [args]
     ["mvulog"] -> MVULog.main
     ["mvupoc"] -> TUIMVUProofOfConcept.main
+    ["asmplan"] -> AsmPlan.main
+    ["minibrowser"] -> MiniBrowser.main
+    ["portsim"] -> PortSim.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main

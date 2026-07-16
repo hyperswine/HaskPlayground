@@ -1,4 +1,8 @@
-# Sol syntax PoC sample -- exercises the sugar from the design discussion.
+# Sol
+# Basically the same as FPRISC but has a VM (almost like its own system with a HAL forwarding stuff to the host via the haskell implementation and std libs) instead of a compiler.
+# Sol = FPRISC + VM + Automatic STM and IO + extra syntax sugar for paths
+# Can also do > like > print "hello" anywhere for a sequential effect
+# Paths are logical URLs that map to a file on the host. This allows STM to be done quite easily per script session
 
 MyType = Type (MyInt Int | MyString String Int). # tagged union, two variants
 Length = Nat.                                    # alias: parsed, skipped
@@ -44,6 +48,8 @@ chained x =
 
 b = "mystring".
 mystring = "g2 = {g2 (MyString b (String.len b))}, third = {[10, 20, 30] ! 3}".
+
+> print mystring.
 
 check = case myfunc {a = "x", c = 9} "x" of True -> "matched" | False -> "no".
 
