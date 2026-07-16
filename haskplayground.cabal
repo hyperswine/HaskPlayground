@@ -71,6 +71,7 @@ library
       PortSim
       Processor
       Proto
+      QosModel
       QuantUI
       Rc
       RealWorld
@@ -95,6 +96,7 @@ library
       VListDual
       VListFP
       VM
+      WasmModel
       WindowSystem
   other-modules:
       Paths_haskplayground

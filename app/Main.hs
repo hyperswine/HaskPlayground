@@ -19,6 +19,8 @@ import qualified QuantUI
 import qualified SPSCArc
 import qualified SolcMain
 import qualified Solx
+import qualified QosModel
+import qualified WasmModel
 import System.Environment (getArgs)
 import qualified TUIMVUProofOfConcept
 
