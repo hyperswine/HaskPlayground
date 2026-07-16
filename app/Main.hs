@@ -20,7 +20,7 @@ import qualified SPSCArc
 import qualified SolcMain
 import qualified Solx
 import qualified QosModel
-import qualified WasmModel
+import qualified WasmMain
 import System.Environment (getArgs)
 import qualified TUIMVUProofOfConcept
 
@@ -45,7 +45,7 @@ main = do
     ["minibrowser"] -> MiniBrowser.main
     ["portsim", args] -> PortSim.main [args]
     ["qosmodel"] -> QosModel.main
-    ["wasmmodel"] -> WasmModel.main
+    ["wasm"] -> WasmMain.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main

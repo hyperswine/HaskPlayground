@@ -9,10 +9,12 @@
 --     where a blocked actor suspends and OTHER actors keep running
 --   * a round-robin actor scheduler (stand-in for the FPR OS scheduler)
 --
--- The VM is deliberately shaped like a real minimal wasm interpreter:
--- explicit value stack, structured Block/Loop/If with de-Bruijn-style Br
--- depths, and suspension implemented by simply returning the VM state
--- (no host stack capture needed -- the wasm state IS the continuation).
+-- EXTENDED (vs original) with the minimal instruction additions needed to
+-- run a real hand-written WAT calculator:
+--   DivS, RemS   -- i32.div_s / i32.rem_s  (decimal formatting needs these)
+--   LtS          -- i32.lt_s               (digit range checks)
+--   Load8U       -- i32.load8_u            (VM can now read its own memory)
+--   Store8       -- i32.store8             (and write it)
 -- ============================================================================
 
 module WasmModel where
@@ -36,7 +38,12 @@ data Instr
   | Add
   | Sub
   | Mul
+  | DivS -- NEW: i32.div_s (traps on /0, like wasm)
+  | RemS -- NEW: i32.rem_s
+  | LtS -- NEW: i32.lt_s  (signed, pushes 0/1)
   | Eqz
+  | Load8U -- NEW: pop addr, push mem[addr]
+  | Store8 -- NEW: pop val, pop addr, mem[addr] := val & 0xff
   | Blk [Instr] -- block: Br n targets exit
   | Lp [Instr] -- loop:  Br n targets re-entry (back-edge)
   | Ift [Instr] [Instr] -- if/else
@@ -100,7 +107,22 @@ exec ins vm = case ins of
   Add -> bin (+) vm
   Sub -> bin (-) vm
   Mul -> bin (*) vm
+  DivS -> case vmStk vm of
+    (0 : _ : _) -> Trapped "integer divide by zero"
+    (b : a : vs) -> Running vm {vmStk = (a `quot` b) : vs} -- wasm div_s truncates toward 0
+    _ -> Trapped "stack underflow"
+  RemS -> case vmStk vm of
+    (0 : _ : _) -> Trapped "integer divide by zero"
+    (b : a : vs) -> Running vm {vmStk = (a `rem` b) : vs}
+    _ -> Trapped "stack underflow"
+  LtS -> bin (\a b -> if a < b then 1 else 0) vm
   Eqz -> pop1 vm $ \v m -> push (if v == 0 then 1 else 0) m
+  Load8U -> pop1 vm $ \p m ->
+    push (IM.findWithDefault 0 p (vmMem m)) m
+  Store8 -> case vmStk vm of
+    (v : p : vs) ->
+      Running vm {vmStk = vs, vmMem = IM.insert p (v `mod` 256) (vmMem vm)}
+    _ -> Trapped "stack underflow"
   Drp -> pop1 vm $ \_ m -> Running m
   Blk body ->
     Running
@@ -181,15 +203,12 @@ data Rights = R | W deriving (Show, Eq, Ord)
 data Resource = FileCap Rights FilePath
   deriving (Show, Eq, Ord)
 
--- the "System actor": consults the grant cache; a miss means we must ask the
--- user, which in this model suspends the requesting actor until resolved.
 data World = World
   { wGrants :: M.Map Resource Bool, -- cached user decisions
     wFiles :: M.Map FilePath String, -- the simulated FS
     wPolicy :: Resource -> Bool -- stand-in for the human
   }
 
--- per-actor fd table (fd 1 preopened as stdout, like a WASI preopen)
 data FdEntry = FdStdout | FdFile FilePath Int -- path + read offset
 
 data Actor = Actor
@@ -204,8 +223,6 @@ data Status
   | WaitPerm Resource HostFn [Int] VM -- suspended awaiting the user
   | Dead String -- finished or trapped
 
--- Try to perform a host call.  Left res  => capability miss, must prompt.
---                              Right ... => done, values to push.
 doHost ::
   World ->
   Actor ->
@@ -218,7 +235,7 @@ doHost w a fn args = case (fn, args) of
       Just FdStdout ->
         let s = memReadStr (curVM a) p n
          in Right (w, a, [n], ["[" ++ aName a ++ " stdout] " ++ show s])
-      Just (FdFile path _) -> needs (FileCap W path) -- writes gated too
+      Just (FdFile path _) -> needs (FileCap W path)
       Nothing -> Right (w, a, [-1], [])
   (FdRead, [fd, p, n]) ->
     case IM.lookup fd (aFds a) of
@@ -292,8 +309,6 @@ withVM a f = case aStatus a of
 
 -- ----------------------------------------------------------------------------
 -- Scheduler: round-robin, fixed fuel slice per turn.
--- A permission miss parks the actor; prompts resolve at end of round,
--- so you can SEE the other actor keep running while one is blocked.
 -- ----------------------------------------------------------------------------
 
 fuelSlice :: Int
@@ -355,7 +370,6 @@ runActorSlice w a = case aStatus a of
                   pure (wd, act {aStatus = WaitPerm res fn args vmCharged})
       _ -> pure (wd, act)
 
--- end-of-round: the "System actor" resolves one pending user prompt
 resolveOnePrompt :: World -> [Actor] -> IO (World, [Actor])
 resolveOnePrompt w actors = go actors []
   where
@@ -371,20 +385,18 @@ resolveOnePrompt w actors = go actors []
             ++ " -> user says "
             ++ (if verdict then "ALLOW" else "DENY")
         let w' = w {wGrants = M.insert res verdict (wGrants w)}
-        -- retry the host call now that a decision is cached
         a' <- case doHost w' a {aStatus = Runnable vm} fn args of
           Right (_, actR, results, logs) -> do
             mapM_ putStrLn logs
             pure $ withVM actR (\m -> m {vmStk = reverse results ++ vmStk m})
-          Left _ -> pure a -- unreachable: grant is now cached
+          Left _ -> pure a
         pure (w', reverse acc ++ (a' : as))
       _ -> go as (a : acc)
 
 -- ----------------------------------------------------------------------------
--- Two demo "apps" (hand-assembled wasm-ish modules)
+-- Demo "app" kept from the original: ticker (pure compute, fuel-yield demo)
 -- ----------------------------------------------------------------------------
 
--- data-segment layout helpers
 seg :: [(Int, String)] -> IM.IntMap Int
 seg xs = IM.fromList [(p + i, ord c) | (p, s) <- xs, (i, c) <- zip [0 ..] s]
 
@@ -406,97 +418,32 @@ mkActor name body dataSegs =
       aNextFd = 3
     }
 
--- App 1: "ticker" -- 4 iterations of (print "tick" then burn fuel in an
--- inner loop).  Forces multiple fuel-yields per tick: pure compute,
--- zero capabilities needed.
 ticker :: Actor
 ticker = mkActor "ticker" body [(0, "tick\n")]
   where
     body =
       [ Const 0,
-        LSet 0, -- i = 0
+        LSet 0,
         Blk
           [ Lp
               [ LGet 0,
                 Const 4,
                 Sub,
                 Eqz,
-                BrIf 1, -- if i==4 exit
+                BrIf 1,
                 Const 1,
                 Const 0,
                 Const 5,
                 Host FdWrite,
-                Drp, -- write "tick\n"
+                Drp,
                 Const 25,
-                LSet 1, -- j = 25
-                Lp [LGet 1, Const 1, Sub, LTee 1, BrIf 0], -- busy loop
+                LSet 1,
+                Lp [LGet 1, Const 1, Sub, LTee 1, BrIf 0],
                 LGet 0,
                 Const 1,
                 Add,
-                LSet 0, -- i++
-                Br 0 -- back-edge
+                LSet 0,
+                Br 0
               ]
           ]
       ]
-
--- App 2: "filer" -- opens a file it has no capability for (prompts the user,
--- ALLOW), reads + prints it, then tries a second path (prompts, DENY) and
--- handles the -1 gracefully.
-filer :: Actor
-filer =
-  mkActor
-    "filer"
-    body
-    [ (100, "/home/jasen/notes.txt"),
-      (140, "/etc/shadow"),
-      (300, "denied!\n")
-    ]
-  where
-    body =
-      [ Const 100,
-        Const 21,
-        Const 0,
-        Host PathOpen, -- open notes (R)
-        LSet 0, -- fd
-        LGet 0,
-        Const 200,
-        Const 64,
-        Host FdRead, -- read into 200
-        LSet 1, -- n
-        Const 1,
-        Const 200,
-        LGet 1,
-        Host FdWrite,
-        Drp, -- echo to stdout
-        Const 140,
-        Const 11,
-        Const 0,
-        Host PathOpen, -- open shadow (R)
-        Const (-1),
-        Sub,
-        Eqz, -- == -1 ?
-        Ift
-          [Const 1, Const 300, Const 8, Host FdWrite, Drp]
-          []
-      ]
-
--- ----------------------------------------------------------------------------
-
-main :: IO ()
-main = do
-  let world =
-        World
-          { wGrants = M.empty,
-            wFiles =
-              M.fromList
-                [ ("/home/jasen/notes.txt", "remember: fuel checks at loop headers\n"),
-                  ("/etc/shadow", "root:$6$nope")
-                ],
-            wPolicy = \case
-              FileCap R "/home/jasen/notes.txt" -> True
-              _ -> False
-          }
-  putStrLn "=== FPR OS wasm-VM model: fuel yields + on-demand capabilities ==="
-  -- filer first in the run queue so its permission-block visibly lets
-  -- ticker keep running in the same round
-  runRounds world [filer, ticker]

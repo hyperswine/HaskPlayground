@@ -96,7 +96,9 @@ library
       VListDual
       VListFP
       VM
+      WasmMain
       WasmModel
+      WatParser
       WindowSystem
   other-modules:
       Paths_haskplayground
