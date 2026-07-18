@@ -12,262 +12,193 @@ module top
     , output wire  uart_tx_pin
     , output wire [5:0] led
     );
-  wire [1029:0] result_0;
-  wire [62:0] result_1;
-  wire [62:0] c$case_alt;
-  wire [3:0] result_2;
-  wire [3:0] c$case_alt_0;
-  wire [3:0] c$case_alt_1;
-  wire [62:0] c$case_alt_2;
-  wire signed [31:0] c$app_arg;
-  wire signed [31:0] c$case_alt_3;
-  wire signed [31:0] c$case_alt_4;
-  wire signed [63:0] c$app_arg_0;
-  wire [3:0] c$app_arg_1;
-  wire [3:0] c$case_alt_5;
-  wire [3:0] c$case_alt_6;
-  wire [3:0] c$case_alt_7;
-  wire [3:0] c$case_alt_8;
-  wire [3:0] c$case_alt_9;
-  wire [3:0] c$case_alt_10;
-  wire [3:0] c$case_alt_11;
+  wire [998:0] result_0;
+  wire [31:0] c$app_arg;
+  wire [31:0] c$case_alt;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [23:0] \tx' ;
+  wire [135:0] c$app_arg_0;
+  wire [135:0] c$case_alt_0;
+  wire [127:0] c$app_arg_1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [135:0] fifo3;
+  reg  c$case_alt_1;
+  wire [8:0] c$case_alt_2;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [15:0] runTimeout1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [7:0] outPendDat1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire  outPending1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire  cpuRst1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [31:0] progWordAcc1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [11:0] progByteIdx1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [1:0] eta1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [79:0] top2;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [7:0] \c$ledLatch'_case_alt ;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [8:0] mc1;
+  reg [798:0] result_1;
+  wire [798:0] c$case_alt_3;
+  wire [798:0] c$case_alt_4;
+  wire [79:0] c$app_arg_2;
+  wire [79:0] c$case_alt_5;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [79:0] wild7;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [215:0] c$ds28_case_alt;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [215:0] c$ds28_case_alt_0;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [215:0] c$ds28_case_alt_1;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [215:0] c$ds28_case_alt_2;
+  wire [798:0] result_2;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [42:0] pgWr;
+  wire [135:0] c$app_arg_3;
   wire  c$case_scrut;
-  wire [3:0] c$case_alt_12;
-  wire [62:0] c$case_alt_13;
-  wire [62:0] c$case_alt_14;
-  wire signed [31:0] c$app_arg_2;
-  wire [62:0] c$case_alt_15;
-  wire signed [31:0] result_3;
-  wire [31:0] c$app_arg_3;
-  wire [62:0] c$case_alt_16;
-  wire [4:0] rd;
-  wire [62:0] c$case_alt_17;
-  wire [3:0] c$app_arg_4;
-  wire [3:0] c$case_alt_18;
+  wire [31:0] c$app_arg_4;
+  // src/CPURiscVTop.hs:254:1-9
+  wire  c$pgWr_case_scrut;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [31:0] \wordAcc' ;
+  // src/CPURiscVTop.hs:254:1-9
+  wire signed [63:0] ds28;
+  // src/CPURiscVTop.hs:254:1-9
+  wire signed [63:0] c$ds28_app_arg;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [11:0] bytePos;
+  wire [79:0] c$app_arg_5;
+  wire [79:0] c$case_alt_6;
+  wire  c$case_scrut_0;
+  wire [79:0] c$case_alt_7;
+  wire [135:0] c$case_alt_8;
+  wire [127:0] c$app_arg_6;
+  reg [7:0] c$fifoPushOut_app_arg;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [8:0] mc1_0;
+  // src/CPURiscVTop.hs:254:1-9
+  wire [708:0] c$ds10_case_alt;
+  wire [708:0] c$case_alt_9;
+  wire [708:0] c$case_alt_10;
+  wire [8:0] c$app_arg_7;
+  wire [1:0] c$app_arg_8;
+  reg [1:0] c$case_alt_11;
+  reg [1:0] c$case_alt_12;
+  wire [37:0] c$app_arg_9;
+  wire [31:0] nextPC;
+  reg  c$case_alt_13;
+  wire [104:0] c$case_alt_14;
+  wire [108:0] c$app_arg_10;
+  wire [31:0] c$app_arg_11;
+  wire signed [63:0] c$case_alt_15;
+  wire [31:0] c$app_arg_12;
+  wire [31:0] c$case_alt_16;
+  wire [31:0] c$app_arg_13;
+  wire [31:0] c$case_alt_17;
+  wire [62:0] result_3;
+  wire [62:0] c$case_alt_18;
+  wire [3:0] result_4;
   wire [3:0] c$case_alt_19;
   wire [3:0] c$case_alt_20;
-  wire  c$case_scrut_0;
-  wire [3:0] c$case_alt_21;
-  wire signed [31:0] c$app_arg_5;
-  wire [62:0] c$case_alt_22;
-  wire [3:0] c$app_arg_6;
-  wire [3:0] c$case_alt_23;
-  wire signed [31:0] result_4;
-  wire [31:0] c$app_arg_7;
+  wire [62:0] c$case_alt_21;
+  wire signed [31:0] c$app_arg_14;
+  wire signed [31:0] c$case_alt_22;
+  wire signed [31:0] c$case_alt_23;
+  wire signed [63:0] c$app_arg_15;
+  wire [3:0] c$app_arg_16;
+  wire [3:0] c$case_alt_24;
+  wire [3:0] c$case_alt_25;
+  wire [3:0] c$case_alt_26;
+  wire [3:0] c$case_alt_27;
+  wire [3:0] c$case_alt_28;
+  wire [3:0] c$case_alt_29;
+  wire [3:0] c$case_alt_30;
+  wire  c$case_scrut_1;
+  wire [3:0] c$case_alt_31;
+  wire [62:0] c$case_alt_32;
+  wire [62:0] c$case_alt_33;
+  wire signed [31:0] c$app_arg_17;
+  wire [62:0] c$case_alt_34;
+  wire signed [31:0] result_5;
+  wire [31:0] c$app_arg_18;
+  wire [62:0] c$case_alt_35;
+  wire [4:0] rd;
+  wire [62:0] c$case_alt_36;
+  wire [3:0] c$app_arg_19;
+  wire [3:0] c$case_alt_37;
+  wire [3:0] c$case_alt_38;
+  wire [3:0] c$case_alt_39;
+  wire  c$case_scrut_2;
+  wire [3:0] c$case_alt_40;
+  wire signed [31:0] c$app_arg_20;
+  wire [62:0] c$case_alt_41;
+  wire [3:0] c$app_arg_21;
+  wire [3:0] c$case_alt_42;
+  wire signed [31:0] result_6;
+  wire [31:0] c$app_arg_22;
   wire [4:0] rs1;
   wire [4:0] rs2;
   wire [6:0] op;
-  wire [2:0] c$app_arg_8;
-  wire [2:0] c$case_alt_24;
-  wire  c$case_scrut_1;
-  wire [2:0] c$case_alt_25;
-  wire  c$case_scrut_2;
-  wire [2:0] c$case_alt_26;
+  wire [2:0] c$app_arg_23;
+  wire [2:0] c$case_alt_43;
   wire  c$case_scrut_3;
-  wire [2:0] c$case_alt_27;
+  wire [2:0] c$case_alt_44;
   wire  c$case_scrut_4;
-  wire [2:0] c$case_alt_28;
+  wire [2:0] c$case_alt_45;
   wire  c$case_scrut_5;
+  wire [2:0] c$case_alt_46;
   wire  c$case_scrut_6;
-  wire signed [31:0] result_5;
-  wire [31:0] c$app_arg_9;
-  wire [3:0] result_6;
-  wire [3:0] c$case_alt_29;
-  wire [3:0] c$case_alt_30;
-  wire [3:0] c$case_alt_31;
-  wire [3:0] c$case_alt_32;
-  wire [3:0] c$case_alt_33;
-  wire [3:0] c$case_alt_34;
-  wire [3:0] c$case_alt_35;
-  wire [3:0] c$case_alt_36;
+  wire [2:0] c$case_alt_47;
+  wire  c$case_scrut_7;
+  wire  c$case_scrut_8;
+  wire signed [31:0] result_7;
+  wire [31:0] c$app_arg_24;
+  wire [3:0] result_8;
+  wire [3:0] c$case_alt_48;
+  wire [3:0] c$case_alt_49;
+  wire [3:0] c$case_alt_50;
+  wire [3:0] c$case_alt_51;
+  wire [3:0] c$case_alt_52;
+  wire [3:0] c$case_alt_53;
+  wire [3:0] c$case_alt_54;
+  wire [3:0] c$case_alt_55;
   wire [2:0] f3;
   wire [6:0] f7;
   wire [31:0] c$f7_app_arg;
-  wire [31:0] c$case_alt_37;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [23:0] \tx' ;
-  wire [135:0] c$app_arg_10;
-  wire [135:0] c$case_alt_38;
-  wire [127:0] c$app_arg_11;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [135:0] fifo3;
-  reg  c$case_alt_39;
-  wire [8:0] c$case_alt_40;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [15:0] runTimeout1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [7:0] outPendDat1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire  outPending1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire  cpuRst1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [31:0] progWordAcc1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [11:0] progByteIdx1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [1:0] eta1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [79:0] top2;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [7:0] \c$ledLatch'_case_alt ;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [8:0] mc1;
-  reg [829:0] result_7;
-  wire [829:0] c$case_alt_41;
-  wire [829:0] c$case_alt_42;
-  wire [79:0] c$app_arg_12;
-  wire [79:0] c$case_alt_43;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [79:0] wild7;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [215:0] c$ds28_case_alt;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [215:0] c$ds28_case_alt_0;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [215:0] c$ds28_case_alt_1;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [215:0] c$ds28_case_alt_2;
-  wire [829:0] result_8;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [42:0] pgWr;
-  wire [135:0] c$app_arg_13;
-  wire  c$case_scrut_7;
-  wire [31:0] c$app_arg_14;
-  // src/CPURiscVTop.hs:241:1-9
-  wire  c$pgWr_case_scrut;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [31:0] \wordAcc' ;
-  // src/CPURiscVTop.hs:241:1-9
-  wire signed [63:0] ds28;
-  // src/CPURiscVTop.hs:241:1-9
-  wire signed [63:0] c$ds28_app_arg;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [11:0] bytePos;
-  wire [79:0] c$app_arg_15;
-  wire [79:0] c$case_alt_44;
-  wire  c$case_scrut_8;
-  wire [79:0] c$case_alt_45;
-  wire [135:0] c$case_alt_46;
-  wire [127:0] c$app_arg_16;
-  reg [7:0] c$fifoPushOut_app_arg;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [8:0] mc1_0;
-  // src/CPURiscVTop.hs:241:1-9
-  wire [739:0] c$ds10_case_alt;
-  wire [739:0] c$case_alt_47;
-  wire [739:0] c$case_alt_48;
-  wire [8:0] c$app_arg_17;
-  wire [1:0] c$app_arg_18;
-  reg [1:0] c$case_alt_49;
-  reg [1:0] c$case_alt_50;
-  wire [37:0] c$app_arg_19;
-  wire [31:0] nextPC;
-  wire [31:0] c$app_arg_20;
-  reg  c$case_alt_51;
-  wire [104:0] c$case_alt_52;
-  wire [108:0] c$app_arg_21;
-  wire [224:0] c$app_arg_22;
-  wire signed [63:0] c$case_alt_53;
-  wire [31:0] c$app_arg_23;
-  wire [31:0] c$case_alt_54;
-  wire [31:0] c$app_arg_24;
-  wire [31:0] c$case_alt_55;
-  wire [62:0] result_9;
-  wire [62:0] c$case_alt_56;
-  wire [3:0] result_10;
-  wire [3:0] c$case_alt_57;
-  wire [3:0] c$case_alt_58;
-  wire [62:0] c$case_alt_59;
-  wire signed [31:0] c$app_arg_25;
-  wire signed [31:0] c$case_alt_60;
-  wire signed [31:0] c$case_alt_61;
-  wire signed [63:0] c$app_arg_26;
-  wire [3:0] c$app_arg_27;
-  wire [3:0] c$case_alt_62;
-  wire [3:0] c$case_alt_63;
-  wire [3:0] c$case_alt_64;
-  wire [3:0] c$case_alt_65;
-  wire [3:0] c$case_alt_66;
-  wire [3:0] c$case_alt_67;
-  wire [3:0] c$case_alt_68;
-  wire  c$case_scrut_9;
-  wire [3:0] c$case_alt_69;
-  wire [62:0] c$case_alt_70;
-  wire [62:0] c$case_alt_71;
-  wire signed [31:0] c$app_arg_28;
-  wire [62:0] c$case_alt_72;
-  wire signed [31:0] result_11;
-  wire [31:0] c$app_arg_29;
-  wire [62:0] c$case_alt_73;
-  wire [4:0] rd_0;
-  wire [62:0] c$case_alt_74;
-  wire [3:0] c$app_arg_30;
-  wire [3:0] c$case_alt_75;
-  wire [3:0] c$case_alt_76;
-  wire [3:0] c$case_alt_77;
-  wire  c$case_scrut_10;
-  wire [3:0] c$case_alt_78;
-  wire signed [31:0] c$app_arg_31;
-  wire [62:0] c$case_alt_79;
-  wire [3:0] c$app_arg_32;
-  wire [3:0] c$case_alt_80;
-  wire signed [31:0] result_12;
-  wire [31:0] c$app_arg_33;
-  wire [4:0] rs1_0;
-  wire [4:0] rs2_0;
-  wire [6:0] op_0;
-  wire [2:0] c$app_arg_34;
-  wire [2:0] c$case_alt_81;
-  wire  c$case_scrut_11;
-  wire [2:0] c$case_alt_82;
-  wire  c$case_scrut_12;
-  wire [2:0] c$case_alt_83;
-  wire  c$case_scrut_13;
-  wire [2:0] c$case_alt_84;
-  wire  c$case_scrut_14;
-  wire [2:0] c$case_alt_85;
-  wire  c$case_scrut_15;
-  wire  c$case_scrut_16;
-  wire signed [31:0] result_13;
-  wire [31:0] c$app_arg_35;
-  wire [3:0] result_14;
-  wire [3:0] c$case_alt_86;
-  wire [3:0] c$case_alt_87;
-  wire [3:0] c$case_alt_88;
-  wire [3:0] c$case_alt_89;
-  wire [3:0] c$case_alt_90;
-  wire [3:0] c$case_alt_91;
-  wire [3:0] c$case_alt_92;
-  wire [3:0] c$case_alt_93;
-  wire [2:0] f3_0;
-  wire [6:0] f7_0;
-  wire [31:0] c$f7_app_arg_0;
-  wire  c$app_arg_36;
-  wire [31:0] c$app_arg_37;
-  wire  c$app_arg_38;
-  wire [31:0] c$nextPC_case_alt;
+  wire  c$app_arg_25;
+  wire  c$app_arg_26;
   wire  mispredicted;
-  wire [31:0] ifPredTarget;
-  wire [31:0] actualNextPC;
-  reg  c$mispredicted_case_alt;
-  reg [31:0] c$actualNextPC_case_alt;
-  reg [31:0] c$actualNextPC_case_alt_0;
-  reg  result_15;
-  wire [31:0] c$app_arg_39;
-  wire [31:0] c$app_arg_40;
-  wire signed [31:0] c$app_arg_41;
-  wire signed [31:0] c$app_arg_42;
-  reg [31:0] result_16;
-  wire [31:0] c$case_alt_94;
-  wire [31:0] c$case_alt_95;
-  wire signed [63:0] result_17;
+  wire [31:0] c$nextPC_case_alt;
+  wire [31:0] c$nextPC_case_alt_0;
+  wire [31:0] c$nextPC_case_alt_1;
+  reg  result_9;
+  wire signed [63:0] \b# ;
+  wire signed [63:0] \a# ;
+  wire  c$mispredicted_app_arg;
+  reg  result_10;
+  wire [31:0] c$app_arg_27;
+  wire [31:0] c$app_arg_28;
+  wire signed [31:0] c$app_arg_29;
+  wire signed [31:0] c$app_arg_30;
+  reg  c$isBranch_case_alt;
+  reg [31:0] result_11;
+  wire [31:0] c$case_alt_56;
+  wire [31:0] c$case_alt_57;
+  wire signed [63:0] result_12;
   wire signed [63:0] ds;
   wire signed [63:0] c$ds_app_arg;
-  wire [31:0] c$app_arg_43;
-  wire [31:0] c$app_arg_44;
-  wire signed [31:0] c$app_arg_45;
-  wire signed [31:0] c$app_arg_46;
+  wire [31:0] c$app_arg_31;
+  wire [31:0] c$app_arg_32;
+  wire signed [31:0] c$app_arg_33;
+  wire signed [31:0] c$app_arg_34;
   wire [31:0] c$aluResult_app_arg;
   wire [31:0] fwdRs2;
   wire [31:0] c$aluResult_app_arg_0;
@@ -279,245 +210,251 @@ module top
   wire  c$fwdRs1_case_alt_1;
   wire  c$wbEn_case_alt;
   reg [31:0] c$wbResult_case_alt;
-  wire [32:0] result_18;
+  wire [32:0] result_13;
   wire [32:0] c$ds9_case_alt;
-  wire signed [31:0] result_19;
-  wire [31:0] c$app_arg_47;
-  wire signed [31:0] result_20;
-  wire [31:0] c$app_arg_48;
+  wire signed [31:0] result_14;
+  wire [31:0] c$app_arg_35;
+  wire signed [31:0] result_15;
+  wire [31:0] c$app_arg_36;
   wire signed [31:0] c$ds9_app_arg;
   wire signed [63:0] c$ds9_app_arg_0;
   reg  c$ds9_app_arg_1;
   wire [6:0] fetchOp;
   wire [83:0] c$ds8_case_alt;
-  reg [83:0] result_21;
-  wire [51:0] result_22;
-  wire [51:0] c$case_alt_96;
-  reg [42:0] result_23;
-  reg [31:0] c$app_arg_49;
-  wire [31:0] c$case_alt_97;
-  wire [31:0] c$case_alt_98;
+  reg [83:0] result_16;
+  wire [51:0] result_17;
+  wire [51:0] c$case_alt_58;
+  reg [42:0] result_18;
+  reg [31:0] c$app_arg_37;
+  wire [31:0] c$case_alt_59;
+  wire [31:0] c$case_alt_60;
   wire [31:0] h16;
-  wire [31:0] c$case_alt_99;
-  wire [31:0] c$case_alt_100;
+  wire [31:0] c$case_alt_61;
+  wire [31:0] c$case_alt_62;
   wire [1:0] byteOff;
   wire [31:0] b8;
   wire [31:0] c$h16_app_arg;
-  reg [51:0] c$case_alt_101;
+  reg [51:0] c$case_alt_63;
   reg [3:0] c$memCtrlStoreOut_app_arg;
-  reg [31:0] result_24;
+  reg [31:0] result_19;
   wire [15:0] selHalf;
   wire [7:0] selByte;
   wire [7:0] c$selByte_case_alt;
   wire [7:0] c$selByte_case_alt_0;
   wire [1:0] byteOff_0;
   wire [31:0] c$selByte_app_arg;
-  wire [31:0] c$case_alt_102;
-  wire [31:0] c$case_alt_103;
-  wire [31:0] result_25;
+  wire [31:0] c$case_alt_64;
+  wire [31:0] c$case_alt_65;
+  wire [31:0] result_20;
   wire [8:0] memCtrl;
   wire [31:0] c$memCtrlLoadOut_app_arg;
   reg [3:0] c$memCtrlLoadOut_app_arg_0;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire  cpuEn;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   reg  c$cpuEn_case_alt;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire signed [63:0] c$cpuEn_case_scrut;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire  rxVld;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire [7:0] rxByte;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire [33:0] \rx' ;
-  wire [42:0] result_26;
-  // src/CPURiscVTop.hs:73:1-10
+  wire [42:0] result_21;
+  // src/CPURiscVTop.hs:86:1-10
   wire [7:0] c$dataOut_case_alt;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire [7:0] \shift' ;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire  wild3;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   reg [23:0] ds8;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire [23:0] c$ds8_case_alt_0;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire [23:0] c$ds8_case_alt_1;
-  wire [23:0] result_27;
-  // src/CPURiscVTop.hs:73:1-10
+  wire [23:0] result_22;
+  // src/CPURiscVTop.hs:86:1-10
   wire [23:0] c$ds8_case_alt_2;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire  c$ds8_case_scrut;
-  wire [23:0] result_28;
-  // src/CPURiscVTop.hs:73:1-10
+  wire [23:0] result_23;
+  // src/CPURiscVTop.hs:86:1-10
   wire [23:0] c$ds8_case_alt_3;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire  c$ds8_case_scrut_0;
   wire [23:0] c$uartRxStep_failOut;
-  // src/CPURiscVTop.hs:73:1-10
+  // src/CPURiscVTop.hs:86:1-10
   wire [7:0] shifted;
   wire [23:0] c$uartRxStep_failOut_0;
-  wire [25:0] result_29;
-  // src/CPURiscVTop.hs:114:1-10
+  wire [25:0] result_24;
+  // src/CPURiscVTop.hs:127:1-10
   wire  \pin' ;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   reg [23:0] ds6;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [23:0] c$ds6_case_alt;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [23:0] c$ds6_case_alt_0;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [23:0] c$ds6_case_alt_1;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire  send;
-  wire [23:0] result_30;
-  // src/CPURiscVTop.hs:114:1-10
+  wire [23:0] result_25;
+  // src/CPURiscVTop.hs:127:1-10
   wire [23:0] c$ds6_case_alt_2;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire  c$ds6_case_scrut;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [9:0] c$ds6_app_arg;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [23:0] c$ds6_case_alt_3;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [7:0] dat;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   reg  busy;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire signed [63:0] c$busy_case_scrut;
   wire [23:0] c$uartTxStep_failOut;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire  bit0;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [7:0] shifted_0;
-  // src/CPURiscVTop.hs:114:1-10
+  // src/CPURiscVTop.hs:127:1-10
   wire [7:0] c$shifted_app_arg;
   wire [431:0] c$tupIn;
   wire [431:0] c$tupIn_case_alt;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire [79:0] wild4;
-  wire [135:0] c$case_alt_104;
-  wire [127:0] c$app_arg_50;
-  // src/CPURiscVTop.hs:241:1-9
+  wire [135:0] c$case_alt_66;
+  wire [127:0] c$app_arg_38;
+  // src/CPURiscVTop.hs:254:1-9
   wire [135:0] fifo1;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire [144:0] c$ds8_case_alt_4;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   reg [144:0] c$ds8_case_alt_5;
-  // src/CPURiscVTop.hs:241:1-9
+  // src/CPURiscVTop.hs:254:1-9
   wire signed [63:0] c$ds8_case_scrut_1;
-  wire [143:0] c$case_alt_105;
-  wire [7:0] c$app_arg_51;
-  wire [1:0] result_31;
-  // src/CPURiscVTop.hs:393:1-11
+  wire [143:0] c$case_alt_67;
+  wire [7:0] c$app_arg_39;
+  wire [1:0] result_26;
+  // src/CPURiscVTop.hs:408:1-11
   wire [1:0] c$ds_case_alt;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [1:0] wd;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [5:0] pra = 6'd0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [5:0] wa;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [8:0] ds1 = {1'b0,8'bxxxxxxxx};
-  reg [1:0] result_32;
-  // src/CPURiscVTop.hs:393:1-11
+  reg [1:0] result_27;
+  // src/CPURiscVTop.hs:408:1-11
   wire [7:0] ds1_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [7:0] a1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire  c$ds2_app_arg;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [8:0] bhtWrCmdS;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [5:0] bhtRdAddrS;
-  wire [31:0] result_33;
-  // src/CPURiscVTop.hs:393:1-11
+  wire [31:0] result_28;
+  // src/CPURiscVTop.hs:408:1-11
   wire [31:0] c$ds_case_alt_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [4:0] pra_0 = 5'd0;
-  reg [31:0] result_34;
-  // src/CPURiscVTop.hs:393:1-11
+  reg [31:0] result_29;
+  // src/CPURiscVTop.hs:408:1-11
   wire [4:0] regRdAddrB;
-  wire [31:0] result_35;
-  // src/CPURiscVTop.hs:393:1-11
+  wire [31:0] result_30;
+  // src/CPURiscVTop.hs:408:1-11
   wire [31:0] c$ds_case_alt_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [31:0] wd_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [4:0] pra_1 = 5'd0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [4:0] wa_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [37:0] prevRegWrCmd = {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-  reg [31:0] result_36;
-  // src/CPURiscVTop.hs:393:1-11
+  reg [31:0] result_31;
+  // src/CPURiscVTop.hs:408:1-11
   wire signed [63:0] c$ds2_app_arg_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [36:0] ds1_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [36:0] a1_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire  c$ds2_app_arg_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [37:0] regWrCmdS;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [4:0] regRdAddrA;
-  wire [31:0] result_37;
-  // src/CPURiscVTop.hs:393:1-11
+  wire [31:0] result_32;
+  // src/CPURiscVTop.hs:408:1-11
   wire [31:0] c$ds_case_alt_2;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [31:0] wd_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [9:0] pra_2 = 10'd0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [9:0] wa_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   reg [42:0] ds1_2 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-  reg [31:0] result_38;
-  // src/CPURiscVTop.hs:393:1-11
+  reg [31:0] result_33;
+  // src/CPURiscVTop.hs:408:1-11
   wire [41:0] ds1_3;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [41:0] a1_1;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire  c$ds2_app_arg_2;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [42:0] dataWrCmdS;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [9:0] dataRdAddr;
-  reg [31:0] result_39;
-  // src/CPURiscVTop.hs:393:1-11
+  reg [31:0] result_34;
+  // src/CPURiscVTop.hs:408:1-11
   wire [41:0] ds1_4;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [41:0] a1_2;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire  c$ds_app_arg_0;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [42:0] eta2;
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire [175:0] fullOut;
-  // src/CPURiscVTop.hs:393:1-11
-  reg [853:0] c$ds_app_arg_1 = {{2'd0,   12'd0,   32'b00000000000000000000000000000000,   1'b1,   8'b11111111,
+  // src/CPURiscVTop.hs:408:1-11
+  reg [822:0] c$ds_app_arg_1 = {{2'd0,   12'd0,   32'b00000000000000000000000000000000,   1'b1,   8'b11111111,
   1'b0,   8'b00000000,   16'd0},   {32'd0,   {1'b0,   32'd0,
                                               32'b00000000000000000000000000000000,
-                                              32'd0,   1'b0},   {1'b0,   32'd0,
-                                                                 {4'd0,   1'd1,
-                                                                  2'd0,   1'b0,
-                                                                  5'd0,   5'd0,
-                                                                  5'd0,
-                                                                  32'sd0,
-                                                                  4'd0,   3'd0,
-                                                                  1'b0},
-                                                                 32'b00000000000000000000000000000000,
-                                                                 32'b00000000000000000000000000000000,
-                                                                 32'd0,   1'b0,
-                                                                 32'd0},
-                                    {1'b0,   32'd0,   5'd0,   1'b0,   2'd0,
+                                              1'b0},   {1'b0,   32'd0,   {4'd0,
+                                                                          1'd1,
+                                                                          2'd0,
+                                                                          1'b0,
+                                                                          5'd0,
+                                                                          5'd0,
+                                                                          5'd0,
+                                                                          32'sd0,
+                                                                          4'd0,
+                                                                          3'd0,
+                                                                          1'b0},
+                                                        32'b00000000000000000000000000000000,
+                                                        32'b00000000000000000000000000000000,
+                                                        1'b0,   32'd0,   32'd0,
+                                                        1'b0},   {1'b0,
+                                                                  32'd0,
+                                                                  5'd0,   1'b0,
+                                                                  2'd0,
+                                                                  32'b00000000000000000000000000000000,
+                                                                  32'b00000000000000000000000000000000,
+                                                                  4'd0},
+                                    {1'b0,   5'd0,   1'b0,   2'd0,
                                      32'b00000000000000000000000000000000,
                                      32'b00000000000000000000000000000000,
-                                     4'd0},   {1'b0,   5'd0,   1'b0,   2'd0,
-                                               32'b00000000000000000000000000000000,
-                                               32'b00000000000000000000000000000000,
-                                               32'b00000000000000000000000000000000},
+                                     32'b00000000000000000000000000000000},
                                     1'b0,   1'b0},   {8'b00000000,   1'b0},
  {{8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,
    8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,
@@ -525,277 +462,98 @@ module top
    8'b00000000},   4'd0,   4'd0},   {2'd0,   10'd0,   3'd0,   8'b00000000,
                                      1'b1,   1'b1,   8'b00000000,   1'b0},
  {2'd0,   10'd0,   3'd0,   8'b00000000,   1'b1}};
-  // src/CPURiscVTop.hs:393:1-11
+  // src/CPURiscVTop.hs:408:1-11
   wire  eta1_0;
   wire [7:0] c$bv;
   wire [31:0] c$bv_0;
+  wire [3:0] c$i_2;
+  wire [127:0] c$vec;
+  wire [1:0] result_selection_2;
+  wire [11:0] c$bv_1;
+  wire [7:0] c$bv_2;
+  wire [4:0] c$i_19;
+  wire [3:0] c$i_27;
+  wire [127:0] c$vec_0;
+  wire [1:0] c$fifoPushOut_app_arg_selection_2;
+  wire [31:0] c$bv_3;
+  wire [3:0] c$case_alt_selection_20;
+  wire [31:0] c$i_68;
   wire signed [20:0] c$s;
   wire signed [11:0] c$s_0;
   wire signed [11:0] c$s_1;
   wire signed [12:0] c$s_2;
-  wire [3:0] c$i_49;
-  wire [127:0] c$vec;
-  wire [1:0] result_selection_5;
-  wire [11:0] c$bv_1;
-  wire [7:0] c$bv_2;
-  wire [4:0] c$i_66;
-  wire [3:0] c$i_74;
-  wire [127:0] c$vec_0;
-  wire [1:0] c$fifoPushOut_app_arg_selection_2;
-  wire [31:0] c$bv_3;
-  wire [3:0] c$case_alt_selection_57;
-  wire [31:0] c$i_124;
-  wire signed [20:0] c$s_3;
-  wire signed [11:0] c$s_4;
-  wire signed [11:0] c$s_5;
-  wire signed [12:0] c$s_6;
-  wire [2:0] c$mispredicted_case_alt_selection_4;
-  wire [2:0] c$actualNextPC_case_alt_selection_4;
-  wire [3:0] c$actualNextPC_case_alt_selection_10;
-  wire [2:0] result_selection_15;
-  wire [3:0] result_selection_21;
+  wire signed [63:0] result_selection_res;
+  wire  c$dtt_rhs_3;
+  wire [2:0] result_selection_13;
+  wire [2:0] c$isBranch_case_alt_selection_4;
+  wire [3:0] result_selection_19;
   wire [31:0] c$bv_4;
-  wire [4:0] c$i_182;
+  wire [4:0] c$i_125;
   wire [1:0] c$fwdRs1_case_alt_selection_13;
   wire [1:0] c$wbResult_case_alt_selection_3;
-  wire signed [20:0] c$s_7;
-  wire signed [12:0] c$s_8;
-  wire [31:0] c$i_190;
+  wire signed [20:0] c$s_3;
+  wire signed [12:0] c$s_4;
+  wire [31:0] c$i_133;
   wire [31:0] c$bv_5;
-  wire [3:0] result_selection_27;
+  wire [3:0] result_selection_25;
   wire [31:0] c$bv_6;
   wire [31:0] c$bv_7;
   wire [31:0] c$bv_8;
   wire [31:0] c$bv_9;
   wire [31:0] c$bv_10;
   wire [3:0] c$memCtrlStoreOut_app_arg_selection_3;
-  wire signed [7:0] c$s_9;
-  wire signed [15:0] c$s_10;
+  wire signed [7:0] c$s_5;
+  wire signed [15:0] c$s_6;
   wire [31:0] c$bv_11;
   wire [3:0] c$memCtrlLoadOut_app_arg_selection_3;
-  wire [1:0] c$dtt_rhs_2;
+  wire [1:0] c$dtt_rhs_7;
   wire [1:0] ds8_selection_2;
   wire [7:0] c$bv_12;
   wire [1:0] ds6_selection_2;
-  wire [1:0] c$dtt_rhs_6;
-  wire [3:0] c$i_279;
+  wire [1:0] c$dtt_rhs_11;
+  wire [3:0] c$i_222;
   wire [127:0] c$vec_1;
-  wire [1:0] c$dtt_rhs_10;
-  wire [3:0] c$i_283;
+  wire [1:0] c$dtt_rhs_15;
+  wire [3:0] c$i_226;
   wire [127:0] c$vecFlat;
-  wire [5:0] c$i_286;
-  wire [4:0] c$i_355;
-  wire [9:0] c$i_1383;
-  wire [9:0] c$i_2409;
-  wire [9:0] c$i_2410;
+  wire [5:0] c$i_229;
+  wire [4:0] c$i_298;
+  wire [9:0] c$i_1326;
+  wire [9:0] c$i_2352;
+  wire [9:0] c$i_2353;
   wire [6:0] result;
 
   assign result = fullOut[175:169];
 
   assign c$bv = (\c$ledLatch'_case_alt );
 
-  assign c$bv_0 = ((result_7[217:186]) >> (64'sd2));
+  assign c$bv_0 = ((result_1[217:186]) >> (64'sd2));
 
   assign result_0 = {{{eta1,   progByteIdx1,
                        progWordAcc1,   cpuRst1,
                        \c$ledLatch'_case_alt ,   outPending1,
                        outPendDat1,   runTimeout1},
-                      result_7[613:43],   c$case_alt_40,
-                      c$app_arg_10,   \rx' ,   \tx' },
+                      result_1[582:43],   c$case_alt_2,
+                      c$app_arg_0,   \rx' ,   \tx' },
                      {{\tx' [0:0],   ~ (c$bv[5 : 0])},
-                      c$case_alt_37[0+:10],   result_7[42:0],
+                      c$case_alt[0+:10],   result_1[42:0],
                       c$bv_0[0+:10],   c$ds10_case_alt[159:117],
-                      result_1[49:45],   result_1[44:40],
-                      c$ds10_case_alt[116:79],
-                      c$case_alt_37[0+:6],
+                      (c$app_arg[19 : 15]),   (c$app_arg[24 : 20]),
+                      c$ds10_case_alt[116:79],   c$case_alt[0+:6],
                       c$ds10_case_alt[78:70]}};
 
-  assign result_1 = (op == 7'b0110011) ? {result_2,
-                                          1'd0,   2'd0,   1'b1,   rd,   rs1,   rs2,
-                                          32'sd0,   4'd0,   3'd0,   1'b0} : c$case_alt;
+  assign c$app_arg = result_34;
 
-  assign c$case_alt = (op == 7'b0010011) ? {c$app_arg_1,
-                                            1'd1,   2'd0,   1'b1,   rd,   rs1,   5'd0,
-                                            c$app_arg,   4'd0,   3'd0,
-                                            1'b0} : c$case_alt_2;
+  assign c$case_alt = result_1[582:551] >> (64'sd2);
 
-  assign result_2 = c$case_scrut_1 ? c$case_alt_0 : result_6;
+  assign \tx'  = result_24[25:2];
 
-  assign c$case_alt_0 = (f7 == 7'b0000000) ? 4'd0 : c$case_alt_1;
+  assign c$app_arg_0 = (rxVld & ((rxByte == 8'b01011000) & (c$case_alt_1 & (~ ((fifo3[7:4] + 4'd1) == fifo3[3:0]))))) ? c$case_alt_0 : fifo3;
 
-  assign c$case_alt_1 = c$case_scrut ? 4'd1 : result_6;
+  assign c$case_alt_0 = {c$app_arg_1,
+                         fifo3[7:4] + 4'd1,   fifo3[3:0]};
 
-  assign c$case_alt_2 = (op == 7'b0110111) ? {4'd10,
-                                              1'd1,   2'd0,   1'b1,   rd,   5'd0,   5'd0,
-                                              c$app_arg_2,   4'd0,   3'd0,
-                                              1'b0} : c$case_alt_13;
-
-  assign c$app_arg = c$case_scrut_2 ? c$case_alt_4 : c$case_alt_3;
-
-  assign c$case_alt_3 = c$case_scrut_4 ? c$case_alt_4 : c$app_arg_5;
-
-  assign c$case_alt_4 = $signed(c$app_arg_0[0+:32]);
-
-  assign c$app_arg_0 = $unsigned({{(64-5) {1'b0}},rs2});
-
-  assign c$app_arg_1 = c$case_scrut_1 ? 4'd0 : c$case_alt_5;
-
-  assign c$case_alt_5 = c$case_scrut_2 ? 4'd5 : c$case_alt_6;
-
-  assign c$case_alt_6 = c$case_scrut_0 ? 4'd8 : c$case_alt_7;
-
-  assign c$case_alt_7 = (f3 == 3'b011) ? 4'd9 : c$case_alt_8;
-
-  assign c$case_alt_8 = c$case_scrut_3 ? 4'd4 : c$case_alt_9;
-
-  assign c$case_alt_9 = c$case_scrut_4 ? c$case_alt_10 : c$case_alt_11;
-
-  assign c$case_alt_10 = c$case_scrut ? 4'd7 : 4'd6;
-
-  assign c$case_alt_11 = c$case_scrut_5 ? 4'd3 : c$case_alt_12;
-
-  assign c$case_scrut = f7 == 7'b0100000;
-
-  assign c$case_alt_12 = c$case_scrut_6 ? 4'd2 : 4'd0;
-
-  assign c$case_alt_13 = (op == 7'b0010111) ? {4'd0,
-                                               1'd1,   2'd0,   1'b1,   rd,   5'd0,   5'd0,
-                                               c$app_arg_2,   4'd0,   3'd0,
-                                               1'b1} : c$case_alt_14;
-
-  assign c$case_alt_14 = (op == 7'b1101111) ? {4'd10,
-                                               1'd1,   2'd1,   1'b1,   rd,   5'd0,   5'd0,
-                                               result_3,   4'd0,   3'd7,
-                                               1'b0} : c$case_alt_15;
-
-  assign c$app_arg_2 = $signed(({(c$f7_app_arg[31 : 12]),12'b000000000000}));
-
-  assign c$case_alt_15 = (op == 7'b1100111) ? {4'd0,
-                                               1'd1,   2'd1,   1'b1,   rd,   rs1,   5'd0,
-                                               c$app_arg_5,   4'd0,   3'd7,
-                                               1'b0} : c$case_alt_16;
-
-  assign c$s = ($signed(({({({({(c$app_arg_3[31 : 31]),(c$app_arg_3[19 : 12])}),(c$app_arg_3[20 : 20])}),(c$app_arg_3[30 : 21])}),1'b0})));
-
-  assign result_3 = $signed({{(32-21) {c$s[21-1]}},c$s});
-
-  assign c$app_arg_3 = result_39;
-
-  assign c$case_alt_16 = (op == 7'b0000011) ? {4'd0,
-                                               1'd1,   2'd2,   1'b1,   rd,   rs1,   5'd0,
-                                               c$app_arg_5,   c$app_arg_4,   3'd0,
-                                               1'b0} : c$case_alt_17;
-
-  assign rd = (c$f7_app_arg[11 : 7]);
-
-  assign c$case_alt_17 = (op == 7'b0100011) ? {4'd0,
-                                               1'd1,   2'd0,   1'b0,   5'd0,   rs1,   rs2,
-                                               result_4,   c$app_arg_6,   3'd0,
-                                               1'b0} : c$case_alt_22;
-
-  assign c$app_arg_4 = c$case_scrut_1 ? 4'd1 : c$case_alt_18;
-
-  assign c$case_alt_18 = c$case_scrut_2 ? 4'd2 : c$case_alt_19;
-
-  assign c$case_alt_19 = c$case_scrut_0 ? 4'd3 : c$case_alt_20;
-
-  assign c$case_alt_20 = c$case_scrut_3 ? 4'd4 : c$case_alt_21;
-
-  assign c$case_scrut_0 = f3 == 3'b010;
-
-  assign c$case_alt_21 = c$case_scrut_4 ? 4'd5 : 4'd3;
-
-  assign c$s_0 = ($signed((c$f7_app_arg[31 : 20])));
-
-  assign c$app_arg_5 = $signed({{(32-12) {c$s_0[12-1]}},c$s_0});
-
-  assign c$case_alt_22 = (op == 7'b1100011) ? {4'd0,
-                                               1'd1,   2'd0,   1'b0,   5'd0,   rs1,   rs2,
-                                               result_5,   4'd0,   c$app_arg_8,
-                                               1'b0} : {4'd0,   1'd1,   2'd0,   1'b0,   5'd0,
-                                                        5'd0,   5'd0,   32'sd0,   4'd0,   3'd0,
-                                                        1'b0};
-
-  assign c$app_arg_6 = c$case_scrut_1 ? 4'd6 : c$case_alt_23;
-
-  assign c$case_alt_23 = c$case_scrut_2 ? 4'd7 : 4'd8;
-
-  assign c$s_1 = ($signed(({(c$app_arg_7[31 : 25]),(c$app_arg_7[11 : 7])})));
-
-  assign result_4 = $signed({{(32-12) {c$s_1[12-1]}},c$s_1});
-
-  assign c$app_arg_7 = result_39;
-
-  assign rs1 = (c$f7_app_arg[19 : 15]);
-
-  assign rs2 = (c$f7_app_arg[24 : 20]);
-
-  assign op = c$f7_app_arg[6 : 0];
-
-  assign c$app_arg_8 = c$case_scrut_1 ? 3'd1 : c$case_alt_24;
-
-  assign c$case_alt_24 = c$case_scrut_2 ? 3'd2 : c$case_alt_25;
-
-  assign c$case_scrut_1 = f3 == 3'b000;
-
-  assign c$case_alt_25 = c$case_scrut_3 ? 3'd3 : c$case_alt_26;
-
-  assign c$case_scrut_2 = f3 == 3'b001;
-
-  assign c$case_alt_26 = c$case_scrut_4 ? 3'd4 : c$case_alt_27;
-
-  assign c$case_scrut_3 = f3 == 3'b100;
-
-  assign c$case_alt_27 = c$case_scrut_5 ? 3'd5 : c$case_alt_28;
-
-  assign c$case_scrut_4 = f3 == 3'b101;
-
-  assign c$case_alt_28 = c$case_scrut_6 ? 3'd6 : 3'd0;
-
-  assign c$case_scrut_5 = f3 == 3'b110;
-
-  assign c$case_scrut_6 = f3 == 3'b111;
-
-  assign c$s_2 = ($signed(({({({({(c$app_arg_9[31 : 31]),(c$app_arg_9[7 : 7])}),(c$app_arg_9[30 : 25])}),(c$app_arg_9[11 : 8])}),1'b0})));
-
-  assign result_5 = $signed({{(32-13) {c$s_2[13-1]}},c$s_2});
-
-  assign c$app_arg_9 = result_39;
-
-  assign result_6 = (f3 == 3'b001) ? 4'd5 : c$case_alt_29;
-
-  assign c$case_alt_29 = (f3 == 3'b010) ? 4'd8 : c$case_alt_30;
-
-  assign c$case_alt_30 = (f3 == 3'b011) ? 4'd9 : c$case_alt_31;
-
-  assign c$case_alt_31 = (f3 == 3'b100) ? 4'd4 : c$case_alt_32;
-
-  assign c$case_alt_32 = (f3 == 3'b101) ? c$case_alt_33 : c$case_alt_35;
-
-  assign c$case_alt_33 = (f7 == 7'b0000000) ? 4'd6 : c$case_alt_34;
-
-  assign c$case_alt_34 = (f7 == 7'b0100000) ? 4'd7 : c$case_alt_35;
-
-  assign c$case_alt_35 = (f3 == 3'b110) ? 4'd3 : c$case_alt_36;
-
-  assign c$case_alt_36 = (f3 == 3'b111) ? 4'd2 : 4'd0;
-
-  assign f3 = c$f7_app_arg[14 : 12];
-
-  assign f7 = c$f7_app_arg[31 : 25];
-
-  assign c$f7_app_arg = result_39;
-
-  assign c$case_alt_37 = result_7[613:582] >> (64'sd2);
-
-  assign \tx'  = result_29[25:2];
-
-  assign c$app_arg_10 = (rxVld & ((rxByte == 8'b01011000) & (c$case_alt_39 & (~ ((fifo3[7:4] + 4'd1) == fifo3[3:0]))))) ? c$case_alt_38 : fifo3;
-
-  assign c$case_alt_38 = {c$app_arg_11,
-                          fifo3[7:4] + 4'd1,   fifo3[3:0]};
-
-  assign c$i_49 = fifo3[7:4];
+  assign c$i_2 = fifo3[7:4];
 
   assign c$vec = fifo3[135:8];
 
@@ -803,22 +561,22 @@ module top
   genvar i;
   generate
   for (i=0;i<16;i=i+1) begin : vector_replace
-    assign c$app_arg_11[(15-i)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_49})) == i ? 8'b01001011 : c$vec[(15-i)*8+:8];
+    assign c$app_arg_1[(15-i)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_2})) == i ? 8'b01001011 : c$vec[(15-i)*8+:8];
   end
   endgenerate
   // vector replace end
 
-  assign fifo3 = result_7[749:614];
+  assign fifo3 = result_1[718:583];
 
   always @(*) begin
     case(c$cpuEn_case_scrut)
-      64'sd0 : c$case_alt_39 = 1'b1;
-      default : c$case_alt_39 = 1'b0;
+      64'sd0 : c$case_alt_1 = 1'b1;
+      default : c$case_alt_1 = 1'b0;
     endcase
   end
 
-  assign c$case_alt_40 = mc1[0:0] ? {8'b00000000,
-                                     1'b0} : mc1;
+  assign c$case_alt_2 = mc1[0:0] ? {8'b00000000,
+                                    1'b0} : mc1;
 
   assign runTimeout1 = top2[15:0];
 
@@ -834,62 +592,62 @@ module top
 
   assign eta1 = top2[79:78];
 
-  assign top2 = result_7[829:750];
+  assign top2 = result_1[798:719];
 
-  assign \c$ledLatch'_case_alt  = mc1[0:0] ? mc1[8:1] : c$ds_app_arg_1[806:799];
+  assign \c$ledLatch'_case_alt  = mc1[0:0] ? mc1[8:1] : c$ds_app_arg_1[775:768];
 
   assign mc1 = c$ds10_case_alt[168:160];
 
-  assign result_selection_5 = c$tupIn[295:294];
+  assign result_selection_2 = c$tupIn[295:294];
 
   always @(*) begin
-    case(result_selection_5)
-      2'b00 : result_7 = {c$app_arg_15,
-                          c$tupIn[431:296],   c$ds10_case_alt[739:169],
+    case(result_selection_2)
+      2'b00 : result_1 = {c$app_arg_5,
+                          c$tupIn[431:296],   c$ds10_case_alt[708:169],
                           {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
-      2'b01 : result_7 = c$case_alt_42;
-      2'b10 : result_7 = {c$app_arg_12,
+      2'b01 : result_1 = c$case_alt_4;
+      2'b10 : result_1 = {c$app_arg_2,
                           c$ds28_case_alt[215:80],
-                          c$ds10_case_alt[739:169],
+                          c$ds10_case_alt[708:169],
                           {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
-      default : result_7 = c$case_alt_41;
+      default : result_1 = c$case_alt_3;
     endcase
   end
 
-  assign c$case_alt_41 = c$case_scrut_7 ? {{2'd0,
-                                            c$tupIn[293:282],   c$tupIn[281:250],
-                                            c$tupIn[249:249],   c$tupIn[248:241],
-                                            c$tupIn[240:240],   c$tupIn[239:232],
-                                            c$tupIn[231:216]},   c$case_alt_46,
-                                           c$ds10_case_alt[739:169],
-                                           {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}} : {c$tupIn[295:216],
-                                                                                                     c$tupIn[431:296],
-                                                                                                     c$ds10_case_alt[739:169],
-                                                                                                     {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+  assign c$case_alt_3 = c$case_scrut ? {{2'd0,
+                                         c$tupIn[293:282],   c$tupIn[281:250],
+                                         c$tupIn[249:249],   c$tupIn[248:241],
+                                         c$tupIn[240:240],   c$tupIn[239:232],
+                                         c$tupIn[231:216]},   c$case_alt_8,
+                                        c$ds10_case_alt[708:169],
+                                        {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}} : {c$tupIn[295:216],
+                                                                                                  c$tupIn[431:296],
+                                                                                                  c$ds10_case_alt[708:169],
+                                                                                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
 
-  assign c$case_alt_42 = c$case_scrut_8 ? {c$tupIn[295:216],
-                                           c$tupIn[431:296],   c$ds10_case_alt[739:169],
-                                           {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}} : result_8;
+  assign c$case_alt_4 = c$case_scrut_0 ? {c$tupIn[295:216],
+                                          c$tupIn[431:296],   c$ds10_case_alt[708:169],
+                                          {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}} : result_2;
 
-  assign c$app_arg_12 = (c$ds10_case_alt[169:169] | (wild7[15:0] == 16'd65535)) ? c$case_alt_43 : wild7;
+  assign c$app_arg_2 = (c$ds10_case_alt[169:169] | (wild7[15:0] == 16'd65535)) ? c$case_alt_5 : wild7;
 
-  assign c$case_alt_43 = wild7[24:24] ? wild7 : {2'd3,
-                                                 wild7[77:66],   wild7[65:34],   wild7[33:33],
-                                                 wild7[32:25],   1'b0,   wild7[23:16],
-                                                 wild7[15:0]};
+  assign c$case_alt_5 = wild7[24:24] ? wild7 : {2'd3,
+                                                wild7[77:66],   wild7[65:34],   wild7[33:33],
+                                                wild7[32:25],   1'b0,   wild7[23:16],
+                                                wild7[15:0]};
 
   assign wild7 = c$ds28_case_alt[79:0];
 
   assign c$ds28_case_alt = mc1_0[0:0] ? c$ds28_case_alt_0 : c$ds28_case_alt_1;
 
-  assign c$ds28_case_alt_0 = c$case_scrut_7 ? {c$case_alt_46,
-                                               {2'd2,   c$tupIn[293:282],   c$tupIn[281:250],
-                                                1'b0,   c$tupIn[248:241],   c$tupIn[240:240],
-                                                c$tupIn[239:232],
-                                                16'd0}} : {c$tupIn[431:296],   {2'd2,
-                                                                                c$tupIn[293:282],   c$tupIn[281:250],
-                                                                                1'b0,   c$tupIn[248:241],   1'b1,
-                                                                                mc1_0[8:1],   16'd0}};
+  assign c$ds28_case_alt_0 = c$case_scrut ? {c$case_alt_8,
+                                             {2'd2,   c$tupIn[293:282],   c$tupIn[281:250],
+                                              1'b0,   c$tupIn[248:241],   c$tupIn[240:240],
+                                              c$tupIn[239:232],
+                                              16'd0}} : {c$tupIn[431:296],   {2'd2,
+                                                                              c$tupIn[293:282],   c$tupIn[281:250],
+                                                                              1'b0,   c$tupIn[248:241],   1'b1,
+                                                                              mc1_0[8:1],   16'd0}};
 
   assign c$ds28_case_alt_1 = cpuEn ? c$ds28_case_alt_2 : {c$tupIn[431:296],
                                                           {2'd2,   c$tupIn[293:282],   c$tupIn[281:250],
@@ -908,21 +666,21 @@ module top
                                                                                      c$tupIn[239:232],
                                                                                      c$tupIn[231:216]}};
 
-  assign result_8 = (c$tupIn[293:282] == 12'd4095) ? {{2'd0,
+  assign result_2 = (c$tupIn[293:282] == 12'd4095) ? {{2'd0,
                                                        12'd0,   32'b00000000000000000000000000000000,
                                                        c$tupIn[249:249],   c$tupIn[248:241],
                                                        c$tupIn[240:240],   c$tupIn[239:232],
-                                                       c$tupIn[231:216]},   c$app_arg_13,
-                                                      c$ds10_case_alt[739:169],   pgWr} : {{2'd1,
+                                                       c$tupIn[231:216]},   c$app_arg_3,
+                                                      c$ds10_case_alt[708:169],   pgWr} : {{2'd1,
                                                                                             c$tupIn[293:282] + 12'd1,
-                                                                                            c$app_arg_14,
+                                                                                            c$app_arg_4,
                                                                                             c$tupIn[249:249],
                                                                                             c$tupIn[248:241],
                                                                                             c$tupIn[240:240],
                                                                                             c$tupIn[239:232],
                                                                                             c$tupIn[231:216]},
                                                                                            c$tupIn[431:296],
-                                                                                           c$ds10_case_alt[739:169],
+                                                                                           c$ds10_case_alt[708:169],
                                                                                            pgWr};
 
   assign c$bv_1 = (c$tupIn[293:282] / 12'd4);
@@ -930,11 +688,11 @@ module top
   assign pgWr = c$pgWr_case_scrut ? {1'b1,{c$bv_1[0+:10],
                                            \wordAcc' }} : {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
 
-  assign c$app_arg_13 = c$case_scrut_7 ? c$case_alt_46 : c$tupIn[431:296];
+  assign c$app_arg_3 = c$case_scrut ? c$case_alt_8 : c$tupIn[431:296];
 
-  assign c$case_scrut_7 = ~ ((c$tupIn[303:300] + 4'd1) == c$tupIn[299:296]);
+  assign c$case_scrut = ~ ((c$tupIn[303:300] + 4'd1) == c$tupIn[299:296]);
 
-  assign c$app_arg_14 = c$pgWr_case_scrut ? 32'b00000000000000000000000000000000 : \wordAcc' ;
+  assign c$app_arg_4 = c$pgWr_case_scrut ? 32'b00000000000000000000000000000000 : \wordAcc' ;
 
   assign c$pgWr_case_scrut = bytePos == 12'd3;
 
@@ -944,39 +702,39 @@ module top
 
   assign ds28 = $signed(c$ds28_app_arg);
 
-  assign c$i_66 = ((5'd3 - (bytePos[0+:5])) * 5'd8);
+  assign c$i_19 = ((5'd3 - (bytePos[0+:5])) * 5'd8);
 
-  assign c$ds28_app_arg = $unsigned({{(64-5) {1'b0}},c$i_66});
+  assign c$ds28_app_arg = $unsigned({{(64-5) {1'b0}},c$i_19});
 
   assign bytePos = c$tupIn[293:282] % 12'd4;
 
-  assign c$app_arg_15 = c$case_scrut_8 ? {2'd0,
-                                          c$tupIn[293:282],   c$tupIn[281:250],   1'b1,
-                                          c$tupIn[248:241],   c$tupIn[240:240],
-                                          c$tupIn[239:232],
-                                          c$tupIn[231:216]} : c$case_alt_44;
+  assign c$app_arg_5 = c$case_scrut_0 ? {2'd0,
+                                         c$tupIn[293:282],   c$tupIn[281:250],   1'b1,
+                                         c$tupIn[248:241],   c$tupIn[240:240],
+                                         c$tupIn[239:232],
+                                         c$tupIn[231:216]} : c$case_alt_6;
 
-  assign c$case_alt_44 = (rxByte == 8'b01010000) ? {2'd1,
-                                                    12'd0,   32'b00000000000000000000000000000000,
-                                                    1'b1,   c$tupIn[248:241],   c$tupIn[240:240],
-                                                    c$tupIn[239:232],
-                                                    c$tupIn[231:216]} : c$case_alt_45;
+  assign c$case_alt_6 = (rxByte == 8'b01010000) ? {2'd1,
+                                                   12'd0,   32'b00000000000000000000000000000000,
+                                                   1'b1,   c$tupIn[248:241],   c$tupIn[240:240],
+                                                   c$tupIn[239:232],
+                                                   c$tupIn[231:216]} : c$case_alt_7;
 
-  assign c$case_scrut_8 = ~ rxVld;
+  assign c$case_scrut_0 = ~ rxVld;
 
-  assign c$case_alt_45 = (rxByte == 8'b01010010) ? {2'd2,
-                                                    c$tupIn[293:282],   c$tupIn[281:250],   1'b0,
-                                                    c$tupIn[248:241],   c$tupIn[240:240],
-                                                    c$tupIn[239:232],   16'd0} : {2'd0,
-                                                                                  c$tupIn[293:282],   c$tupIn[281:250],
-                                                                                  1'b1,   c$tupIn[248:241],
-                                                                                  c$tupIn[240:240],   c$tupIn[239:232],
-                                                                                  c$tupIn[231:216]};
+  assign c$case_alt_7 = (rxByte == 8'b01010010) ? {2'd2,
+                                                   c$tupIn[293:282],   c$tupIn[281:250],   1'b0,
+                                                   c$tupIn[248:241],   c$tupIn[240:240],
+                                                   c$tupIn[239:232],   16'd0} : {2'd0,
+                                                                                 c$tupIn[293:282],   c$tupIn[281:250],
+                                                                                 1'b1,   c$tupIn[248:241],
+                                                                                 c$tupIn[240:240],   c$tupIn[239:232],
+                                                                                 c$tupIn[231:216]};
 
-  assign c$case_alt_46 = {c$app_arg_16,
-                          c$tupIn[303:300] + 4'd1,   c$tupIn[299:296]};
+  assign c$case_alt_8 = {c$app_arg_6,
+                         c$tupIn[303:300] + 4'd1,   c$tupIn[299:296]};
 
-  assign c$i_74 = c$tupIn[303:300];
+  assign c$i_27 = c$tupIn[303:300];
 
   assign c$vec_0 = c$tupIn[431:304];
 
@@ -984,7 +742,7 @@ module top
   genvar i_0;
   generate
   for (i_0=0;i_0<16;i_0=i_0+1) begin : vector_replace_0
-    assign c$app_arg_16[(15-i_0)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_74})) == i_0 ? c$fifoPushOut_app_arg : c$vec_0[(15-i_0)*8+:8];
+    assign c$app_arg_6[(15-i_0)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_27})) == i_0 ? c$fifoPushOut_app_arg : c$vec_0[(15-i_0)*8+:8];
   end
   endgenerate
   // vector replace end
@@ -1001,119 +759,123 @@ module top
 
   assign mc1_0 = c$ds10_case_alt[168:160];
 
-  assign c$ds10_case_alt = c$ds_app_arg_1[807:807] ? {{32'd0,
+  assign c$ds10_case_alt = c$ds_app_arg_1[776:776] ? {{32'd0,
                                                        {1'b0,   32'd0,
-                                                        32'b00000000000000000000000000000000,   32'd0,
-                                                        1'b0},   {1'b0,   32'd0,   {4'd0,   1'd1,
-                                                                                    2'd0,   1'b0,   5'd0,   5'd0,
-                                                                                    5'd0,   32'sd0,   4'd0,   3'd0,
-                                                                                    1'b0},
-                                                                  32'b00000000000000000000000000000000,
-                                                                  32'b00000000000000000000000000000000,   32'd0,
-                                                                  1'b0,   32'd0},   {1'b0,   32'd0,   5'd0,
-                                                                                     1'b0,   2'd0,
-                                                                                     32'b00000000000000000000000000000000,
-                                                                                     32'b00000000000000000000000000000000,
-                                                                                     4'd0},   {1'b0,   5'd0,   1'b0,
-                                                                                               2'd0,
-                                                                                               32'b00000000000000000000000000000000,
-                                                                                               32'b00000000000000000000000000000000,
-                                                                                               32'b00000000000000000000000000000000},
+                                                        32'b00000000000000000000000000000000,   1'b0},
+                                                       {1'b0,   32'd0,   {4'd0,   1'd1,   2'd0,
+                                                                          1'b0,   5'd0,   5'd0,   5'd0,   32'sd0,
+                                                                          4'd0,   3'd0,   1'b0},
+                                                        32'b00000000000000000000000000000000,
+                                                        32'b00000000000000000000000000000000,   1'b0,
+                                                        32'd0,   32'd0,   1'b0},   {1'b0,   32'd0,
+                                                                                    5'd0,   1'b0,   2'd0,
+                                                                                    32'b00000000000000000000000000000000,
+                                                                                    32'b00000000000000000000000000000000,
+                                                                                    4'd0},   {1'b0,   5'd0,   1'b0,
+                                                                                              2'd0,
+                                                                                              32'b00000000000000000000000000000000,
+                                                                                              32'b00000000000000000000000000000000,
+                                                                                              32'b00000000000000000000000000000000},
                                                        1'b0,   1'b0},   c$ds_app_arg_1[202:194],
                                                       {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
                                                       {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
                                                       {1'b0,8'bxxxxxxxx},   32'd0,   5'd0,
                                                       32'b00000000000000000000000000000000,
-                                                      1'b0} : c$case_alt_47;
+                                                      1'b0} : c$case_alt_9;
 
-  assign c$case_alt_47 = c$ds_app_arg_1[203:203] ? {c$ds_app_arg_1[773:203],
-                                                    memCtrl,
-                                                    {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                                                    {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                                                    {1'b0,8'bxxxxxxxx},   c$ds_app_arg_1[773:742],
-                                                    5'd0,   32'b00000000000000000000000000000000,
-                                                    1'b0} : c$case_alt_48;
+  assign c$case_alt_9 = c$ds_app_arg_1[203:203] ? {c$ds_app_arg_1[742:203],
+                                                   memCtrl,
+                                                   {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
+                                                   {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
+                                                   {1'b0,8'bxxxxxxxx},   c$ds_app_arg_1[742:711],
+                                                   5'd0,   32'b00000000000000000000000000000000,
+                                                   1'b0} : c$case_alt_10;
 
-  assign c$case_alt_48 = (~ cpuEn) ? {c$ds_app_arg_1[773:203],
+  assign c$case_alt_10 = (~ cpuEn) ? {c$ds_app_arg_1[742:203],
                                       memCtrl,
                                       {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
                                       {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                                      {1'b0,8'bxxxxxxxx},   c$ds_app_arg_1[773:742],
+                                      {1'b0,8'bxxxxxxxx},   c$ds_app_arg_1[742:711],
                                       5'd0,   32'b00000000000000000000000000000000,
-                                      1'b0} : {{nextPC,
-                                                {c$app_arg_38 & (~ mispredicted),
-                                                 c$ds_app_arg_1[773:742],   result_39,
-                                                 c$app_arg_37,   c$app_arg_36},   c$app_arg_22,
-                                                c$app_arg_21,   c$case_alt_52,
-                                                c$ds_app_arg_1[643:643] & (c$case_alt_51 & (c$ds_app_arg_1[603:603] & ((c$ds_app_arg_1[602:598] != 5'd0) & ((c$ds_app_arg_1[602:598] == ((c$app_arg_20[19 : 15]))) | (c$ds_app_arg_1[602:598] == ((c$app_arg_20[24 : 20]))))))),
+                                      1'b0} : {{nextPC,   {c$app_arg_26,
+                                                           c$ds_app_arg_1[742:711],   result_34,
+                                                           c$app_arg_25},
+                                                {c$ds_app_arg_1[710:710] & c$app_arg_26,
+                                                 c$ds_app_arg_1[709:678],   result_3,
+                                                 c$app_arg_13,   c$app_arg_12,
+                                                 c$ds_app_arg_1[645:645],
+                                                 (($unsigned((($signed(c$case_alt_15[0+:32])) + $signed(result_3[39:8]))))),
+                                                 c$ds_app_arg_1[709:678] + 32'd4,
+                                                 (c$app_arg_11[6 : 0]) == 7'b1100111},
+                                                c$app_arg_10,   c$case_alt_14,
+                                                c$ds_app_arg_1[644:644] & (c$case_alt_13 & (c$ds_app_arg_1[604:604] & ((c$ds_app_arg_1[603:599] != 5'd0) & ((c$ds_app_arg_1[603:599] == ((c$app_arg_11[19 : 15]))) | (c$ds_app_arg_1[603:599] == ((c$app_arg_11[24 : 20]))))))),
                                                 1'b0},   c$ds8_case_alt[83:75],
-                                               c$ds8_case_alt[74:32],   c$app_arg_19,
-                                               c$app_arg_17,   nextPC,
+                                               c$ds8_case_alt[74:32],   c$app_arg_9,
+                                               c$app_arg_7,   nextPC,
                                                c$ds_app_arg_1[308:304],
                                                c$wbResult_case_alt,   wbEn};
 
-  assign c$bv_3 = (c$ds_app_arg_1[642:611] >> (64'sd2));
+  assign c$bv_3 = (c$ds_app_arg_1[643:612] >> (64'sd2));
 
-  assign c$app_arg_17 = (c$ds_app_arg_1[643:643] & c$mispredicted_case_alt) ? {1'b1,{c$bv_3[0+:6],
-                                                                                     c$app_arg_18}} : {1'b0,8'bxxxxxxxx};
+  assign c$app_arg_7 = (c$ds_app_arg_1[644:644] & (c$mispredicted_app_arg & c$isBranch_case_alt)) ? {1'b1,{c$bv_3[0+:6],
+                                                                                                           c$app_arg_8}} : {1'b0,8'bxxxxxxxx};
 
-  assign c$app_arg_18 = result_15 ? c$case_alt_49 : c$case_alt_50;
+  assign c$app_arg_8 = result_10 ? c$case_alt_11 : c$case_alt_12;
 
   always @(*) begin
-    case(result_31)
-      2'b00 : c$case_alt_49 = 2'd1;
-      2'b01 : c$case_alt_49 = 2'd2;
-      2'b10 : c$case_alt_49 = 2'd3;
-      default : c$case_alt_49 = 2'd3;
+    case(result_26)
+      2'b00 : c$case_alt_11 = 2'd1;
+      2'b01 : c$case_alt_11 = 2'd2;
+      2'b10 : c$case_alt_11 = 2'd3;
+      default : c$case_alt_11 = 2'd3;
     endcase
   end
 
   always @(*) begin
-    case(result_31)
-      2'b10 : c$case_alt_50 = 2'd1;
-      2'b11 : c$case_alt_50 = 2'd2;
-      default : c$case_alt_50 = 2'd0;
+    case(result_26)
+      2'b10 : c$case_alt_12 = 2'd1;
+      2'b11 : c$case_alt_12 = 2'd2;
+      default : c$case_alt_12 = 2'd0;
     endcase
   end
 
-  assign c$app_arg_19 = wbEn ? {1'b1,{c$ds_app_arg_1[308:304],
-                                      c$wbResult_case_alt}} : {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+  assign c$app_arg_9 = wbEn ? {1'b1,{c$ds_app_arg_1[308:304],
+                                     c$wbResult_case_alt}} : {1'b0,37'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
 
-  assign nextPC = c$ds_app_arg_1[204:204] ? c$ds_app_arg_1[642:611] : c$nextPC_case_alt;
+  assign nextPC = mispredicted ? c$nextPC_case_alt : c$nextPC_case_alt_0;
 
-  assign c$app_arg_20 = c$ds_app_arg_1[708:677];
-
-  assign c$case_alt_selection_57 = c$ds_app_arg_1[555:552];
+  assign c$case_alt_selection_20 = c$ds_app_arg_1[556:553];
 
   always @(*) begin
-    case(c$case_alt_selection_57)
-      4'b0001 : c$case_alt_51 = 1'b1;
-      4'b0010 : c$case_alt_51 = 1'b1;
-      4'b0011 : c$case_alt_51 = 1'b1;
-      4'b0100 : c$case_alt_51 = 1'b1;
-      4'b0101 : c$case_alt_51 = 1'b1;
-      default : c$case_alt_51 = 1'b0;
+    case(c$case_alt_selection_20)
+      4'b0001 : c$case_alt_13 = 1'b1;
+      4'b0010 : c$case_alt_13 = 1'b1;
+      4'b0011 : c$case_alt_13 = 1'b1;
+      4'b0100 : c$case_alt_13 = 1'b1;
+      4'b0101 : c$case_alt_13 = 1'b1;
+      default : c$case_alt_13 = 1'b0;
     endcase
   end
 
-  assign c$case_alt_52 = c$ds_app_arg_1[418:418] ? {1'b1,
+  assign c$case_alt_14 = c$ds_app_arg_1[418:418] ? {1'b1,
                                                     c$ds_app_arg_1[385:381],
                                                     c$ds_app_arg_1[380:380],
                                                     c$ds_app_arg_1[379:378],
                                                     c$ds_app_arg_1[377:346],
                                                     c$ds8_case_alt[31:0],
-                                                    ((c$ds_app_arg_1[417:386] + 32'd4))} : {1'b0,
-                                                                                            5'd0,   1'b0,   2'd0,
-                                                                                            32'b00000000000000000000000000000000,
-                                                                                            32'b00000000000000000000000000000000,
-                                                                                            32'b00000000000000000000000000000000};
+                                                    (c$ds_app_arg_1[417:386])} : {1'b0,   5'd0,
+                                                                                  1'b0,   2'd0,
+                                                                                  32'b00000000000000000000000000000000,
+                                                                                  32'b00000000000000000000000000000000,
+                                                                                  32'b00000000000000000000000000000000};
 
-  assign c$app_arg_21 = (c$ds_app_arg_1[643:643] & c$app_arg_38) ? {1'b1,
-                                                                    c$ds_app_arg_1[642:611],
-                                                                    c$ds_app_arg_1[602:598],
-                                                                    c$ds_app_arg_1[603:603],
-                                                                    c$ds_app_arg_1[605:604],   result_16,
-                                                                    fwdRs2,   c$ds_app_arg_1[555:552]} : {1'b0,
+  assign c$app_arg_10 = (c$ds_app_arg_1[644:644] & c$mispredicted_app_arg) ? {1'b1,
+                                                                              c$ds_app_arg_1[451:420],
+                                                                              c$ds_app_arg_1[603:599],
+                                                                              c$ds_app_arg_1[604:604],
+                                                                              c$ds_app_arg_1[606:605],   result_11,
+                                                                              fwdRs2,
+                                                                              c$ds_app_arg_1[556:553]} : {1'b0,
                                                                                                           32'd0,
                                                                                                           5'd0,   1'b0,
                                                                                                           2'd0,
@@ -1121,334 +883,311 @@ module top
                                                                                                           32'b00000000000000000000000000000000,
                                                                                                           4'd0};
 
-  assign c$app_arg_22 = (mispredicted | ((~ c$ds_app_arg_1[741:741]) | c$ds_app_arg_1[204:204])) ? {1'b0,
-                                                                                                    32'd0,   {4'd0,
-                                                                                                              1'd1,
-                                                                                                              2'd0,
-                                                                                                              1'b0,
-                                                                                                              5'd0,
-                                                                                                              5'd0,
-                                                                                                              5'd0,
-                                                                                                              32'sd0,
-                                                                                                              4'd0,
-                                                                                                              3'd0,
-                                                                                                              1'b0},
-                                                                                                    32'b00000000000000000000000000000000,
-                                                                                                    32'b00000000000000000000000000000000,
-                                                                                                    32'd0,   1'b0,
-                                                                                                    32'd0} : {1'b1,
-                                                                                                              c$ds_app_arg_1[740:709],
-                                                                                                              result_9,
-                                                                                                              c$app_arg_24,
-                                                                                                              c$app_arg_23,
-                                                                                                              c$ds_app_arg_1[676:645],
-                                                                                                              c$ds_app_arg_1[644:644],
-                                                                                                              (($unsigned((($signed(c$case_alt_53[0+:32])) + $signed(result_9[39:8])))))};
+  assign c$app_arg_11 = c$ds_app_arg_1[677:646];
 
-  assign c$i_124 = c$ds_app_arg_1[740:709];
+  assign c$i_68 = c$ds_app_arg_1[709:678];
 
-  assign c$case_alt_53 = $unsigned({{(64-32) {1'b0}},c$i_124});
+  assign c$case_alt_15 = $unsigned({{(64-32) {1'b0}},c$i_68});
 
-  assign c$app_arg_23 = (wbEn & (c$wbEn_case_alt & (c$ds_app_arg_1[308:304] == result_9[44:40]))) ? c$wbResult_case_alt : c$case_alt_54;
+  assign c$app_arg_12 = (wbEn & (c$wbEn_case_alt & (c$ds_app_arg_1[308:304] == result_3[44:40]))) ? c$wbResult_case_alt : c$case_alt_16;
 
-  assign c$case_alt_54 = (result_9[44:40] == 5'd0) ? 32'b00000000000000000000000000000000 : result_33;
+  assign c$case_alt_16 = (result_3[44:40] == 5'd0) ? 32'b00000000000000000000000000000000 : result_28;
 
-  assign c$app_arg_24 = (wbEn & (c$wbEn_case_alt & (c$ds_app_arg_1[308:304] == result_9[49:45]))) ? c$wbResult_case_alt : c$case_alt_55;
+  assign c$app_arg_13 = (wbEn & (c$wbEn_case_alt & (c$ds_app_arg_1[308:304] == result_3[49:45]))) ? c$wbResult_case_alt : c$case_alt_17;
 
-  assign c$case_alt_55 = (result_9[49:45] == 5'd0) ? 32'b00000000000000000000000000000000 : result_35;
+  assign c$case_alt_17 = (result_3[49:45] == 5'd0) ? 32'b00000000000000000000000000000000 : result_30;
 
-  assign result_9 = (op_0 == 7'b0110011) ? {result_10,
-                                            1'd0,   2'd0,   1'b1,   rd_0,   rs1_0,
-                                            rs2_0,   32'sd0,   4'd0,   3'd0,
-                                            1'b0} : c$case_alt_56;
+  assign result_3 = (op == 7'b0110011) ? {result_4,
+                                          1'd0,   2'd0,   1'b1,   rd,   rs1,   rs2,
+                                          32'sd0,   4'd0,   3'd0,
+                                          1'b0} : c$case_alt_18;
 
-  assign c$case_alt_56 = (op_0 == 7'b0010011) ? {c$app_arg_27,
-                                                 1'd1,   2'd0,   1'b1,   rd_0,   rs1_0,   5'd0,
-                                                 c$app_arg_25,   4'd0,   3'd0,
-                                                 1'b0} : c$case_alt_59;
+  assign c$case_alt_18 = (op == 7'b0010011) ? {c$app_arg_16,
+                                               1'd1,   2'd0,   1'b1,   rd,   rs1,   5'd0,
+                                               c$app_arg_14,   4'd0,   3'd0,
+                                               1'b0} : c$case_alt_21;
 
-  assign result_10 = c$case_scrut_11 ? c$case_alt_57 : result_14;
+  assign result_4 = c$case_scrut_3 ? c$case_alt_19 : result_8;
 
-  assign c$case_alt_57 = (f7_0 == 7'b0000000) ? 4'd0 : c$case_alt_58;
+  assign c$case_alt_19 = (f7 == 7'b0000000) ? 4'd0 : c$case_alt_20;
 
-  assign c$case_alt_58 = c$case_scrut_9 ? 4'd1 : result_14;
+  assign c$case_alt_20 = c$case_scrut_1 ? 4'd1 : result_8;
 
-  assign c$case_alt_59 = (op_0 == 7'b0110111) ? {4'd10,
-                                                 1'd1,   2'd0,   1'b1,   rd_0,   5'd0,   5'd0,
-                                                 c$app_arg_28,   4'd0,   3'd0,
-                                                 1'b0} : c$case_alt_70;
+  assign c$case_alt_21 = (op == 7'b0110111) ? {4'd10,
+                                               1'd1,   2'd0,   1'b1,   rd,   5'd0,   5'd0,
+                                               c$app_arg_17,   4'd0,   3'd0,
+                                               1'b0} : c$case_alt_32;
 
-  assign c$app_arg_25 = c$case_scrut_12 ? c$case_alt_61 : c$case_alt_60;
+  assign c$app_arg_14 = c$case_scrut_4 ? c$case_alt_23 : c$case_alt_22;
 
-  assign c$case_alt_60 = c$case_scrut_14 ? c$case_alt_61 : c$app_arg_31;
+  assign c$case_alt_22 = c$case_scrut_6 ? c$case_alt_23 : c$app_arg_20;
 
-  assign c$case_alt_61 = $signed(c$app_arg_26[0+:32]);
+  assign c$case_alt_23 = $signed(c$app_arg_15[0+:32]);
 
-  assign c$app_arg_26 = $unsigned({{(64-5) {1'b0}},rs2_0});
+  assign c$app_arg_15 = $unsigned({{(64-5) {1'b0}},rs2});
 
-  assign c$app_arg_27 = c$case_scrut_11 ? 4'd0 : c$case_alt_62;
+  assign c$app_arg_16 = c$case_scrut_3 ? 4'd0 : c$case_alt_24;
 
-  assign c$case_alt_62 = c$case_scrut_12 ? 4'd5 : c$case_alt_63;
+  assign c$case_alt_24 = c$case_scrut_4 ? 4'd5 : c$case_alt_25;
 
-  assign c$case_alt_63 = c$case_scrut_10 ? 4'd8 : c$case_alt_64;
+  assign c$case_alt_25 = c$case_scrut_2 ? 4'd8 : c$case_alt_26;
 
-  assign c$case_alt_64 = (f3_0 == 3'b011) ? 4'd9 : c$case_alt_65;
+  assign c$case_alt_26 = (f3 == 3'b011) ? 4'd9 : c$case_alt_27;
 
-  assign c$case_alt_65 = c$case_scrut_13 ? 4'd4 : c$case_alt_66;
+  assign c$case_alt_27 = c$case_scrut_5 ? 4'd4 : c$case_alt_28;
 
-  assign c$case_alt_66 = c$case_scrut_14 ? c$case_alt_67 : c$case_alt_68;
+  assign c$case_alt_28 = c$case_scrut_6 ? c$case_alt_29 : c$case_alt_30;
 
-  assign c$case_alt_67 = c$case_scrut_9 ? 4'd7 : 4'd6;
+  assign c$case_alt_29 = c$case_scrut_1 ? 4'd7 : 4'd6;
 
-  assign c$case_alt_68 = c$case_scrut_15 ? 4'd3 : c$case_alt_69;
+  assign c$case_alt_30 = c$case_scrut_7 ? 4'd3 : c$case_alt_31;
 
-  assign c$case_scrut_9 = f7_0 == 7'b0100000;
+  assign c$case_scrut_1 = f7 == 7'b0100000;
 
-  assign c$case_alt_69 = c$case_scrut_16 ? 4'd2 : 4'd0;
+  assign c$case_alt_31 = c$case_scrut_8 ? 4'd2 : 4'd0;
 
-  assign c$case_alt_70 = (op_0 == 7'b0010111) ? {4'd0,
-                                                 1'd1,   2'd0,   1'b1,   rd_0,   5'd0,   5'd0,
-                                                 c$app_arg_28,   4'd0,   3'd0,
-                                                 1'b1} : c$case_alt_71;
+  assign c$case_alt_32 = (op == 7'b0010111) ? {4'd0,
+                                               1'd1,   2'd0,   1'b1,   rd,   5'd0,   5'd0,
+                                               c$app_arg_17,   4'd0,   3'd0,
+                                               1'b1} : c$case_alt_33;
 
-  assign c$case_alt_71 = (op_0 == 7'b1101111) ? {4'd10,
-                                                 1'd1,   2'd1,   1'b1,   rd_0,   5'd0,   5'd0,
-                                                 result_11,   4'd0,   3'd7,
-                                                 1'b0} : c$case_alt_72;
+  assign c$case_alt_33 = (op == 7'b1101111) ? {4'd10,
+                                               1'd1,   2'd1,   1'b1,   rd,   5'd0,   5'd0,
+                                               result_5,   4'd0,   3'd7,
+                                               1'b0} : c$case_alt_34;
 
-  assign c$app_arg_28 = $signed(({(c$f7_app_arg_0[31 : 12]),12'b000000000000}));
+  assign c$app_arg_17 = $signed(({(c$f7_app_arg[31 : 12]),12'b000000000000}));
 
-  assign c$case_alt_72 = (op_0 == 7'b1100111) ? {4'd0,
-                                                 1'd1,   2'd1,   1'b1,   rd_0,   rs1_0,   5'd0,
-                                                 c$app_arg_31,   4'd0,   3'd7,
-                                                 1'b0} : c$case_alt_73;
+  assign c$case_alt_34 = (op == 7'b1100111) ? {4'd0,
+                                               1'd1,   2'd1,   1'b1,   rd,   rs1,   5'd0,
+                                               c$app_arg_20,   4'd0,   3'd7,
+                                               1'b0} : c$case_alt_35;
 
-  assign c$s_3 = ($signed(({({({({(c$app_arg_29[31 : 31]),(c$app_arg_29[19 : 12])}),(c$app_arg_29[20 : 20])}),(c$app_arg_29[30 : 21])}),1'b0})));
+  assign c$s = ($signed(({({({({(c$app_arg_18[31 : 31]),(c$app_arg_18[19 : 12])}),(c$app_arg_18[20 : 20])}),(c$app_arg_18[30 : 21])}),1'b0})));
 
-  assign result_11 = $signed({{(32-21) {c$s_3[21-1]}},c$s_3});
+  assign result_5 = $signed({{(32-21) {c$s[21-1]}},c$s});
 
-  assign c$app_arg_29 = c$ds_app_arg_1[708:677];
+  assign c$app_arg_18 = c$ds_app_arg_1[677:646];
 
-  assign c$case_alt_73 = (op_0 == 7'b0000011) ? {4'd0,
-                                                 1'd1,   2'd2,   1'b1,   rd_0,   rs1_0,   5'd0,
-                                                 c$app_arg_31,   c$app_arg_30,   3'd0,
-                                                 1'b0} : c$case_alt_74;
+  assign c$case_alt_35 = (op == 7'b0000011) ? {4'd0,
+                                               1'd1,   2'd2,   1'b1,   rd,   rs1,   5'd0,
+                                               c$app_arg_20,   c$app_arg_19,   3'd0,
+                                               1'b0} : c$case_alt_36;
 
-  assign rd_0 = (c$f7_app_arg_0[11 : 7]);
+  assign rd = (c$f7_app_arg[11 : 7]);
 
-  assign c$case_alt_74 = (op_0 == 7'b0100011) ? {4'd0,
-                                                 1'd1,   2'd0,   1'b0,   5'd0,   rs1_0,
-                                                 rs2_0,   result_12,   c$app_arg_32,   3'd0,
-                                                 1'b0} : c$case_alt_79;
+  assign c$case_alt_36 = (op == 7'b0100011) ? {4'd0,
+                                               1'd1,   2'd0,   1'b0,   5'd0,   rs1,   rs2,
+                                               result_6,   c$app_arg_21,   3'd0,
+                                               1'b0} : c$case_alt_41;
 
-  assign c$app_arg_30 = c$case_scrut_11 ? 4'd1 : c$case_alt_75;
+  assign c$app_arg_19 = c$case_scrut_3 ? 4'd1 : c$case_alt_37;
 
-  assign c$case_alt_75 = c$case_scrut_12 ? 4'd2 : c$case_alt_76;
+  assign c$case_alt_37 = c$case_scrut_4 ? 4'd2 : c$case_alt_38;
 
-  assign c$case_alt_76 = c$case_scrut_10 ? 4'd3 : c$case_alt_77;
+  assign c$case_alt_38 = c$case_scrut_2 ? 4'd3 : c$case_alt_39;
 
-  assign c$case_alt_77 = c$case_scrut_13 ? 4'd4 : c$case_alt_78;
+  assign c$case_alt_39 = c$case_scrut_5 ? 4'd4 : c$case_alt_40;
 
-  assign c$case_scrut_10 = f3_0 == 3'b010;
+  assign c$case_scrut_2 = f3 == 3'b010;
 
-  assign c$case_alt_78 = c$case_scrut_14 ? 4'd5 : 4'd3;
+  assign c$case_alt_40 = c$case_scrut_6 ? 4'd5 : 4'd3;
 
-  assign c$s_4 = ($signed((c$f7_app_arg_0[31 : 20])));
+  assign c$s_0 = ($signed((c$f7_app_arg[31 : 20])));
 
-  assign c$app_arg_31 = $signed({{(32-12) {c$s_4[12-1]}},c$s_4});
+  assign c$app_arg_20 = $signed({{(32-12) {c$s_0[12-1]}},c$s_0});
 
-  assign c$case_alt_79 = (op_0 == 7'b1100011) ? {4'd0,
-                                                 1'd1,   2'd0,   1'b0,   5'd0,   rs1_0,
-                                                 rs2_0,   result_13,   4'd0,   c$app_arg_34,
-                                                 1'b0} : {4'd0,   1'd1,   2'd0,   1'b0,   5'd0,
-                                                          5'd0,   5'd0,   32'sd0,   4'd0,   3'd0,
-                                                          1'b0};
+  assign c$case_alt_41 = (op == 7'b1100011) ? {4'd0,
+                                               1'd1,   2'd0,   1'b0,   5'd0,   rs1,   rs2,
+                                               result_7,   4'd0,   c$app_arg_23,
+                                               1'b0} : {4'd0,   1'd1,   2'd0,   1'b0,   5'd0,
+                                                        5'd0,   5'd0,   32'sd0,   4'd0,   3'd0,
+                                                        1'b0};
 
-  assign c$app_arg_32 = c$case_scrut_11 ? 4'd6 : c$case_alt_80;
+  assign c$app_arg_21 = c$case_scrut_3 ? 4'd6 : c$case_alt_42;
 
-  assign c$case_alt_80 = c$case_scrut_12 ? 4'd7 : 4'd8;
+  assign c$case_alt_42 = c$case_scrut_4 ? 4'd7 : 4'd8;
 
-  assign c$s_5 = ($signed(({(c$app_arg_33[31 : 25]),(c$app_arg_33[11 : 7])})));
+  assign c$s_1 = ($signed(({(c$app_arg_22[31 : 25]),(c$app_arg_22[11 : 7])})));
 
-  assign result_12 = $signed({{(32-12) {c$s_5[12-1]}},c$s_5});
+  assign result_6 = $signed({{(32-12) {c$s_1[12-1]}},c$s_1});
 
-  assign c$app_arg_33 = c$ds_app_arg_1[708:677];
+  assign c$app_arg_22 = c$ds_app_arg_1[677:646];
 
-  assign rs1_0 = (c$f7_app_arg_0[19 : 15]);
+  assign rs1 = (c$f7_app_arg[19 : 15]);
 
-  assign rs2_0 = (c$f7_app_arg_0[24 : 20]);
+  assign rs2 = (c$f7_app_arg[24 : 20]);
 
-  assign op_0 = c$f7_app_arg_0[6 : 0];
+  assign op = c$f7_app_arg[6 : 0];
 
-  assign c$app_arg_34 = c$case_scrut_11 ? 3'd1 : c$case_alt_81;
+  assign c$app_arg_23 = c$case_scrut_3 ? 3'd1 : c$case_alt_43;
 
-  assign c$case_alt_81 = c$case_scrut_12 ? 3'd2 : c$case_alt_82;
+  assign c$case_alt_43 = c$case_scrut_4 ? 3'd2 : c$case_alt_44;
 
-  assign c$case_scrut_11 = f3_0 == 3'b000;
+  assign c$case_scrut_3 = f3 == 3'b000;
 
-  assign c$case_alt_82 = c$case_scrut_13 ? 3'd3 : c$case_alt_83;
+  assign c$case_alt_44 = c$case_scrut_5 ? 3'd3 : c$case_alt_45;
 
-  assign c$case_scrut_12 = f3_0 == 3'b001;
+  assign c$case_scrut_4 = f3 == 3'b001;
 
-  assign c$case_alt_83 = c$case_scrut_14 ? 3'd4 : c$case_alt_84;
+  assign c$case_alt_45 = c$case_scrut_6 ? 3'd4 : c$case_alt_46;
 
-  assign c$case_scrut_13 = f3_0 == 3'b100;
+  assign c$case_scrut_5 = f3 == 3'b100;
 
-  assign c$case_alt_84 = c$case_scrut_15 ? 3'd5 : c$case_alt_85;
+  assign c$case_alt_46 = c$case_scrut_7 ? 3'd5 : c$case_alt_47;
 
-  assign c$case_scrut_14 = f3_0 == 3'b101;
+  assign c$case_scrut_6 = f3 == 3'b101;
 
-  assign c$case_alt_85 = c$case_scrut_16 ? 3'd6 : 3'd0;
+  assign c$case_alt_47 = c$case_scrut_8 ? 3'd6 : 3'd0;
 
-  assign c$case_scrut_15 = f3_0 == 3'b110;
+  assign c$case_scrut_7 = f3 == 3'b110;
 
-  assign c$case_scrut_16 = f3_0 == 3'b111;
+  assign c$case_scrut_8 = f3 == 3'b111;
 
-  assign c$s_6 = ($signed(({({({({(c$app_arg_35[31 : 31]),(c$app_arg_35[7 : 7])}),(c$app_arg_35[30 : 25])}),(c$app_arg_35[11 : 8])}),1'b0})));
+  assign c$s_2 = ($signed(({({({({(c$app_arg_24[31 : 31]),(c$app_arg_24[7 : 7])}),(c$app_arg_24[30 : 25])}),(c$app_arg_24[11 : 8])}),1'b0})));
 
-  assign result_13 = $signed({{(32-13) {c$s_6[13-1]}},c$s_6});
+  assign result_7 = $signed({{(32-13) {c$s_2[13-1]}},c$s_2});
 
-  assign c$app_arg_35 = c$ds_app_arg_1[708:677];
+  assign c$app_arg_24 = c$ds_app_arg_1[677:646];
 
-  assign result_14 = (f3_0 == 3'b001) ? 4'd5 : c$case_alt_86;
+  assign result_8 = (f3 == 3'b001) ? 4'd5 : c$case_alt_48;
 
-  assign c$case_alt_86 = (f3_0 == 3'b010) ? 4'd8 : c$case_alt_87;
+  assign c$case_alt_48 = (f3 == 3'b010) ? 4'd8 : c$case_alt_49;
 
-  assign c$case_alt_87 = (f3_0 == 3'b011) ? 4'd9 : c$case_alt_88;
+  assign c$case_alt_49 = (f3 == 3'b011) ? 4'd9 : c$case_alt_50;
 
-  assign c$case_alt_88 = (f3_0 == 3'b100) ? 4'd4 : c$case_alt_89;
+  assign c$case_alt_50 = (f3 == 3'b100) ? 4'd4 : c$case_alt_51;
 
-  assign c$case_alt_89 = (f3_0 == 3'b101) ? c$case_alt_90 : c$case_alt_92;
+  assign c$case_alt_51 = (f3 == 3'b101) ? c$case_alt_52 : c$case_alt_54;
 
-  assign c$case_alt_90 = (f7_0 == 7'b0000000) ? 4'd6 : c$case_alt_91;
+  assign c$case_alt_52 = (f7 == 7'b0000000) ? 4'd6 : c$case_alt_53;
 
-  assign c$case_alt_91 = (f7_0 == 7'b0100000) ? 4'd7 : c$case_alt_92;
+  assign c$case_alt_53 = (f7 == 7'b0100000) ? 4'd7 : c$case_alt_54;
 
-  assign c$case_alt_92 = (f3_0 == 3'b110) ? 4'd3 : c$case_alt_93;
+  assign c$case_alt_54 = (f3 == 3'b110) ? 4'd3 : c$case_alt_55;
 
-  assign c$case_alt_93 = (f3_0 == 3'b111) ? 4'd2 : 4'd0;
+  assign c$case_alt_55 = (f3 == 3'b111) ? 4'd2 : 4'd0;
 
-  assign f3_0 = c$f7_app_arg_0[14 : 12];
+  assign f3 = c$f7_app_arg[14 : 12];
 
-  assign f7_0 = c$f7_app_arg_0[31 : 25];
+  assign f7 = c$f7_app_arg[31 : 25];
 
-  assign c$f7_app_arg_0 = c$ds_app_arg_1[708:677];
+  assign c$f7_app_arg = c$ds_app_arg_1[677:646];
 
-  assign c$app_arg_36 = c$ds_app_arg_1[204:204] ? c$ds_app_arg_1[644:644] : result_18[32:32];
+  assign c$app_arg_25 = c$ds_app_arg_1[204:204] ? c$ds_app_arg_1[645:645] : result_13[32:32];
 
-  assign c$app_arg_37 = c$ds_app_arg_1[204:204] ? c$ds_app_arg_1[676:645] : ifPredTarget;
+  assign c$app_arg_26 = c$mispredicted_app_arg & (~ mispredicted);
 
-  assign c$app_arg_38 = ~ c$ds_app_arg_1[204:204];
+  assign mispredicted = c$ds_app_arg_1[644:644] & (c$mispredicted_app_arg & (c$isBranch_case_alt & result_9));
 
-  assign c$nextPC_case_alt = mispredicted ? actualNextPC : ifPredTarget;
+  assign c$nextPC_case_alt = result_10 ? c$nextPC_case_alt_1 : c$ds_app_arg_1[451:420];
 
-  assign mispredicted = c$ds_app_arg_1[643:643] & (c$mispredicted_case_alt & (c$ds_app_arg_1[483:452] != actualNextPC));
+  assign c$nextPC_case_alt_0 = c$ds_app_arg_1[204:204] ? c$ds_app_arg_1[643:612] : result_13[31:0];
 
-  assign ifPredTarget = result_18[31:0];
+  assign c$nextPC_case_alt_1 = c$ds_app_arg_1[419:419] ? ((result_11 & 32'b11111111111111111111111111111110)) : c$ds_app_arg_1[483:452];
 
-  assign actualNextPC = result_15 ? c$actualNextPC_case_alt : (c$ds_app_arg_1[642:611] + 32'd4);
-
-  assign c$mispredicted_case_alt_selection_4 = c$ds_app_arg_1[551:549];
+  assign result_selection_res = (\a#  == \b# ) ? 64'sd1 : 64'sd0;
 
   always @(*) begin
-    case(c$mispredicted_case_alt_selection_4)
-      3'b000 : c$mispredicted_case_alt = 1'b0;
-      default : c$mispredicted_case_alt = 1'b1;
+    case(result_selection_res)
+      64'sd1 : result_9 = 1'b0;
+      default : result_9 = 1'b1;
     endcase
   end
 
-  assign c$actualNextPC_case_alt_selection_4 = c$ds_app_arg_1[551:549];
+  assign c$dtt_rhs_3 = c$ds_app_arg_1[484:484];
+
+  assign \b#  = $unsigned({{63 {1'b0}},
+                           c$dtt_rhs_3});
+
+  assign \a#  = $unsigned({{63 {1'b0}},
+                           result_10});
+
+  assign c$mispredicted_app_arg = ~ c$ds_app_arg_1[204:204];
+
+  assign result_selection_13 = c$ds_app_arg_1[552:550];
 
   always @(*) begin
-    case(c$actualNextPC_case_alt_selection_4)
-      3'b111 : c$actualNextPC_case_alt = c$actualNextPC_case_alt_0;
-      default : c$actualNextPC_case_alt = c$ds_app_arg_1[450:419];
+    case(result_selection_13)
+      3'b000 : result_10 = 1'b0;
+      3'b001 : result_10 = fwdRs1 == fwdRs2;
+      3'b010 : result_10 = fwdRs1 != fwdRs2;
+      3'b011 : result_10 = c$app_arg_30 < c$app_arg_29;
+      3'b100 : result_10 = c$app_arg_30 >= c$app_arg_29;
+      3'b101 : result_10 = c$app_arg_28 < c$app_arg_27;
+      3'b110 : result_10 = c$app_arg_28 >= c$app_arg_27;
+      default : result_10 = 1'b1;
     endcase
   end
 
-  assign c$actualNextPC_case_alt_selection_10 = c$ds_app_arg_1[610:607];
+  assign c$app_arg_27 = fwdRs2;
+
+  assign c$app_arg_28 = fwdRs1;
+
+  assign c$app_arg_29 = $signed(fwdRs2);
+
+  assign c$app_arg_30 = $signed(fwdRs1);
+
+  assign c$isBranch_case_alt_selection_4 = c$ds_app_arg_1[552:550];
 
   always @(*) begin
-    case(c$actualNextPC_case_alt_selection_10)
-      4'b0000 : c$actualNextPC_case_alt_0 = (result_16 & 32'b11111111111111111111111111111110);
-      default : c$actualNextPC_case_alt_0 = c$ds_app_arg_1[450:419];
+    case(c$isBranch_case_alt_selection_4)
+      3'b000 : c$isBranch_case_alt = 1'b0;
+      default : c$isBranch_case_alt = 1'b1;
     endcase
   end
 
-  assign result_selection_15 = c$ds_app_arg_1[551:549];
+  assign result_selection_19 = c$ds_app_arg_1[611:608];
 
   always @(*) begin
-    case(result_selection_15)
-      3'b000 : result_15 = 1'b0;
-      3'b001 : result_15 = fwdRs1 == fwdRs2;
-      3'b010 : result_15 = fwdRs1 != fwdRs2;
-      3'b011 : result_15 = c$app_arg_42 < c$app_arg_41;
-      3'b100 : result_15 = c$app_arg_42 >= c$app_arg_41;
-      3'b101 : result_15 = c$app_arg_40 < c$app_arg_39;
-      3'b110 : result_15 = c$app_arg_40 >= c$app_arg_39;
-      default : result_15 = 1'b1;
+    case(result_selection_19)
+      4'b0000 : result_11 = ($unsigned((c$app_arg_34 + c$app_arg_33)));
+      4'b0001 : result_11 = ($unsigned((c$app_arg_34 - c$app_arg_33)));
+      4'b0010 : result_11 = c$aluResult_app_arg_0 & c$aluResult_app_arg;
+      4'b0011 : result_11 = c$aluResult_app_arg_0 | c$aluResult_app_arg;
+      4'b0100 : result_11 = c$aluResult_app_arg_0 ^ c$aluResult_app_arg;
+      4'b0101 : result_11 = c$app_arg_31 << result_12;
+      4'b0110 : result_11 = c$app_arg_31 >> result_12;
+      4'b0111 : result_11 = ($unsigned((c$app_arg_34 >>> result_12)));
+      4'b1000 : result_11 = c$case_alt_57;
+      4'b1001 : result_11 = c$case_alt_56;
+      default : result_11 = c$aluResult_app_arg;
     endcase
   end
 
-  assign c$app_arg_39 = fwdRs2;
+  assign c$case_alt_56 = (c$app_arg_32 < (c$aluResult_app_arg)) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
 
-  assign c$app_arg_40 = fwdRs1;
+  assign c$case_alt_57 = (c$app_arg_34 < c$app_arg_33) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
 
-  assign c$app_arg_41 = $signed(fwdRs2);
-
-  assign c$app_arg_42 = $signed(fwdRs1);
-
-  assign result_selection_21 = c$ds_app_arg_1[610:607];
-
-  always @(*) begin
-    case(result_selection_21)
-      4'b0000 : result_16 = ($unsigned((c$app_arg_46 + c$app_arg_45)));
-      4'b0001 : result_16 = ($unsigned((c$app_arg_46 - c$app_arg_45)));
-      4'b0010 : result_16 = c$aluResult_app_arg_0 & c$aluResult_app_arg;
-      4'b0011 : result_16 = c$aluResult_app_arg_0 | c$aluResult_app_arg;
-      4'b0100 : result_16 = c$aluResult_app_arg_0 ^ c$aluResult_app_arg;
-      4'b0101 : result_16 = c$app_arg_43 << result_17;
-      4'b0110 : result_16 = c$app_arg_43 >> result_17;
-      4'b0111 : result_16 = ($unsigned((c$app_arg_46 >>> result_17)));
-      4'b1000 : result_16 = c$case_alt_95;
-      4'b1001 : result_16 = c$case_alt_94;
-      default : result_16 = c$aluResult_app_arg;
-    endcase
-  end
-
-  assign c$case_alt_94 = (c$app_arg_44 < (c$aluResult_app_arg)) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
-
-  assign c$case_alt_95 = (c$app_arg_46 < c$app_arg_45) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
-
-  assign result_17 = ds;
+  assign result_12 = ds;
 
   assign ds = $signed(c$ds_app_arg);
 
   assign c$bv_4 = (c$aluResult_app_arg);
 
-  assign c$i_182 = ((c$bv_4[4 : 0]));
+  assign c$i_125 = ((c$bv_4[4 : 0]));
 
-  assign c$ds_app_arg = $unsigned({{(64-5) {1'b0}},c$i_182});
+  assign c$ds_app_arg = $unsigned({{(64-5) {1'b0}},c$i_125});
 
-  assign c$app_arg_43 = (c$app_arg_44);
+  assign c$app_arg_31 = (c$app_arg_32);
 
-  assign c$app_arg_44 = c$aluResult_app_arg_0;
+  assign c$app_arg_32 = c$aluResult_app_arg_0;
 
-  assign c$app_arg_45 = $signed(c$aluResult_app_arg);
+  assign c$app_arg_33 = $signed(c$aluResult_app_arg);
 
-  assign c$app_arg_46 = $signed(c$aluResult_app_arg_0);
+  assign c$app_arg_34 = $signed(c$aluResult_app_arg_0);
 
-  assign c$aluResult_app_arg = c$ds_app_arg_1[606:606] ? (($unsigned($signed(c$ds_app_arg_1[587:556])))) : fwdRs2;
+  assign c$aluResult_app_arg = c$ds_app_arg_1[607:607] ? (($unsigned($signed(c$ds_app_arg_1[588:557])))) : fwdRs2;
 
-  assign fwdRs2 = (c$ds_app_arg_1[380:380] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[385:381] == c$ds_app_arg_1[592:588]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[377:346] : c$fwdRs2_case_alt;
+  assign fwdRs2 = (c$ds_app_arg_1[380:380] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[385:381] == c$ds_app_arg_1[593:589]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[377:346] : c$fwdRs2_case_alt;
 
-  assign c$aluResult_app_arg_0 = c$ds_app_arg_1[548:548] ? ((c$ds_app_arg_1[642:611])) : fwdRs1;
+  assign c$aluResult_app_arg_0 = c$ds_app_arg_1[549:549] ? ((c$ds_app_arg_1[643:612])) : fwdRs1;
 
-  assign fwdRs1 = (c$ds_app_arg_1[380:380] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[385:381] == c$ds_app_arg_1[597:593]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[377:346] : c$fwdRs1_case_alt;
+  assign fwdRs1 = (c$ds_app_arg_1[380:380] & (c$fwdRs1_case_alt_1 & ((c$ds_app_arg_1[385:381] == c$ds_app_arg_1[598:594]) & c$fwdRs1_case_alt_0))) ? c$ds_app_arg_1[377:346] : c$fwdRs1_case_alt;
 
-  assign c$fwdRs2_case_alt = (wbEn & (c$ds_app_arg_1[308:304] == c$ds_app_arg_1[592:588])) ? c$wbResult_case_alt : c$ds_app_arg_1[515:484];
+  assign c$fwdRs2_case_alt = (wbEn & (c$ds_app_arg_1[308:304] == c$ds_app_arg_1[593:589])) ? c$wbResult_case_alt : c$ds_app_arg_1[516:485];
 
-  assign c$fwdRs1_case_alt = (wbEn & (c$ds_app_arg_1[308:304] == c$ds_app_arg_1[597:593])) ? c$wbResult_case_alt : c$ds_app_arg_1[547:516];
+  assign c$fwdRs1_case_alt = (wbEn & (c$ds_app_arg_1[308:304] == c$ds_app_arg_1[598:594])) ? c$wbResult_case_alt : c$ds_app_arg_1[548:517];
 
   assign wbEn = c$ds_app_arg_1[309:309] & (c$ds_app_arg_1[303:303] & c$wbEn_case_alt);
 
@@ -1475,119 +1214,119 @@ module top
     endcase
   end
 
-  assign result_18 = (fetchOp == 7'b1101111) ? {1'b1,
-                                                (($unsigned((c$ds9_app_arg + result_19))))} : c$ds9_case_alt;
+  assign result_13 = (fetchOp == 7'b1101111) ? {1'b1,
+                                                (($unsigned((c$ds9_app_arg + result_14))))} : c$ds9_case_alt;
 
   assign c$ds9_case_alt = ((fetchOp == 7'b1100011) & c$ds9_app_arg_1) ? {1'b1,
-                                                                         (($unsigned((c$ds9_app_arg + result_20))))} : {1'b0,
-                                                                                                                        c$ds_app_arg_1[773:742] + 32'd4};
+                                                                         (($unsigned((c$ds9_app_arg + result_15))))} : {1'b0,
+                                                                                                                        c$ds_app_arg_1[742:711] + 32'd4};
 
-  assign c$s_7 = ($signed(({({({({(c$app_arg_47[31 : 31]),(c$app_arg_47[19 : 12])}),(c$app_arg_47[20 : 20])}),(c$app_arg_47[30 : 21])}),1'b0})));
+  assign c$s_3 = ($signed(({({({({(c$app_arg_35[31 : 31]),(c$app_arg_35[19 : 12])}),(c$app_arg_35[20 : 20])}),(c$app_arg_35[30 : 21])}),1'b0})));
 
-  assign result_19 = $signed({{(32-21) {c$s_7[21-1]}},c$s_7});
+  assign result_14 = $signed({{(32-21) {c$s_3[21-1]}},c$s_3});
 
-  assign c$app_arg_47 = result_39;
+  assign c$app_arg_35 = result_34;
 
-  assign c$s_8 = ($signed(({({({({(c$app_arg_48[31 : 31]),(c$app_arg_48[7 : 7])}),(c$app_arg_48[30 : 25])}),(c$app_arg_48[11 : 8])}),1'b0})));
+  assign c$s_4 = ($signed(({({({({(c$app_arg_36[31 : 31]),(c$app_arg_36[7 : 7])}),(c$app_arg_36[30 : 25])}),(c$app_arg_36[11 : 8])}),1'b0})));
 
-  assign result_20 = $signed({{(32-13) {c$s_8[13-1]}},c$s_8});
+  assign result_15 = $signed({{(32-13) {c$s_4[13-1]}},c$s_4});
 
-  assign c$app_arg_48 = result_39;
+  assign c$app_arg_36 = result_34;
 
   assign c$ds9_app_arg = $signed(c$ds9_app_arg_0[0+:32]);
 
-  assign c$i_190 = c$ds_app_arg_1[773:742];
+  assign c$i_133 = c$ds_app_arg_1[742:711];
 
-  assign c$ds9_app_arg_0 = $unsigned({{(64-32) {1'b0}},c$i_190});
+  assign c$ds9_app_arg_0 = $unsigned({{(64-32) {1'b0}},c$i_133});
 
   always @(*) begin
-    case(result_31)
+    case(result_26)
       2'b10 : c$ds9_app_arg_1 = 1'b1;
       2'b11 : c$ds9_app_arg_1 = 1'b1;
       default : c$ds9_app_arg_1 = 1'b0;
     endcase
   end
 
-  assign c$bv_5 = (result_39);
+  assign c$bv_5 = (result_34);
 
   assign fetchOp = c$bv_5[6 : 0];
 
-  assign c$ds8_case_alt = c$ds_app_arg_1[418:418] ? result_21 : {memCtrl,
+  assign c$ds8_case_alt = c$ds_app_arg_1[418:418] ? result_16 : {memCtrl,
                                                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
                                                                  32'b00000000000000000000000000000000};
 
-  assign result_selection_27 = c$ds_app_arg_1[313:310];
+  assign result_selection_25 = c$ds_app_arg_1[313:310];
 
   always @(*) begin
-    case(result_selection_27)
-      4'b0000 : result_21 = {memCtrl,
+    case(result_selection_25)
+      4'b0000 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
                              c$ds_app_arg_1[377:346]};
-      4'b0001 : result_21 = {memCtrl,
+      4'b0001 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                             result_25};
-      4'b0010 : result_21 = {memCtrl,
+                             result_20};
+      4'b0010 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                             result_25};
-      4'b0011 : result_21 = {memCtrl,
+                             result_20};
+      4'b0011 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                             result_25};
-      4'b0100 : result_21 = {memCtrl,
+                             result_20};
+      4'b0100 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                             result_25};
-      4'b0101 : result_21 = {memCtrl,
+                             result_20};
+      4'b0101 : result_16 = {memCtrl,
                              {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx},
-                             result_25};
-      4'b0110 : result_21 = {result_22[51:43],
-                             result_22[42:0],
+                             result_20};
+      4'b0110 : result_16 = {result_17[51:43],
+                             result_17[42:0],
                              32'b00000000000000000000000000000000};
-      4'b0111 : result_21 = {result_22[51:43],
-                             result_22[42:0],
+      4'b0111 : result_16 = {result_17[51:43],
+                             result_17[42:0],
                              32'b00000000000000000000000000000000};
-      default : result_21 = {result_22[51:43],
-                             result_22[42:0],
+      default : result_16 = {result_17[51:43],
+                             result_17[42:0],
                              32'b00000000000000000000000000000000};
     endcase
   end
 
-  assign result_22 = (c$memCtrlLoadOut_app_arg <= 32'd4095) ? {memCtrl,
-                                                               result_23} : c$case_alt_96;
+  assign result_17 = (c$memCtrlLoadOut_app_arg <= 32'd4095) ? {memCtrl,
+                                                               result_18} : c$case_alt_58;
 
-  assign c$case_alt_96 = (c$memCtrlLoadOut_app_arg == 32'd65536) ? c$case_alt_101 : {memCtrl,
-                                                                                     {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+  assign c$case_alt_58 = (c$memCtrlLoadOut_app_arg == 32'd65536) ? c$case_alt_63 : {memCtrl,
+                                                                                    {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
 
   assign c$bv_6 = (c$memCtrlLoadOut_app_arg >> (64'sd2));
 
   always @(*) begin
     case(c$memCtrlStoreOut_app_arg)
-      4'b0000 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      4'b0001 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      4'b0010 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      4'b0011 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      4'b0100 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      4'b0101 : result_23 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
-      default : result_23 = {1'b1,{c$bv_6[0+:10],
-                                   c$app_arg_49}};
+      4'b0000 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      4'b0001 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      4'b0010 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      4'b0011 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      4'b0100 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      4'b0101 : result_18 = {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
+      default : result_18 = {1'b1,{c$bv_6[0+:10],
+                                   c$app_arg_37}};
     endcase
   end
 
   always @(*) begin
     case(c$memCtrlStoreOut_app_arg)
-      4'b0110 : c$app_arg_49 = c$case_alt_98;
-      4'b0111 : c$app_arg_49 = c$case_alt_97;
-      default : c$app_arg_49 = c$ds_app_arg_1[345:314];
+      4'b0110 : c$app_arg_37 = c$case_alt_60;
+      4'b0111 : c$app_arg_37 = c$case_alt_59;
+      default : c$app_arg_37 = c$ds_app_arg_1[345:314];
     endcase
   end
 
-  assign c$case_alt_97 = (byteOff < 2'd2) ? ((result_37 & 32'b11111111111111110000000000000000) | h16) : ((result_37 & 32'b00000000000000001111111111111111) | (h16 << (64'sd16)));
+  assign c$case_alt_59 = (byteOff < 2'd2) ? ((result_32 & 32'b11111111111111110000000000000000) | h16) : ((result_32 & 32'b00000000000000001111111111111111) | (h16 << (64'sd16)));
 
-  assign c$case_alt_98 = (byteOff == 2'd0) ? ((result_37 & 32'b11111111111111111111111100000000) | b8) : c$case_alt_99;
+  assign c$case_alt_60 = (byteOff == 2'd0) ? ((result_32 & 32'b11111111111111111111111100000000) | b8) : c$case_alt_61;
 
   assign h16 = {16'b0000000000000000,(c$h16_app_arg[15 : 0])};
 
-  assign c$case_alt_99 = (byteOff == 2'd1) ? ((result_37 & 32'b11111111111111110000000011111111) | (b8 << (64'sd8))) : c$case_alt_100;
+  assign c$case_alt_61 = (byteOff == 2'd1) ? ((result_32 & 32'b11111111111111110000000011111111) | (b8 << (64'sd8))) : c$case_alt_62;
 
-  assign c$case_alt_100 = (byteOff == 2'd2) ? ((result_37 & 32'b11111111000000001111111111111111) | (b8 << (64'sd16))) : ((result_37 & 32'b00000000111111111111111111111111) | (b8 << (64'sd24)));
+  assign c$case_alt_62 = (byteOff == 2'd2) ? ((result_32 & 32'b11111111000000001111111111111111) | (b8 << (64'sd16))) : ((result_32 & 32'b00000000111111111111111111111111) | (b8 << (64'sd24)));
 
   assign c$bv_7 = (c$memCtrlLoadOut_app_arg & 32'd3);
 
@@ -1605,17 +1344,17 @@ module top
 
   always @(*) begin
     case(c$memCtrlStoreOut_app_arg)
-      4'b0110 : c$case_alt_101 = {{c$bv_8[0+:8],
-                                   1'b1},
-                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
-      4'b0111 : c$case_alt_101 = {{c$bv_9[0+:8],
-                                   1'b1},
-                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
-      4'b1000 : c$case_alt_101 = {{c$bv_10[0+:8],
-                                   1'b1},
-                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
-      default : c$case_alt_101 = {memCtrl,
-                                  {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+      4'b0110 : c$case_alt_63 = {{c$bv_8[0+:8],
+                                  1'b1},
+                                 {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+      4'b0111 : c$case_alt_63 = {{c$bv_9[0+:8],
+                                  1'b1},
+                                 {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+      4'b1000 : c$case_alt_63 = {{c$bv_10[0+:8],
+                                  1'b1},
+                                 {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
+      default : c$case_alt_63 = {memCtrl,
+                                 {1'b0,42'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx}};
     endcase
   end
 
@@ -1629,18 +1368,18 @@ module top
     endcase
   end
 
-  assign c$s_9 = ($signed(selByte));
+  assign c$s_5 = ($signed(selByte));
 
-  assign c$s_10 = ($signed(selHalf));
+  assign c$s_6 = ($signed(selHalf));
 
   always @(*) begin
     case(c$memCtrlLoadOut_app_arg_0)
-      4'b0001 : result_24 = ($unsigned(($signed({{(32-8) {c$s_9[8-1]}},c$s_9}))));
-      4'b0010 : result_24 = ($unsigned(($signed({{(32-16) {c$s_10[16-1]}},c$s_10}))));
-      4'b0011 : result_24 = result_37;
-      4'b0100 : result_24 = {24'b000000000000000000000000,selByte};
-      4'b0101 : result_24 = {16'b0000000000000000,selHalf};
-      default : result_24 = 32'b00000000000000000000000000000000;
+      4'b0001 : result_19 = ($unsigned(($signed({{(32-8) {c$s_5[8-1]}},c$s_5}))));
+      4'b0010 : result_19 = ($unsigned(($signed({{(32-16) {c$s_6[16-1]}},c$s_6}))));
+      4'b0011 : result_19 = result_32;
+      4'b0100 : result_19 = {24'b000000000000000000000000,selByte};
+      4'b0101 : result_19 = {16'b0000000000000000,selHalf};
+      default : result_19 = 32'b00000000000000000000000000000000;
     endcase
   end
 
@@ -1656,13 +1395,13 @@ module top
 
   assign byteOff_0 = c$bv_11[0+:2];
 
-  assign c$selByte_app_arg = result_37;
+  assign c$selByte_app_arg = result_32;
 
-  assign c$case_alt_102 = (c$memCtrlLoadOut_app_arg == 32'd65536) ? 32'b00000000000000000000000000000000 : c$case_alt_103;
+  assign c$case_alt_64 = (c$memCtrlLoadOut_app_arg == 32'd65536) ? 32'b00000000000000000000000000000000 : c$case_alt_65;
 
-  assign c$case_alt_103 = (c$memCtrlLoadOut_app_arg == 32'd65540) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
+  assign c$case_alt_65 = (c$memCtrlLoadOut_app_arg == 32'd65540) ? 32'b00000000000000000000000000000001 : 32'b00000000000000000000000000000000;
 
-  assign result_25 = (c$memCtrlLoadOut_app_arg <= 32'd4095) ? result_24 : c$case_alt_102;
+  assign result_20 = (c$memCtrlLoadOut_app_arg <= 32'd4095) ? result_19 : c$case_alt_64;
 
   assign memCtrl = c$ds_app_arg_1[202:194];
 
@@ -1680,7 +1419,7 @@ module top
     endcase
   end
 
-  assign cpuEn = c$cpuEn_case_alt & (~ c$ds_app_arg_1[798:798]);
+  assign cpuEn = c$cpuEn_case_alt & (~ c$ds_app_arg_1[767:767]);
 
   always @(*) begin
     case(c$cpuEn_case_scrut)
@@ -1689,17 +1428,17 @@ module top
     endcase
   end
 
-  assign c$dtt_rhs_2 = c$ds_app_arg_1[853:852];
+  assign c$dtt_rhs_7 = c$ds_app_arg_1[822:821];
 
-  assign c$cpuEn_case_scrut = $unsigned(c$dtt_rhs_2);
+  assign c$cpuEn_case_scrut = $unsigned(c$dtt_rhs_7);
 
-  assign rxVld = result_26[0:0];
+  assign rxVld = result_21[0:0];
 
-  assign rxByte = result_26[8:1];
+  assign rxByte = result_21[8:1];
 
-  assign \rx'  = result_26[42:9];
+  assign \rx'  = result_21[42:9];
 
-  assign result_26 = {{ds8[23:22],   ds8[21:12],
+  assign result_21 = {{ds8[23:22],   ds8[21:12],
                        ds8[11:9],   \shift' ,   uart_rx_pin,
                        c$ds_app_arg_1[34:34],   c$dataOut_case_alt,
                        wild3},   {c$dataOut_case_alt,   wild3}};
@@ -1715,8 +1454,8 @@ module top
   always @(*) begin
     case(ds8_selection_2)
       2'b00 : ds8 = c$ds8_case_alt_1;
-      2'b01 : ds8 = result_28;
-      2'b10 : ds8 = result_27;
+      2'b01 : ds8 = result_23;
+      2'b10 : ds8 = result_22;
       default : ds8 = c$ds8_case_alt_0;
     endcase
   end
@@ -1733,15 +1472,15 @@ module top
                                                   1'b0} : {2'd0,   10'd0,   3'd0,
                                                            c$ds_app_arg_1[42:35],   1'b0};
 
-  assign result_27 = c$ds8_case_scrut ? c$ds8_case_alt_2 : c$uartRxStep_failOut;
+  assign result_22 = c$ds8_case_scrut ? c$ds8_case_alt_2 : c$uartRxStep_failOut;
 
   assign c$ds8_case_alt_2 = (c$ds_app_arg_1[45:43] == 3'd7) ? {2'd3,
                                                                10'd0,   c$ds_app_arg_1[45:43],   shifted,
                                                                1'b0} : c$uartRxStep_failOut;
 
-  assign c$ds8_case_scrut = c$ds_app_arg_1[55:46] == 10'd702;
+  assign c$ds8_case_scrut = c$ds_app_arg_1[55:46] == 10'd867;
 
-  assign result_28 = (c$ds_app_arg_1[55:46] == 10'd350) ? c$ds8_case_alt_3 : c$uartRxStep_failOut_0;
+  assign result_23 = (c$ds_app_arg_1[55:46] == 10'd433) ? c$ds8_case_alt_3 : c$uartRxStep_failOut_0;
 
   assign c$ds8_case_alt_3 = c$ds8_case_scrut_0 ? {2'd2,
                                                   10'd0,   3'd0,   c$ds_app_arg_1[42:35],
@@ -1749,7 +1488,7 @@ module top
 
   assign c$ds8_case_scrut_0 = c$ds_app_arg_1[33:33] == 1'b0;
 
-  assign c$uartRxStep_failOut = (c$ds_app_arg_1[55:46] == 10'd702) ? {2'd2,
+  assign c$uartRxStep_failOut = (c$ds_app_arg_1[55:46] == 10'd867) ? {2'd2,
                                                                       10'd0,   c$ds_app_arg_1[45:43] + 3'd1,
                                                                       shifted,   1'b0} : {2'd2,
                                                                                           c$ds_app_arg_1[55:46] + 10'd1,
@@ -1761,14 +1500,14 @@ module top
 
   assign shifted = {((c$ds_app_arg_1[33:33])),(c$bv_12[7 : 1])};
 
-  assign c$uartRxStep_failOut_0 = (c$ds_app_arg_1[55:46] == 10'd350) ? {2'd0,
+  assign c$uartRxStep_failOut_0 = (c$ds_app_arg_1[55:46] == 10'd433) ? {2'd0,
                                                                         10'd0,   3'd0,   c$ds_app_arg_1[42:35],
                                                                         1'b0} : {2'd1,
                                                                                  c$ds_app_arg_1[55:46] + 10'd1,
                                                                                  c$ds_app_arg_1[45:43],
                                                                                  c$ds_app_arg_1[42:35],   1'b0};
 
-  assign result_29 = {{ds6[23:22],   ds6[21:12],
+  assign result_24 = {{ds6[23:22],   ds6[21:12],
                        ds6[11:9],   ds6[8:1],   \pin' },   {\pin' ,
                                                             busy}};
 
@@ -1780,7 +1519,7 @@ module top
     case(ds6_selection_2)
       2'b00 : ds6 = c$ds6_case_alt_1;
       2'b01 : ds6 = c$ds6_case_alt_0;
-      2'b10 : ds6 = result_30;
+      2'b10 : ds6 = result_25;
       default : ds6 = c$ds6_case_alt;
     endcase
   end
@@ -1803,13 +1542,13 @@ module top
 
   assign send = c$ds8_case_alt_4[0:0];
 
-  assign result_30 = c$ds6_case_scrut ? c$ds6_case_alt_2 : c$uartTxStep_failOut;
+  assign result_25 = c$ds6_case_scrut ? c$ds6_case_alt_2 : c$uartTxStep_failOut;
 
   assign c$ds6_case_alt_2 = (c$ds_app_arg_1[11:9] == 3'd7) ? {2'd3,
                                                               10'd0,   c$ds_app_arg_1[11:9],   shifted_0,
                                                               bit0} : c$uartTxStep_failOut;
 
-  assign c$ds6_case_scrut = c$ds_app_arg_1[21:12] == 10'd702;
+  assign c$ds6_case_scrut = c$ds_app_arg_1[21:12] == 10'd867;
 
   assign c$ds6_app_arg = c$ds_app_arg_1[21:12] + 10'd1;
 
@@ -1827,11 +1566,11 @@ module top
     endcase
   end
 
-  assign c$dtt_rhs_6 = c$ds_app_arg_1[23:22];
+  assign c$dtt_rhs_11 = c$ds_app_arg_1[23:22];
 
-  assign c$busy_case_scrut = $unsigned(c$dtt_rhs_6);
+  assign c$busy_case_scrut = $unsigned(c$dtt_rhs_11);
 
-  assign c$uartTxStep_failOut = (c$ds_app_arg_1[21:12] == 10'd702) ? {2'd2,
+  assign c$uartTxStep_failOut = (c$ds_app_arg_1[21:12] == 10'd867) ? {2'd2,
                                                                       10'd0,   c$ds_app_arg_1[11:9] + 3'd1,
                                                                       shifted_0,   bit0} : {2'd2,
                                                                                             c$ds_app_arg_1[21:12] + 10'd1,
@@ -1845,29 +1584,29 @@ module top
 
   assign c$shifted_app_arg = c$ds_app_arg_1[8:1];
 
-  assign c$tupIn = c$ds_app_arg_1[798:798] ? c$tupIn_case_alt : {fifo1,
-                                                                 c$ds_app_arg_1[853:774],   {fifo1,
-                                                                                             c$ds_app_arg_1[853:774]}};
+  assign c$tupIn = c$ds_app_arg_1[767:767] ? c$tupIn_case_alt : {fifo1,
+                                                                 c$ds_app_arg_1[822:743],   {fifo1,
+                                                                                             c$ds_app_arg_1[822:743]}};
 
   assign c$tupIn_case_alt = ((fifo1[7:4] + 4'd1) == fifo1[3:0]) ? {fifo1,
-                                                                   c$ds_app_arg_1[853:774],   {fifo1,
-                                                                                               c$ds_app_arg_1[853:774]}} : {c$case_alt_104,
+                                                                   c$ds_app_arg_1[822:743],   {fifo1,
+                                                                                               c$ds_app_arg_1[822:743]}} : {c$case_alt_66,
                                                                                                                             wild4,
-                                                                                                                            {c$case_alt_104,
+                                                                                                                            {c$case_alt_66,
                                                                                                                              wild4}};
 
-  assign wild4 = {c$ds_app_arg_1[853:852],
-                  c$ds_app_arg_1[851:840],
-                  c$ds_app_arg_1[839:808],
-                  c$ds_app_arg_1[807:807],
-                  c$ds_app_arg_1[806:799],   1'b0,
-                  c$ds_app_arg_1[797:790],
-                  c$ds_app_arg_1[789:774]};
+  assign wild4 = {c$ds_app_arg_1[822:821],
+                  c$ds_app_arg_1[820:809],
+                  c$ds_app_arg_1[808:777],
+                  c$ds_app_arg_1[776:776],
+                  c$ds_app_arg_1[775:768],   1'b0,
+                  c$ds_app_arg_1[766:759],
+                  c$ds_app_arg_1[758:743]};
 
-  assign c$case_alt_104 = {c$app_arg_50,
-                           fifo1[7:4] + 4'd1,   fifo1[3:0]};
+  assign c$case_alt_66 = {c$app_arg_38,
+                          fifo1[7:4] + 4'd1,   fifo1[3:0]};
 
-  assign c$i_279 = fifo1[7:4];
+  assign c$i_222 = fifo1[7:4];
 
   assign c$vec_1 = fifo1[135:8];
 
@@ -1875,7 +1614,7 @@ module top
   genvar i_1;
   generate
   for (i_1=0;i_1<16;i_1=i_1+1) begin : vector_replace_1
-    assign c$app_arg_50[(15-i_1)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_279})) == i_1 ? c$ds_app_arg_1[797:790] : c$vec_1[(15-i_1)*8+:8];
+    assign c$app_arg_38[(15-i_1)*8+:8] = ($unsigned({{(64-4) {1'b0}},c$i_222})) == i_1 ? c$ds_app_arg_1[766:759] : c$vec_1[(15-i_1)*8+:8];
   end
   endgenerate
   // vector replace end
@@ -1887,22 +1626,22 @@ module top
 
   always @(*) begin
     case(c$ds8_case_scrut_1)
-      64'sd0 : c$ds8_case_alt_5 = {c$case_alt_105[143:8],
-                                   c$case_alt_105[7:0],   1'b1};
+      64'sd0 : c$ds8_case_alt_5 = {c$case_alt_67[143:8],
+                                   c$case_alt_67[7:0],   1'b1};
       default : c$ds8_case_alt_5 = {c$ds_app_arg_1[193:58],
                                     8'b00000000,   1'b0};
     endcase
   end
 
-  assign c$dtt_rhs_10 = c$ds_app_arg_1[23:22];
+  assign c$dtt_rhs_15 = c$ds_app_arg_1[23:22];
 
-  assign c$ds8_case_scrut_1 = $unsigned(c$dtt_rhs_10);
+  assign c$ds8_case_scrut_1 = $unsigned(c$dtt_rhs_15);
 
-  assign c$case_alt_105 = {{c$ds_app_arg_1[193:66],
-                            c$ds_app_arg_1[65:62],
-                            c$ds_app_arg_1[61:58] + 4'd1},   c$app_arg_51};
+  assign c$case_alt_67 = {{c$ds_app_arg_1[193:66],
+                           c$ds_app_arg_1[65:62],
+                           c$ds_app_arg_1[61:58] + 4'd1},   c$app_arg_39};
 
-  assign c$i_283 = c$ds_app_arg_1[61:58];
+  assign c$i_226 = c$ds_app_arg_1[61:58];
 
   assign c$vecFlat = c$ds_app_arg_1[193:66];
 
@@ -1914,12 +1653,12 @@ module top
     assign vecArray[(16-1)-i_2] = c$vecFlat[i_2*8+:8];
   end
   endgenerate
-  assign c$app_arg_51 = vecArray[($unsigned({{(64-4) {1'b0}},c$i_283}))];
+  assign c$app_arg_39 = vecArray[($unsigned({{(64-4) {1'b0}},c$i_226}))];
   // index end
 
-  assign result_31 = ds1[8:8] ? c$ds_case_alt : result_32;
+  assign result_26 = ds1[8:8] ? c$ds_case_alt : result_27;
 
-  assign c$ds_case_alt = (wa == pra) ? wd : result_32;
+  assign c$ds_case_alt = (wa == pra) ? wd : result_27;
 
   assign wd = ds1[1:0];
 
@@ -1945,10 +1684,10 @@ module top
   end
   // register end
 
-  assign c$i_286 = ds1_0[7:2];
+  assign c$i_229 = ds1_0[7:2];
 
   // blockRam begin
-  reg [1:0] result_32_RAM [0:64-1];
+  reg [1:0] result_27_RAM [0:64-1];
 
   reg [127:0] ram_init;
   integer i_3;
@@ -1961,15 +1700,15 @@ module top
    2'd1,   2'd1,   2'd1,   2'd1,   2'd1,   2'd1,   2'd1,   2'd1,   2'd1,   2'd1,
    2'd1,   2'd1,   2'd1,   2'd1};
     for (i_3=0; i_3 < 64; i_3 = i_3 + 1) begin
-      result_32_RAM[64-1-i_3] = ram_init[i_3*2+:2];
+      result_27_RAM[64-1-i_3] = ram_init[i_3*2+:2];
     end
   end
 
-  always @(posedge clk) begin : result_32_blockRam
+  always @(posedge clk) begin : result_27_blockRam
     if (c$ds2_app_arg) begin
-      result_32_RAM[($unsigned({{(64-6) {1'b0}},c$i_286}))] <= ds1_0[1:0];
+      result_27_RAM[($unsigned({{(64-6) {1'b0}},c$i_229}))] <= ds1_0[1:0];
     end
-    result_32 <= result_32_RAM[($unsigned({{(64-6) {1'b0}},bhtRdAddrS}))];
+    result_27 <= result_27_RAM[($unsigned({{(64-6) {1'b0}},bhtRdAddrS}))];
   end
   // blockRam end
 
@@ -1984,9 +1723,9 @@ module top
 
   assign bhtRdAddrS = fullOut[14:9];
 
-  assign result_33 = prevRegWrCmd[37:37] ? c$ds_case_alt_0 : result_34;
+  assign result_28 = prevRegWrCmd[37:37] ? c$ds_case_alt_0 : result_29;
 
-  assign c$ds_case_alt_0 = (wa_0 == pra_0) ? wd_0 : result_34;
+  assign c$ds_case_alt_0 = (wa_0 == pra_0) ? wd_0 : result_29;
 
   // register begin
   always @(posedge clk or  posedge  eta1_0) begin : pra_0_register
@@ -1999,7 +1738,7 @@ module top
   // register end
 
   // blockRam begin
-  reg [31:0] result_34_RAM [0:32-1];
+  reg [31:0] result_29_RAM [0:32-1];
 
   reg [1023:0] ram_init_0;
   integer i_4;
@@ -2021,23 +1760,23 @@ module top
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000,
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000};
     for (i_4=0; i_4 < 32; i_4 = i_4 + 1) begin
-      result_34_RAM[32-1-i_4] = ram_init_0[i_4*32+:32];
+      result_29_RAM[32-1-i_4] = ram_init_0[i_4*32+:32];
     end
   end
 
-  always @(posedge clk) begin : result_34_blockRam
+  always @(posedge clk) begin : result_29_blockRam
     if (c$ds2_app_arg_1) begin
-      result_34_RAM[c$ds2_app_arg_0] <= ds1_1[31:0];
+      result_29_RAM[c$ds2_app_arg_0] <= ds1_1[31:0];
     end
-    result_34 <= result_34_RAM[($unsigned({{(64-5) {1'b0}},regRdAddrB}))];
+    result_29 <= result_29_RAM[($unsigned({{(64-5) {1'b0}},regRdAddrB}))];
   end
   // blockRam end
 
   assign regRdAddrB = fullOut[57:53];
 
-  assign result_35 = prevRegWrCmd[37:37] ? c$ds_case_alt_1 : result_36;
+  assign result_30 = prevRegWrCmd[37:37] ? c$ds_case_alt_1 : result_31;
 
-  assign c$ds_case_alt_1 = (wa_0 == pra_1) ? wd_0 : result_36;
+  assign c$ds_case_alt_1 = (wa_0 == pra_1) ? wd_0 : result_31;
 
   assign wd_0 = prevRegWrCmd[31:0];
 
@@ -2064,7 +1803,7 @@ module top
   // register end
 
   // blockRam begin
-  reg [31:0] result_36_RAM [0:32-1];
+  reg [31:0] result_31_RAM [0:32-1];
 
   reg [1023:0] ram_init_1;
   integer i_5;
@@ -2086,21 +1825,21 @@ module top
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000,
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000};
     for (i_5=0; i_5 < 32; i_5 = i_5 + 1) begin
-      result_36_RAM[32-1-i_5] = ram_init_1[i_5*32+:32];
+      result_31_RAM[32-1-i_5] = ram_init_1[i_5*32+:32];
     end
   end
 
-  always @(posedge clk) begin : result_36_blockRam
+  always @(posedge clk) begin : result_31_blockRam
     if (c$ds2_app_arg_1) begin
-      result_36_RAM[c$ds2_app_arg_0] <= ds1_1[31:0];
+      result_31_RAM[c$ds2_app_arg_0] <= ds1_1[31:0];
     end
-    result_36 <= result_36_RAM[($unsigned({{(64-5) {1'b0}},regRdAddrA}))];
+    result_31 <= result_31_RAM[($unsigned({{(64-5) {1'b0}},regRdAddrA}))];
   end
   // blockRam end
 
-  assign c$i_355 = ds1_1[36:32];
+  assign c$i_298 = ds1_1[36:32];
 
-  assign c$ds2_app_arg_0 = $unsigned({{(64-5) {1'b0}},c$i_355});
+  assign c$ds2_app_arg_0 = $unsigned({{(64-5) {1'b0}},c$i_298});
 
   assign ds1_1 = regWrCmdS[37:37] ? a1_0 : {{5 {1'bx}},
                                             32'bxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx};
@@ -2113,9 +1852,9 @@ module top
 
   assign regRdAddrA = fullOut[62:58];
 
-  assign result_37 = ds1_2[42:42] ? c$ds_case_alt_2 : result_38;
+  assign result_32 = ds1_2[42:42] ? c$ds_case_alt_2 : result_33;
 
-  assign c$ds_case_alt_2 = (wa_1 == pra_2) ? wd_1 : result_38;
+  assign c$ds_case_alt_2 = (wa_1 == pra_2) ? wd_1 : result_33;
 
   assign wd_1 = ds1_2[31:0];
 
@@ -2141,10 +1880,10 @@ module top
   end
   // register end
 
-  assign c$i_1383 = ds1_3[41:32];
+  assign c$i_1326 = ds1_3[41:32];
 
   // blockRam begin
-  reg [31:0] result_38_RAM [0:1024-1];
+  reg [31:0] result_33_RAM [0:1024-1];
 
   reg [32767:0] ram_init_2;
   integer i_6;
@@ -2662,15 +2401,15 @@ module top
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000,
    32'b00000000000000000000000000000000,   32'b00000000000000000000000000000000};
     for (i_6=0; i_6 < 1024; i_6 = i_6 + 1) begin
-      result_38_RAM[1024-1-i_6] = ram_init_2[i_6*32+:32];
+      result_33_RAM[1024-1-i_6] = ram_init_2[i_6*32+:32];
     end
   end
 
-  always @(posedge clk) begin : result_38_blockRam
+  always @(posedge clk) begin : result_33_blockRam
     if (c$ds2_app_arg_2) begin
-      result_38_RAM[($unsigned({{(64-10) {1'b0}},c$i_1383}))] <= ds1_3[31:0];
+      result_33_RAM[($unsigned({{(64-10) {1'b0}},c$i_1326}))] <= ds1_3[31:0];
     end
-    result_38 <= result_38_RAM[($unsigned({{(64-10) {1'b0}},dataRdAddr}))];
+    result_33 <= result_33_RAM[($unsigned({{(64-10) {1'b0}},dataRdAddr}))];
   end
   // blockRam end
 
@@ -2685,12 +2424,12 @@ module top
 
   assign dataRdAddr = fullOut[115:106];
 
-  assign c$i_2409 = fullOut[168:159];
+  assign c$i_2352 = fullOut[168:159];
 
-  assign c$i_2410 = ds1_4[41:32];
+  assign c$i_2353 = ds1_4[41:32];
 
   // blockRam begin
-  reg [31:0] result_39_RAM [0:1024-1];
+  reg [31:0] result_34_RAM [0:1024-1];
 
   reg [32767:0] ram_init_3;
   integer i_7;
@@ -3208,15 +2947,15 @@ module top
    32'b00000000000000000000000000010011,   32'b00000000000000000000000000010011,
    32'b00000000000000000000000000010011,   32'b00000000000000000000000000010011};
     for (i_7=0; i_7 < 1024; i_7 = i_7 + 1) begin
-      result_39_RAM[1024-1-i_7] = ram_init_3[i_7*32+:32];
+      result_34_RAM[1024-1-i_7] = ram_init_3[i_7*32+:32];
     end
   end
 
-  always @(posedge clk) begin : result_39_blockRam
+  always @(posedge clk) begin : result_34_blockRam
     if (c$ds_app_arg_0) begin
-      result_39_RAM[($unsigned({{(64-10) {1'b0}},c$i_2410}))] <= ds1_4[31:0];
+      result_34_RAM[($unsigned({{(64-10) {1'b0}},c$i_2353}))] <= ds1_4[31:0];
     end
-    result_39 <= result_39_RAM[($unsigned({{(64-10) {1'b0}},c$i_2409}))];
+    result_34 <= result_34_RAM[($unsigned({{(64-10) {1'b0}},c$i_2352}))];
   end
   // blockRam end
 
@@ -3237,25 +2976,31 @@ module top
       c$ds_app_arg_1 <= {{2'd0,   12'd0,   32'b00000000000000000000000000000000,   1'b1,   8'b11111111,
     1'b0,   8'b00000000,   16'd0},   {32'd0,   {1'b0,   32'd0,
                                                 32'b00000000000000000000000000000000,
-                                                32'd0,   1'b0},   {1'b0,   32'd0,
-                                                                   {4'd0,   1'd1,
-                                                                    2'd0,   1'b0,
-                                                                    5'd0,   5'd0,
-                                                                    5'd0,
-                                                                    32'sd0,
-                                                                    4'd0,   3'd0,
-                                                                    1'b0},
-                                                                   32'b00000000000000000000000000000000,
-                                                                   32'b00000000000000000000000000000000,
-                                                                   32'd0,   1'b0,
-                                                                   32'd0},
-                                      {1'b0,   32'd0,   5'd0,   1'b0,   2'd0,
+                                                1'b0},   {1'b0,   32'd0,   {4'd0,
+                                                                            1'd1,
+                                                                            2'd0,
+                                                                            1'b0,
+                                                                            5'd0,
+                                                                            5'd0,
+                                                                            5'd0,
+                                                                            32'sd0,
+                                                                            4'd0,
+                                                                            3'd0,
+                                                                            1'b0},
+                                                          32'b00000000000000000000000000000000,
+                                                          32'b00000000000000000000000000000000,
+                                                          1'b0,   32'd0,   32'd0,
+                                                          1'b0},   {1'b0,
+                                                                    32'd0,
+                                                                    5'd0,   1'b0,
+                                                                    2'd0,
+                                                                    32'b00000000000000000000000000000000,
+                                                                    32'b00000000000000000000000000000000,
+                                                                    4'd0},
+                                      {1'b0,   5'd0,   1'b0,   2'd0,
                                        32'b00000000000000000000000000000000,
                                        32'b00000000000000000000000000000000,
-                                       4'd0},   {1'b0,   5'd0,   1'b0,   2'd0,
-                                                 32'b00000000000000000000000000000000,
-                                                 32'b00000000000000000000000000000000,
-                                                 32'b00000000000000000000000000000000},
+                                       32'b00000000000000000000000000000000},
                                       1'b0,   1'b0},   {8'b00000000,   1'b0},
    {{8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,
      8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,   8'b00000000,
@@ -3264,7 +3009,7 @@ module top
                                        1'b1,   1'b1,   8'b00000000,   1'b0},
    {2'd0,   10'd0,   3'd0,   8'b00000000,   1'b1}};
     end else begin
-      c$ds_app_arg_1 <= result_0[1029:176];
+      c$ds_app_arg_1 <= result_0[998:176];
     end
   end
   // register end
@@ -3272,7 +3017,7 @@ module top
   // resetGen begin
   // pragma translate_off
   reg  rst;
-  localparam reset_period = 1000000 - 10 + (1 * 123460);
+  localparam reset_period = 1000000 - 10 + (1 * 100000);
   `ifndef VERILATOR
   initial begin
     #1 rst =  1 ;

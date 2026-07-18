@@ -19,8 +19,55 @@
 -- ── Pipeline ─────────────────────────────────────────────────────────────
 --   5-stage: IF → ID → EX → MEM → WB
 --   In-order scalar.
---   Branch resolution in EX; 2-bit saturating BHT (64 entries, registered).
+--   Branch resolution in EX; 2-bit saturating BHT (64 entries, blockRam).
 --   JAL predicted taken in ID; JALR always flushes.
+--
+-- ── Timing changes vs previous revision (CP9–CP12) ───────────────────────
+--
+--   CP9 – Direction-only misprediction.
+--         INVARIANT: because there is no BTB, IF computes a taken
+--         prediction's target as rvPC + imm(instrWord) — the *same* PC and
+--         the *same* instruction bits that ID later uses to compute
+--         idexBrTarget.  A taken prediction therefore can never have a
+--         wrong target; only the taken/not-taken *direction* can be wrong.
+--         JALR is never predicted taken, so predTaken=False and
+--         brActualTaken=True always flags it.  Hence:
+--
+--             mispredicted = valid ∧ isBranch ∧ (taken ⊕ predTaken)
+--
+--         This deletes the 32-bit `idexPredPC /= actualNextPC` comparator
+--         (a full carry chain) from the EX critical path, and deletes the
+--         ifidPredPC / idexPredPC pipeline fields entirely.
+--         NOTE: if a BTB is ever added, this invariant breaks and a
+--         registered target-mismatch bit must be reintroduced.
+--         (Pathological corner: a JALR whose target happens to equal PC+4
+--         previously did not flush; it now always flushes.  Architecturally
+--         identical, costs 2 cycles in a case that essentially never occurs.)
+--
+--   CP10 – PC+4 chain.
+--         idexPC4 (= ifidPC + 4) is computed in ID and registered, so the
+--         not-taken leg of actualNextPC is a DFF instead of an adder.
+--         It is carried forward as exmemPC4, so the MEM-stage `exmemPC + 4`
+--         adder feeding memwbPc4 disappears as well.
+--
+--   CP11 – Valid-only flush gating for ID/EX (extends CP7 to idex').
+--         Only idexValid is gated by `mispredicted`; all other idex' fields
+--         load unconditionally from IF/ID.  Stale fields are harmless
+--         because every EX-stage side effect (exmem', bhtWrCmd,
+--         mispredicted, stallNext') is qualified by idexValid.  This removes
+--         a ~150-bit-wide mux whose select was the late mispredict signal.
+--
+--   CP12 – Parallel IF target adders.
+--         tgtJal and tgtBr are computed concurrently and selected by opcode
+--         afterwards, instead of muxing the immediate *into* a shared adder.
+--         Moves the opcode decode off the adder input path.
+--
+--   Fix – BHT update and mispredict are now qualified by ¬loadUseHazard.
+--         Previously, a branch being squashed/replayed by a load-use stall
+--         still evaluated on stale operands and wrote the BHT (and relied on
+--         nextPC guard ordering to mask the bogus mispredict).  Both are now
+--         gated explicitly, which also makes the nextPC muxes commute so the
+--         late `mispredicted` select can sit closest to the PC register.
 --
 module CPURiscV where
 
@@ -363,20 +410,25 @@ memCtrlStore mc memOp byteAddr storeVal oldWord
 -- ===========================================================================
 
 -- IF/ID -----------------------------------------------------------------------
+-- CP9: ifidPredPC removed.  Direction-only prediction (see module header):
+-- a taken prediction's target is always exactly ifidPC + imm(ifidInstr),
+-- which ID recomputes as idexBrTarget, so the target need not be carried.
 
 data IfIdReg = IfIdReg
   { ifidValid     :: Bool
   , ifidPC        :: PC
   , ifidInstr     :: Word32
-  , ifidPredPC    :: PC
   , ifidPredTaken :: Bool
   } deriving (Generic, NFDataX, Show)
 
 emptyIfId :: IfIdReg
-emptyIfId = IfIdReg False 0 0 0 False
+emptyIfId = IfIdReg False 0 0 False
 
 -- ID/EX -----------------------------------------------------------------------
 -- CP1: rs1Val/rs2Val have the MEM/WB bypass pre-applied.
+-- CP9: idexPredPC removed; idexIsJalr added (registered decode bit so EX
+--      never inspects uAluOp to distinguish JAL/JALR).
+-- CP10: idexPC4 pre-computed in ID.
 
 data IdExReg = IdExReg
   { idexValid     :: Bool
@@ -384,21 +436,24 @@ data IdExReg = IdExReg
   , idexUop       :: MicroOp
   , idexRs1Val    :: Word32
   , idexRs2Val    :: Word32
-  , idexPredPC    :: PC
   , idexPredTaken :: Bool
   -- CP8: branch/JAL target pre-computed in ID (= ifidPC + uImm), so EX
   -- mispredicted no longer drives a 32-bit adder on the critical path.
   , idexBrTarget  :: PC
+  , idexPC4       :: PC     -- CP10: ifidPC + 4, pre-computed in ID
+  , idexIsJalr    :: Bool   -- CP9: opcode(ifidInstr) == opJALR, registered
   } deriving (Generic, NFDataX, Show)
 
 emptyIdEx :: IdExReg
-emptyIdEx = IdExReg False 0 nopMicroOp 0 0 0 False 0
+emptyIdEx = IdExReg False 0 nopMicroOp 0 0 False 0 0 False
 
 -- EX/MEM ----------------------------------------------------------------------
+-- CP10: carries PC+4 (from idexPC4) instead of PC, deleting the MEM-stage
+-- +4 adder that fed memwbPc4.
 
 data ExMemReg = ExMemReg
   { exmemValid  :: Bool
-  , exmemPC     :: PC
+  , exmemPC4    :: PC
   , exmemRd     :: RegIdx
   , exmemWbEn   :: Bool
   , exmemWbSrc  :: WbSrc
@@ -458,9 +513,9 @@ initCpuStateRV = CpuStateRV
 -- Inputs:
 --   instrWord    – instruction from instruction blockRam at rvPC
 --   dataBramWord – data blockRam word for EX/MEM address (previous cycle)
---   regRdA       – CP4: register file port A output (rs1 of last cycle's ID instr)
+--   regRdA       – CP4: register file port A output (rs1 of last cycle's fetch)
+--   regRdB       – CP4: register file port B output (rs2 of last cycle's fetch)
 --   bhtRd        – CP5: BHT blockRam output for bhtIdx(rvPC) issued last cycle
---   regRdB       – CP4: register file port B output (rs2 of last cycle's ID instr)
 --   memCtrl      – peripheral state
 --   en           – clock enable
 --
@@ -532,7 +587,7 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
                         , memwbWbSrc  = exmemWbSrc exmem
                         , memwbAluOut = exmemAluOut exmem
                         , memwbMemVal = memReadVal
-                        , memwbPc4    = pack (exmemPC exmem + 4)
+                        , memwbPc4    = pack (exmemPC4 exmem)  -- CP10: no adder
                         }
                  else emptyMemWb
 
@@ -571,38 +626,43 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
 
       brActualTaken = evalBranch (uBranchOp uop) fwdRs1 fwdRs2
 
-      -- CP8: For BRANCH/JAL, brTarget is the pre-computed DFF idexBrTarget.
-      -- For JALR, brTarget is still aluResult (rs1+imm), but JALR is rare.
-      -- The expensive `idexPC + uImm` adder is now hidden in the ID stage.
-      brTarget = case uBranchOp uop of
-        BrJal ->
-          if uAluOp uop == AluAdd  -- JALR uses AluAdd; JAL uses AluLui
-            then unpack (aluResult .&. complement 1) :: PC
-            else idexBrTarget idex
-        _ -> idexBrTarget idex
+      -- CP8/CP9: For BRANCH/JAL, brTarget is the pre-computed DFF idexBrTarget.
+      -- For JALR (registered idexIsJalr bit), brTarget = aluResult & ~1.
+      jalrTarget = unpack (aluResult .&. complement 1) :: PC
+      brTarget   = if idexIsJalr idex then jalrTarget else idexBrTarget idex
 
-      actualNextPC = if brActualTaken then brTarget else idexPC idex + 4
+      -- CP10: not-taken leg is the registered idexPC4 (no adder in EX).
+      actualNextPC = if brActualTaken then brTarget else idexPC4 idex
 
+      isBranch = uBranchOp uop /= BrNone
+
+      -- CP9: direction-only misprediction (see module header for the
+      -- no-BTB target invariant).  JALR: predTaken is always False and
+      -- brActualTaken is always True, so the XOR flags it every time —
+      -- preserving "JALR always flushes".
+      -- Fix: qualified by ¬loadUseHazard so a branch being squashed/replayed
+      -- by a load-use stall cannot flag a bogus mispredict from stale
+      -- operands (previously masked only by nextPC guard ordering).
       mispredicted =
-        idexValid idex
-          && uBranchOp uop /= BrNone
-          && idexPredPC idex /= actualNextPC
+        idexValid idex && not loadUseHazard && isBranch
+          && (brActualTaken /= idexPredTaken idex)
 
       -- CP5: BHT is now an external blockRam; compute write command for this cycle.
-      -- CP2 semantics preserved: IF uses bhtRd (blockRam output from last cycle's
-      -- read address), so the EX→BHT→IF combinatorial loop is fully broken.
+      -- Fix: also qualified by ¬loadUseHazard so a squashed/replayed branch
+      -- does not update the BHT on stale operands (it will update once, on
+      -- the replayed execution).
       bhtUpdateIdx = bhtIdx (idexPC idex)
       bhtNew       = if brActualTaken then bhtStrengthenTaken    bhtRd
                                       else bhtStrengthenNotTaken bhtRd
       bhtWrCmd :: Maybe (Unsigned 6, BhtCounter)
-      bhtWrCmd = if idexValid idex && uBranchOp uop /= BrNone
+      bhtWrCmd = if idexValid idex && not loadUseHazard && isBranch
                    then Just (bhtUpdateIdx, bhtNew)
                    else Nothing
 
       exmem' = if idexValid idex && not loadUseHazard
                  then ExMemReg
                         { exmemValid  = True
-                        , exmemPC     = idexPC  idex
+                        , exmemPC4    = idexPC4 idex   -- CP10
                         , exmemRd     = uRd     uop
                         , exmemWbEn   = uWbEn   uop
                         , exmemWbSrc  = uWbSrc  uop
@@ -652,18 +712,31 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
       idexBrTarget' :: PC
       idexBrTarget' = unpack (pack (fromIntegral (ifidPC ifid) + uImm uop' :: Signed 32))
 
-      idex' =
-        if mispredicted || not (ifidValid ifid) || loadUseHazard
-          then emptyIdEx
-          else IdExReg
-                 { idexValid     = True
+      -- CP10: PC+4 pre-computed in ID
+      idexPC4' :: PC
+      idexPC4' = ifidPC ifid + 4
+
+      -- CP9: registered JALR discriminator
+      idexIsJalr' :: Bool
+      idexIsJalr' = opcode (ifidInstr ifid) == opJALR
+
+      -- CP11: only the valid bit sees the late `mispredicted` signal; all
+      -- other fields load unconditionally from IF/ID.  Stale fields with
+      -- idexValid = False are harmless: exmem', bhtWrCmd, mispredicted and
+      -- stallNext' are all qualified by idexValid.  This removes a wide
+      -- record mux (≈150 bits) whose select was on the EX critical path.
+      idexValid' = ifidValid ifid && not loadUseHazard && not mispredicted
+
+      idex' = IdExReg
+                 { idexValid     = idexValid'
                  , idexPC        = ifidPC       ifid
                  , idexUop       = uop'
                  , idexRs1Val    = rs1v
                  , idexRs2Val    = rs2v
-                 , idexPredPC    = ifidPredPC   ifid
                  , idexPredTaken = ifidPredTaken ifid
                  , idexBrTarget  = idexBrTarget'
+                 , idexPC4       = idexPC4'
+                 , idexIsJalr    = idexIsJalr'
                  }
 
   -- ── IF ──────────────────────────────────────────────────────────────────
@@ -673,30 +746,36 @@ stepCpuRV s@CpuStateRV{..} (instrWord, dataBramWord, regRdA, regRdB, bhtRd, memC
       bhtPred = bhtPredTaken bhtRd
       fetchOp = opcode instrWord
 
-      (ifPredTaken, ifPredTarget) =
-        if fetchOp == opJAL
-          then ( True
-               , unpack (pack (fromIntegral rvPC + immJ instrWord :: Signed 32)) :: PC )
-          else if fetchOp == opBRANCH && bhtPred
-                 then ( True
-                      , unpack (pack (fromIntegral rvPC + immB instrWord :: Signed 32)) :: PC )
-                 else (False, rvPC + 4)
+      -- CP12: compute both candidate targets in parallel and select the
+      -- result, instead of muxing the immediate into a shared adder.  This
+      -- takes the opcode/bhtPred decode off the adder input path; the two
+      -- carry chains run concurrently from BRAM Tco.
+      tgtJal  = unpack (pack (fromIntegral rvPC + immJ instrWord :: Signed 32)) :: PC
+      tgtBr   = unpack (pack (fromIntegral rvPC + immB instrWord :: Signed 32)) :: PC
+      pcPlus4 = rvPC + 4
 
-      nextPC
-        | loadUseHazard = idexPC idex  -- replay the consumer instruction
-        | mispredicted  = actualNextPC
-        | otherwise     = ifPredTarget
+      (ifPredTaken, ifPredTarget)
+        | fetchOp == opJAL               = (True,  tgtJal)
+        | fetchOp == opBRANCH && bhtPred = (True,  tgtBr)
+        | otherwise                      = (False, pcPlus4)
 
-      -- CP7+CP8: only ifidValid is gated by mispredicted (the long EX carry-chain
-      -- path).  All other ifid' fields are muxed only between DFF sources:
-      -- either "hold" (loadUseHazard) or "new fetch" (also DFFs: rvPC, instrWord,
-      -- ifPredTarget, ifPredTaken).  When ifidValid=False the stale field values
-      -- are harmless because idex' will be emptyIdEx.
+      -- Early selects (all-DFF) resolved first; the late `mispredicted`
+      -- select is the final 2:1 mux directly in front of the PC register
+      -- and BRAM address ports.  Safe to commute because mispredicted is
+      -- now explicitly gated by ¬loadUseHazard.
+      nextPCEarly = if loadUseHazard then idexPC idex  -- replay the consumer
+                                     else ifPredTarget
+      nextPC      = if mispredicted then actualNextPC else nextPCEarly
+
+      -- CP7+CP8: only ifidValid is gated by mispredicted (the long EX path).
+      -- All other ifid' fields are muxed only between DFF sources: either
+      -- "hold" (loadUseHazard) or "new fetch" (rvPC, instrWord, ifPredTaken).
+      -- When ifidValid=False the stale field values are harmless because
+      -- idexValid' will be False the following cycle.
       ifid' = IfIdReg
                  { ifidValid     = not loadUseHazard && not mispredicted
                  , ifidPC        = rvPC
                  , ifidInstr     = instrWord
-                 , ifidPredPC    = if loadUseHazard then ifidPredPC   ifid else ifPredTarget
                  , ifidPredTaken = if loadUseHazard then ifidPredTaken ifid else ifPredTaken
                  }
 

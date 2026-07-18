@@ -1,16 +1,20 @@
 /* pll_wrap.v – PLL wrapper for the Clash-generated CPURiscV top entity.
  *
- * Takes the Tang Nano 20K's 27 MHz oscillator, multiplies it to 81 MHz
- * using the on-chip rPLL, and feeds it into the Clash-generated `top`
- * module.  The wrapper exposes the same external ports as `top` so the
- * existing .cst pin-constraint file works unchanged.
+ * Takes the Tang Nano 20K's 27 MHz oscillator, multiplies it to 78 MHz
+ * (exactly 27 * 26 / 9 = 78 MHz) using the on-chip rPLL, and feeds it
+ * into the Clash-generated `top` module.  The wrapper exposes the same
+ * external ports as `top` so the existing .cst pin-constraint file works
+ * unchanged.
+ *
+ * This is the highest frequency achievable while satisfying both:
+ *   - PFD = FCLKIN / (IDIV+1) >= 3 MHz  (gowin_pack requirement)
+ *   - VCO in valid range
  *
  * Gowin rPLL (Apycula/gowin_pack formula):
  *   FOUT = FCLKIN × (FBDIV_SEL + 1) / (IDIV_SEL + 1)
- *        = 27    × 3               / 1               = 81 MHz
- *   VCO  = FOUT × ODIV_SEL   (must be 500–1250 MHz; valid: 2/4/8/16/32/48/64/80/96/112/128)
- *        = 81   × 8                                  = 648 MHz ✓
- *   (ODIV_SEL tunes the VCO frequency; it does NOT divide the output)
+ *        = 27    × 26              / 9               = 78 MHz
+ *   VCO  = FOUT × ODIV_SEL   (must be 500–1250 MHz)
+ *        = 78    × 8                                  = 624 MHz ✓
  *
  * Synthesis top module: pll_top  (set in config.lushay.json)
  */
@@ -23,15 +27,15 @@ module pll_top (
     output wire [5:0]  led
 );
 
-    // ── PLL: 27 MHz → 81 MHz ────────────────────────────────────────────
+    // ── PLL: 27 MHz → 78 MHz ──────────────────────────────────────────────────────
     wire clk_81;
     wire pll_lock;
 
     rPLL #(
         .FCLKIN     ("27"),   // input frequency string (MHz)
-        .IDIV_SEL   (0),      // IDIV  = IDIV_SEL  + 1 = 1
-        .FBDIV_SEL  (2),      // FBDIV = FBDIV_SEL + 1 = 3  → FOUT = 27*3 = 81 MHz
-        .ODIV_SEL   (8),      // VCO   = FOUT * ODIV_SEL    = 81*8  = 648 MHz (valid, in range)
+        .IDIV_SEL   (8),      // IDIV  = IDIV_SEL  + 1 = 9
+        .FBDIV_SEL  (25),     // FBDIV = FBDIV_SEL + 1 = 26 → FOUT = 27*26/9 = 78 MHz
+        .ODIV_SEL   (8),      // VCO   = FOUT * ODIV_SEL    = 78*8 = 624 MHz (valid, in range)
         .PSDA_SEL   ("0000"),
         .DYN_DA_EN  ("false"),
         .DUTYDA_SEL ("1000"),

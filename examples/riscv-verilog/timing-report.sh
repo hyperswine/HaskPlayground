@@ -52,7 +52,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 "$NEXTPNR" \
     --json config.json \
     --write config_pnr.json \
-    --freq 81 \
+    --freq 78 \
     --seed "$SEED" \
     --device GW2AR-LV18QN88C8/I7 \
     --vopt family=GW2A-18C \
@@ -72,7 +72,7 @@ if [[ $DO_PACK -eq 1 ]]; then
     echo "  [3/4] Bitstream (gowin_pack)"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     "$GOWIN_PACK" --device GW2AR-LV18QN88C8/I7 --cst tangnano-20k.cst \
-        config_pnr.json config.fs 2>&1 | tail -5
+        -o config.fs config_pnr.json 2>&1 | tail -5
     echo "  Bitstream written: config.fs"
     echo ""
 else

@@ -14,23 +14,34 @@
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 {-# HLINT ignore "Eta reduce" #-}
 
--- | Tang Nano 20K top-level for CPURiscV (optimised).
+-- | Tang Nano 20K top-level for CPURiscV (optimised, 100 MHz target).
 --
--- ── What changed vs v1 ────────────────────────────────────────────────────
+-- ── What changed vs v2 ────────────────────────────────────────────────────
 --
---   CP4 – Register file blockRam.
---         A third blockRam (regBram, 32 × 32-bit) is instantiated alongside
---         the existing instruction and data BRAMs.  Its read address is driven
---         by the rs1/rs2 fields of the instruction in IF/ID (one cycle of
---         read latency, hidden by the ID→EX pipeline register).  Its write
---         port is driven by regWrCmd from stepCpuRV.
+--   Clock domain retargeted from 81 MHz to 100 MHz (Dom100, vPeriod 10000).
+--   Regenerate the Gowin rPLL IP to match: from the 27 MHz oscillator,
+--   FBDIV/IDIV of 63/17 gives ≈100.06 MHz (ratio 63/17 ≈ 3.7059).  Set
+--   ClkFreqRV below to the *actual* PLL output frequency; the UART divisor
+--   tolerates < 1% error, so 100_000_000 is fine for 100.06 MHz.
 --
---         Write-first bypass: if regWrCmd.addr == the read address supplied
---         this cycle, the written value is returned directly (same logic as
---         the data BRAM bypass already present).
+--   Core changes live in CPURiscV.hs (CP9–CP12): direction-only mispredict
+--   detection (deletes the 32-bit predPC comparator from the EX critical
+--   path), registered PC+4 chain, valid-only ID/EX flush gating, and
+--   parallel IF target adders.  ifidPredPC/idexPredPC fields are gone;
+--   exmemPC is replaced by exmemPC4.  The stepCpuRV interface is unchanged.
 --
---   The sysStepRV Mealy function now threads regRdA/regRdB into stepCpuRV
---   and routes regWrCmd to the blockRam write port.
+--   regRdAddrA/B now use rs1Of/rs2Of (pure bit slices) instead of running
+--   the full `decode` on bramOut — same values, but guaranteed to be wires
+--   straight from the instruction BRAM output into the regfile address
+--   ports with no logic that synthesis must prune.
+--
+-- ── Earlier revisions ─────────────────────────────────────────────────────
+--
+--   CP4 – Register file blockRam (32 × 32-bit, dual read via replication,
+--         write-first bypass).
+--   CP5 – BHT blockRam (64 × 2-bit, write-first bypass).
+--   CP6 – regfile read addresses taken from bramOut, not ifidInstr, to
+--         break the ALU → mispredicted → regRdAddr chain.
 --
 -- ── Address map, UART protocol, pin assignments ──────────────────────────
 --   Unchanged from v1 – see v1 header for details.
@@ -46,11 +57,13 @@ import qualified Prelude as P
 -- Clock domain
 -- ===========================================================================
 
-createDomain vSystem {vName = "Dom80", vPeriod = 12346}
+createDomain vSystem {vName = "Dom100", vPeriod = 10000}
 
-type ClkFreqRV    = 81_000_000
+-- Set to the actual rPLL output frequency.  27 MHz × 63/17 ≈ 100.06 MHz;
+-- the resulting UART baud error is ≈0.06%, well inside tolerance.
+type ClkFreqRV    = 100_000_000
 type BaudRateRV   = 115_200
-type ClksPerBitRV = Div ClkFreqRV BaudRateRV
+type ClksPerBitRV = Div ClkFreqRV BaudRateRV   -- = 868, fits Unsigned 10
 type HalfBitRV    = Div ClksPerBitRV 2
 
 -- ===========================================================================
@@ -344,13 +357,15 @@ sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB,
       -- ── CP4/CP6: Register BRAM read addresses ────────────────────────────
       -- CP6: Use bramOut (the raw instruction being loaded into IF/ID this
       -- cycle) rather than cpu2.rvIfId.ifidInstr.  The latter depends on
-      -- `mispredicted` (which depends on the EX-stage ALU result), creating a
-      -- 18+ ns critical path through: ALU → mispredicted → ifid' → regRdAddr
-      -- → blockRam MUX tree.  Using bramOut (a registered DFF) breaks this
-      -- chain; incorrect reads during a flush are harmless because idex' =
-      -- emptyIdEx the following cycle (ifidValid = False).
-      regRdAddrA = uRs1 (decode bramOut)
-      regRdAddrB = uRs2 (decode bramOut)
+      -- `mispredicted`, creating a long critical path.  Using bramOut (a
+      -- registered BRAM output) breaks this chain; incorrect reads during a
+      -- flush are harmless because idexValid = False the following cycle.
+      --
+      -- v3: rs1Of/rs2Of are pure bit slices — wires straight from the BRAM
+      -- output pins to the regfile address ports (previously the full
+      -- `decode` was invoked and relied on synthesis pruning).
+      regRdAddrA = rs1Of bramOut
+      regRdAddrB = rs2Of bramOut
 
       -- CP4: register file write command (from WB)
       regWrCmdOut :: Maybe (Unsigned 5, Word32)
@@ -389,7 +404,7 @@ sysStepRV SysStateRV{..} (rxPin, bramOut, dataBramOut, regBramOutA, regBramOutB,
       }
   )
   #-}
-topEntityRV :: Clock Dom80 -> Signal Dom80 Bit -> Signal Dom80 (Bit, BitVector 6)
+topEntityRV :: Clock Dom100 -> Signal Dom100 Bit -> Signal Dom100 (Bit, BitVector 6)
 topEntityRV clk rxPin =
   withClockResetEnable clk resetGen enableGen $
     let fullOut = mealy sysStepRV initSysStateRV
@@ -421,7 +436,8 @@ topEntityRV clk rxPin =
         regWrCmdS   = (\(_, _, _, _, _, _, _, w, _, _) -> w) <$> fullOut
 
         -- We split the dual read into two separate blockRam calls sharing the
-        -- same write port.  Clash will merge them into a true-dual-port BRAM.
+        -- same write port.  Synthesis realises them as two replicated
+        -- simple-dual-port RAMs (the classic replicated register file).
         regBramRawA = blockRam
           (repeat (0 :: Word32) :: Vec 32 Word32)
           regRdAddrA regWrCmdS

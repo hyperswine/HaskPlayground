@@ -18,7 +18,7 @@ mkWorld expr =
 
 main :: IO ()
 main = do
-  src <- readFile "calc.wat"
+  src <- readFile "examples/calc.wat"
   case parseWat src of
     Left err -> putStrLn ("WAT parse error: " ++ err)
     Right (body, segs) -> do

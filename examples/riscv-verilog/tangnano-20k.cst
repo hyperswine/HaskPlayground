@@ -1,26 +1,9 @@
-IO_LOC  "clk" 4;
-IO_PORT "clk" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-
-IO_LOC  "led[0]" 20;
-IO_PORT "led[0]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "led[1]" 19;
-IO_PORT "led[1]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "led[2]" 18;
-IO_PORT "led[2]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "led[3]" 17;
-IO_PORT "led[3]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "led[4]" 16;
-IO_PORT "led[4]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "led[5]" 15;
-IO_PORT "led[5]" DRIVE=8 IO_TYPE=LVCMOS18;
-
-IO_LOC  "uart_tx_pin" 69;
-IO_PORT "uart_tx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP;
-
-IO_LOC  "uart_rx_pin" 70;
-IO_PORT "uart_rx_pin" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC "uart_tx_pin_OBUF_O" IOT50A;
+IO_LOC "led_OBUF_O_5" IOL51B;
+IO_LOC "led_OBUF_O_4" IOL51A;
+IO_LOC "led_OBUF_O_3" IOL49B;
+IO_LOC "led_OBUF_O_2" IOL49A;
+IO_LOC "led_OBUF_O_1" IOL47B;
+IO_LOC "led_OBUF_O" IOL47A;
+IO_LOC "\cpu_core.uart_rx_pin_IBUF_O " IOT44B;
+IO_LOC "clk_IBUF_I" IOL7A;

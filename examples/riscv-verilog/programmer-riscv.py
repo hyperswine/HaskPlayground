@@ -1,3 +1,7 @@
+# /// script
+# dependencies = ["pyserial"]
+# ///
+
 """
 programmer-riscv.py — Host-side programmer for the Tang Nano 20K RV32I CPU.
 
