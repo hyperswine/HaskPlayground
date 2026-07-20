@@ -6,13 +6,15 @@
 programmer-riscv.py — Host-side programmer for the Tang Nano 20K RV32I CPU.
 
 Usage:
-    uv run python programmer-riscv.py [OPTIONS]
+    uv run programmer-riscv.py [OPTIONS]
 
     e.g.
 
     python programmer-riscv.py --elf firmware.elf --port /dev/cu.usbserial-20250303171
     python programmer-riscv.py --bin firmware.bin --run
     python programmer-riscv.py --hex firmware.hex --run
+
+    uv run programmer-riscv.py --port /dev/cu.usbserial-20250303171
 
 Options:
     --port   PORT   Serial port (default: auto-detect Tang Nano CH552)
