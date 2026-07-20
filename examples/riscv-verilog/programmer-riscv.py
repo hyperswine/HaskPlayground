@@ -224,7 +224,21 @@ def find_port() -> str:
 
 
 def open_port(port: str, baud: int) -> serial.Serial:
-    return serial.Serial(port, baud, timeout=2)
+    # dsrdtr=False prevents the USB-serial bridge from asserting DTR on open,
+    # which on many Tang Nano / CH552 boards pulses reset to the FPGA.
+    ser = serial.Serial(
+        port, baud, timeout=2,
+        bytesize=serial.EIGHTBITS,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        dsrdtr=False,
+        rtscts=False,
+        xonxoff=False,
+    )
+    # Explicitly deassert any modem control lines that could reset the target.
+    ser.setDTR(False)
+    ser.setRTS(False)
+    return ser
 
 
 def reset_cpu(ser: serial.Serial) -> None:
@@ -238,22 +252,29 @@ def reset_cpu(ser: serial.Serial) -> None:
         print(f"  WARNING: unexpected reset ack {ack!r}")
 
 
-def send_program(ser: serial.Serial, program: bytes) -> None:
+def send_program(ser: serial.Serial, program: bytes) -> bool:
     assert len(program) == INSTR_MEM_BYTES, \
         f"Expected {INSTR_MEM_BYTES} bytes, got {len(program)}"
     print(f"  Programming {len(program)} bytes ({INSTR_MEM_WORDS} × 32-bit words) ...")
     ser.write(b'\x50')
     ser.flush()
-    # Small chunks to avoid overflowing the FPGA RX FIFO
+    # Send in modest chunks with pacing.  The FPGA has no RX FIFO for the
+    # programming stream; it consumes bytes as they arrive from the UART.
+    # Pacing reduces chance of USB buffer issues or overruns on the bridge.
     for i in range(0, len(program), 16):
         ser.write(program[i:i + 16])
         ser.flush()
         time.sleep(0.002)
+    # Give the device a moment to receive the final byte, write the last
+    # instruction word into BRAM, and push 'K' into its TX FIFO.
+    time.sleep(0.03)
     ack = ser.read(1)
     if ack == b'\x4B':
         print("  FPGA acknowledged: program loaded OK")
+        return True
     else:
         print(f"  WARNING: unexpected load ack {ack!r}")
+        return False
 
 
 def run_program(ser: serial.Serial, timeout: float = 30.0) -> list[int]:
@@ -261,6 +282,8 @@ def run_program(ser: serial.Serial, timeout: float = 30.0) -> list[int]:
     print("  Running RV32I program ...")
     ser.write(b'\x52')
     ser.flush()
+    # Small grace period for the FSM to see 'R', deassert reset, and start emitting.
+    time.sleep(0.005)
     results = []
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -303,7 +326,11 @@ def main():
     print(f"Using port: {port}  baud: {args.baud}")
 
     with open_port(port, args.baud) as ser:
-        time.sleep(0.1)
+        # Give the FPGA time to finish any reset triggered by port open / DTR
+        # and for the bitstream design to be active. 0.1s was often too short.
+        time.sleep(0.8)
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
 
         if args.reset:
             reset_cpu(ser)
@@ -335,9 +362,20 @@ def main():
             parser.print_help()
             return
 
-        send_program(ser, program)
+        # Best-effort synchronization: force the control FSM back to PgIdle
+        # (and assert cpuRst) so that the upcoming 'P' will be recognized.
+        ser.write(b"\x58")  # 'X' reset
+        ser.flush()
+        # Drain any queued output (previous 'D', partial output, or noise)
+        ser.reset_input_buffer()
+        time.sleep(0.05)
 
-        if args.run or args.demo:
+        ok = send_program(ser, program)
+
+        if (args.run or args.demo):
+            if not ok:
+                print("  Aborting run because program load was not acknowledged.")
+                return
             run_program(ser)
 
 
