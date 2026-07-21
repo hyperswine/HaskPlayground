@@ -66,6 +66,7 @@ library
       MyClash
       MyHardware
       ParserFull
+      PEDemo
       Pipeline
       PipelinePrime
       PortSim

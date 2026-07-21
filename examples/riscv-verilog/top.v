@@ -1478,9 +1478,9 @@ module top
                                                                10'd0,   c$ds_app_arg_1[45:43],   shifted,
                                                                1'b0} : c$uartRxStep_failOut;
 
-  assign c$ds8_case_scrut = c$ds_app_arg_1[55:46] == 10'd867;
+  assign c$ds8_case_scrut = c$ds_app_arg_1[55:46] == 10'd677;
 
-  assign result_23 = (c$ds_app_arg_1[55:46] == 10'd433) ? c$ds8_case_alt_3 : c$uartRxStep_failOut_0;
+  assign result_23 = (c$ds_app_arg_1[55:46] == 10'd338) ? c$ds8_case_alt_3 : c$uartRxStep_failOut_0;
 
   assign c$ds8_case_alt_3 = c$ds8_case_scrut_0 ? {2'd2,
                                                   10'd0,   3'd0,   c$ds_app_arg_1[42:35],
@@ -1488,7 +1488,7 @@ module top
 
   assign c$ds8_case_scrut_0 = c$ds_app_arg_1[33:33] == 1'b0;
 
-  assign c$uartRxStep_failOut = (c$ds_app_arg_1[55:46] == 10'd867) ? {2'd2,
+  assign c$uartRxStep_failOut = (c$ds_app_arg_1[55:46] == 10'd677) ? {2'd2,
                                                                       10'd0,   c$ds_app_arg_1[45:43] + 3'd1,
                                                                       shifted,   1'b0} : {2'd2,
                                                                                           c$ds_app_arg_1[55:46] + 10'd1,
@@ -1500,7 +1500,7 @@ module top
 
   assign shifted = {((c$ds_app_arg_1[33:33])),(c$bv_12[7 : 1])};
 
-  assign c$uartRxStep_failOut_0 = (c$ds_app_arg_1[55:46] == 10'd433) ? {2'd0,
+  assign c$uartRxStep_failOut_0 = (c$ds_app_arg_1[55:46] == 10'd338) ? {2'd0,
                                                                         10'd0,   3'd0,   c$ds_app_arg_1[42:35],
                                                                         1'b0} : {2'd1,
                                                                                  c$ds_app_arg_1[55:46] + 10'd1,
@@ -1548,7 +1548,7 @@ module top
                                                               10'd0,   c$ds_app_arg_1[11:9],   shifted_0,
                                                               bit0} : c$uartTxStep_failOut;
 
-  assign c$ds6_case_scrut = c$ds_app_arg_1[21:12] == 10'd867;
+  assign c$ds6_case_scrut = c$ds_app_arg_1[21:12] == 10'd677;
 
   assign c$ds6_app_arg = c$ds_app_arg_1[21:12] + 10'd1;
 
@@ -1570,7 +1570,7 @@ module top
 
   assign c$busy_case_scrut = $unsigned(c$dtt_rhs_11);
 
-  assign c$uartTxStep_failOut = (c$ds_app_arg_1[21:12] == 10'd867) ? {2'd2,
+  assign c$uartTxStep_failOut = (c$ds_app_arg_1[21:12] == 10'd677) ? {2'd2,
                                                                       10'd0,   c$ds_app_arg_1[11:9] + 3'd1,
                                                                       shifted_0,   bit0} : {2'd2,
                                                                                             c$ds_app_arg_1[21:12] + 10'd1,

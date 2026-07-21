@@ -27,10 +27,14 @@ module pll_top (
     output wire [5:0]  led
 );
 
-    // ── PLL: 27 MHz → 78 MHz ──────────────────────────────────────────────────────
-    wire clk_81;
+    // ── PLL: 27 MHz → ~78 MHz ────────────────────────────────────────────────────
+    wire clk_78;
     wire pll_lock;
 
+    // CRITICAL: Clash UART logic (in top.v) was written for ~100 MHz.
+    // The constants were patched below for 78 MHz operation (677 cycles/bit).
+    // If you change PLL freq, you *must* keep ClksPerBit / HalfBit in sync
+    // (re-generate via Clash or patch the 10'dXXX literals in top.v).
     rPLL #(
         .FCLKIN     ("27"),   // input frequency string (MHz)
         .IDIV_SEL   (8),      // IDIV  = IDIV_SEL  + 1 = 9
@@ -42,7 +46,7 @@ module pll_top (
         .CLKOUT_FT_DIR (1'b1)
     ) pll_inst (
         .CLKIN   (clk),
-        .CLKOUT  (clk_81),
+        .CLKOUT  (clk_78),
         .LOCK    (pll_lock),
         // unused / tied-off ports
         .CLKFB   (1'b0),
@@ -62,7 +66,7 @@ module pll_top (
     // a reset because the Clash domain uses initial-value-based reset that
     // is guaranteed by the FPGA fabric's power-on state.
     top cpu_core (
-        .clk         (clk_81),
+        .clk         (clk_78),
         .uart_rx_pin (uart_rx_pin),
         .uart_tx_pin (uart_tx_pin),
         .led         (led)
