@@ -14,15 +14,17 @@ import qualified MVUModLiveView
 import qualified MailboxResponse
 import qualified MemoryModel
 import qualified MiniBrowser
+import qualified PEDemo
 import qualified PortSim
+import qualified QosModel
 import qualified QuantUI
 import qualified SPSCArc
 import qualified SolcMain
 import qualified Solx
-import qualified QosModel
-import qualified WasmMain
 import System.Environment (getArgs)
 import qualified TUIMVUProofOfConcept
+import qualified WasmMain
+import qualified TubeFem
 
 main :: IO ()
 main = do
@@ -46,6 +48,8 @@ main = do
     ["portsim", args] -> PortSim.main [args]
     ["qosmodel"] -> QosModel.main
     ["wasm"] -> WasmMain.main
+    ["partialeval"] -> PEDemo.main
+    ["fem"] -> TubeFem.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
