@@ -23,8 +23,8 @@ import qualified SolcMain
 import qualified Solx
 import System.Environment (getArgs)
 import qualified TUIMVUProofOfConcept
-import qualified WasmMain
 import qualified TubeFem
+import qualified WasmMain
 import qualified ZoneSim
 
 main :: IO ()
