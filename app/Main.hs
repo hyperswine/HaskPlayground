@@ -25,6 +25,7 @@ import System.Environment (getArgs)
 import qualified TUIMVUProofOfConcept
 import qualified WasmMain
 import qualified TubeFem
+import qualified ZoneSim
 
 main :: IO ()
 main = do
@@ -50,6 +51,7 @@ main = do
     ["wasm"] -> WasmMain.main
     ["partialeval"] -> PEDemo.main
     ["fem"] -> TubeFem.main
+    ["zonesim"] -> ZoneSim.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main

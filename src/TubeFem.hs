@@ -68,16 +68,10 @@ solveLin a b = backSub (forward (zipWith (\row rhs -> row ++ [rhs]) a b))
       where
         step rows k =
           let (above, rest) = splitAt k rows
-              pivIdx =
-                snd $
-                  maximumBy
-                    (comparing fst)
-                    [(abs (r !! k), ix) | (ix, r) <- zip [0 ..] rest]
+              pivIdx = snd $ maximumBy (comparing fst) [(abs (r !! k), ix) | (ix, r) <- zip [0 ..] rest]
               pk = rest !! pivIdx
               others = [r | (ix, r) <- zip [0 ..] rest, ix /= pivIdx]
-              elim r =
-                let f = (r !! k) / (pk !! k)
-                 in zipWith (\ri pi_ -> ri - f * pi_) r pk
+              elim r = let f = (r !! k) / (pk !! k) in zipWith (\ri pi_ -> ri - f * pi_) r pk
            in above ++ pk : map elim others
     backSub m = go (reverse [0 .. n - 1]) (replicate n 0)
       where
@@ -142,38 +136,16 @@ solveModel Model {..} =
       fe = elemDistLoad w l
       dofs el = [2 * el, 2 * el + 1, 2 * el + 2, 2 * el + 3]
 
-      kGlobal =
-        foldl'
-          ( \m el ->
-              addAt2
-                m
-                [ (dofs el !! r, dofs el !! c, ke !! r !! c)
-                  | r <- [0 .. 3],
-                    c <- [0 .. 3]
-                ]
-          )
-          kGlobal0
-          [0 .. ne - 1]
+      kGlobal = foldl' (\m el -> addAt2 m [(dofs el !! r, dofs el !! c, ke !! r !! c) | r <- [0 .. 3], c <- [0 .. 3]]) kGlobal0 [0 .. ne - 1]
 
-      fGrav =
-        foldl'
-          (\v el -> addAt1 v [(dofs el !! r, fe !! r) | r <- [0 .. 3]])
-          f0
-          [0 .. ne - 1]
+      fGrav = foldl' (\v el -> addAt1 v [(dofs el !! r, fe !! r) | r <- [0 .. 3]]) f0 [0 .. ne - 1]
 
       -- point loads: snap each to nearest node (fine for PoC)
       nearestNode x = round (x / l) :: Int
-      fAll =
-        addAt1
-          fGrav
-          [(2 * nearestNode px, pf) | (px, pf) <- pointLoads]
+      fAll = addAt1 fGrav [(2 * nearestNode px, pf) | (px, pf) <- pointLoads]
 
       -- boundary conditions: Fixed face clamps v and theta at that node
-      fixedDofs =
-        concat
-          [[0, 1] | bcLeft == Fixed]
-          ++ concat
-            [[ndof - 2, ndof - 1] | bcRight == Fixed]
+      fixedDofs = concat [[0, 1] | bcLeft == Fixed] ++ concat [[ndof - 2, ndof - 1] | bcRight == Fixed]
 
       -- DOF elimination: big-number-free reduction (delete rows/cols)
       freeDofs = [d | d <- [0 .. ndof - 1], d `notElem` fixedDofs]
@@ -181,11 +153,7 @@ solveModel Model {..} =
       fRed = [fAll !! r | r <- freeDofs]
 
       uRed = solveLin kRed fRed
-      uFull =
-        foldl'
-          (\v (d, x) -> setAt d x v)
-          (replicate ndof 0)
-          (zip freeDofs uRed)
+      uFull = foldl' (\v (d, x) -> setAt d x v) (replicate ndof 0) (zip freeDofs uRed)
 
       vs = [uFull !! (2 * k) | k <- [0 .. nn - 1]]
 
@@ -217,15 +185,9 @@ render Model {..} Solution {..} =
       colOf k = min (cols - 1) $ round (fromIntegral k / fromIntegral (nn - 1) * fromIntegral (cols - 1) :: Double)
       -- deflection row: 0 deflection at row midRow, scaled to fill
       midRow = 2 :: Int
-      rowOf v =
-        let scaled = v / maxV * fromIntegral (rows - midRow - 2)
-         in max 0 . min (rows - 1) $ midRow - round scaled
+      rowOf v = let scaled = v / maxV * fromIntegral (rows - midRow - 2) in max 0 . min (rows - 1) $ midRow - round scaled
 
-      stressChar el =
-        ramp
-          !! min
-            (length ramp - 1)
-            (floor (abs (elemStress !! el) / maxS * fromIntegral (length ramp - 1)))
+      stressChar el = ramp !! min (length ramp - 1) (floor (abs (elemStress !! el) / maxS * fromIntegral (length ramp - 1)))
 
       blank = replicate rows (replicate cols ' ')
       put g (r, cIdx, ch) = setAt r (setAt cIdx ch (g !! r)) g
@@ -237,21 +199,13 @@ render Model {..} Solution {..} =
                 (r1, r2) = (rowOf (deflect !! el), rowOf (deflect !! (el + 1)))
                 n = max 1 (c2 - c1)
                 ch = stressChar el
-             in [ ( round (fromIntegral r1 + (fromIntegral (r2 - r1) * fromIntegral s / fromIntegral n :: Double)),
-                    c1 + s,
-                    ch
-                  )
-                  | s <- [0 .. n]
-                ]
+             in [(round (fromIntegral r1 + (fromIntegral (r2 - r1) * fromIntegral s / fromIntegral n :: Double)), c1 + s, ch) | s <- [0 .. n]]
             | el <- [0 .. length elemStress - 1]
           ]
 
       grid = foldl' put blank cells
       -- wall glyphs for fixed faces
-      wallify g =
-        [ [decorate rIdx cIdx ch | (cIdx, ch) <- zip [0 ..] row]
-          | (rIdx, row) <- zip [0 ..] g
-        ]
+      wallify g = [[decorate rIdx cIdx ch | (cIdx, ch) <- zip [0 ..] row] | (rIdx, row) <- zip [0 ..] g]
         where
           decorate _ 0 ch
             | bcLeft == Fixed = '|'
@@ -259,22 +213,8 @@ render Model {..} Solution {..} =
           decorate _ cI ch | cI == cols - 1 && bcRight == Fixed = '|'
           decorate _ _ ch = ch
 
-      legendBuckets =
-        unwords
-          [ printf
-              "'%c'<%.0f"
-              chr
-              ( maxS
-                  * fromIntegral (ix + 1)
-                  / fromIntegral (length ramp)
-                  / 1e6
-              )
-            | (ix, chr) <- zip [0 :: Int ..] ramp,
-              ix `mod` 3 == 0
-          ]
-   in unlines (map (dropTrailing) (wallify grid))
-        ++ printf "\nstress ramp \"%s\"  (|sigma|, buckets up to %.1f MPa)\n" ramp (maxS / 1e6)
-        ++ printf "legend: %s (MPa)\n" legendBuckets
+      legendBuckets = unwords [printf "'%c'<%.0f" chr (maxS * fromIntegral (ix + 1) / fromIntegral (length ramp) / 1e6) | (ix, chr) <- zip [0 :: Int ..] ramp, ix `mod` 3 == 0]
+   in unlines (map (dropTrailing) (wallify grid)) ++ printf "\nstress ramp \"%s\"  (|sigma|, buckets up to %.1f MPa)\n" ramp (maxS / 1e6) ++ printf "legend: %s (MPa)\n" legendBuckets
   where
     dropTrailing = reverse . dropWhile (== ' ') . reverse
 

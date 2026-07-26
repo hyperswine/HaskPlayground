@@ -102,6 +102,7 @@ library
       WasmModel
       WatParser
       WindowSystem
+      ZoneSim
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
