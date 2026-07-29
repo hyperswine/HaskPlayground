@@ -46,6 +46,7 @@ library
       FPL1
       FPL1Examples
       FPL1Runner
+      FPRLive
       FPXSyn
       FullAST
       Fusion

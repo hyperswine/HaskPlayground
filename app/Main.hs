@@ -26,6 +26,7 @@ import qualified TUIMVUProofOfConcept
 import qualified TubeFem
 import qualified WasmMain
 import qualified ZoneSim
+import qualified FPRLive
 
 main :: IO ()
 main = do
@@ -52,6 +53,7 @@ main = do
     ["partialeval"] -> PEDemo.main
     ["fem"] -> TubeFem.main
     ["zonesim"] -> ZoneSim.main
+    ["live"] -> FPRLive.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
