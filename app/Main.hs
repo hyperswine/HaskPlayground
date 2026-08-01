@@ -27,6 +27,7 @@ import qualified TubeFem
 import qualified WasmMain
 import qualified ZoneSim
 import qualified FPRLive
+import qualified MiniBrowser
 
 main :: IO ()
 main = do
@@ -54,6 +55,7 @@ main = do
     ["fem"] -> TubeFem.main
     ["zonesim"] -> ZoneSim.main
     ["live"] -> FPRLive.main
+    ["browser"] -> MiniBrowser.main
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
