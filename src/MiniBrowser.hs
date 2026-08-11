@@ -433,6 +433,7 @@ lexMS (c : cs)
             then TP two : lexMS (drop 1 cs)
             else TP [c] : lexMS cs
 
+-- Has numbers, strings, booleans, variables, unary ops, binary ops, ternary op, assignment.
 data Expr
   = ENum Double
   | EStr String

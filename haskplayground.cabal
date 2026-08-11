@@ -48,6 +48,7 @@ library
       FPL1Runner
       FPRLive
       FPXSyn
+      FRPStuffs
       FullAST
       Fusion
       Gameloop
