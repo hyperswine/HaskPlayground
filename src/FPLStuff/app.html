@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="day">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind — Ma design system demo</title>
+<style>
+:root, [data-theme="day"] {
+  --bg-canvas:#F7F8FA; --bg-surface:#FFFFFF; --bg-surface-raised:#FFFFFF;
+  --bg-overlay:rgba(15,17,21,0.4);
+  --border-subtle:#E4E7EC; --border-strong:#C7CCD6;
+  --text-primary:#1A1D23; --text-secondary:#5B6472; --text-tertiary:#8A93A3;
+  --text-on-accent:#FFFFFF;
+  --accent:#3D6FE0; --accent-hover:#3560C7; --accent-pressed:#2C51AD; --accent-subtle:#EAF0FE;
+  --state-success:#2E9E6B; --state-warning:#C98A2E; --state-danger:#D14E4E; --state-celebration:#2FAE6E;
+  --shadow-sm:0 1px 2px rgba(30,41,59,0.06), 0 1px 1px rgba(30,41,59,0.04);
+  --shadow-md:0 4px 12px rgba(30,41,59,0.08);
+  --shadow-lg:0 12px 32px rgba(30,41,59,0.12);
+}
+[data-theme="night"] {
+  --bg-canvas:#15171C; --bg-surface:#1D2027; --bg-surface-raised:#242830;
+  --bg-overlay:rgba(0,0,0,0.6);
+  --border-subtle:#2A2F38; --border-strong:#3A404C;
+  --text-primary:#EDEFF3; --text-secondary:#9AA3B2; --text-tertiary:#6B7280;
+  --text-on-accent:#FFFFFF;
+  --accent:#5B8AF0; --accent-hover:#7099F5; --accent-pressed:#4A78D6; --accent-subtle:#1E2A45;
+  --state-success:#4CBE87; --state-warning:#E0A94F; --state-danger:#E8706F; --state-celebration:#4ED28E;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.35);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.45);
+}
+* { box-sizing:border-box; margin:0; }
+html, body { height:100%; }
+body {
+  font-family:-apple-system,"Segoe UI","Inter",sans-serif;
+  background:var(--bg-canvas); color:var(--text-primary);
+  font-size:15px; line-height:22px;
+  transition:background 320ms cubic-bezier(0.2,0,0,1), color 320ms;
+}
+.app { display:flex; min-height:100vh; }
+
+/* ---- nav rail ---- */
+.rail {
+  width:60px; flex-shrink:0; background:var(--bg-surface);
+  display:flex; flex-direction:column; align-items:center;
+  padding:16px 0; gap:4px; position:sticky; top:0; height:100vh;
+  box-shadow:var(--shadow-sm);
+}
+.rail-item {
+  width:40px; height:40px; border-radius:10px; border:none; background:transparent;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  color:var(--text-secondary); font-size:19px;
+  transition:background 120ms cubic-bezier(0.2,0,0,1), color 120ms;
+}
+.rail-item:hover { background:var(--accent-subtle); }
+.rail-item.active { background:var(--accent-subtle); color:var(--accent); }
+.rail-spacer { flex:1; }
+
+/* ---- main ---- */
+main { flex:1; min-width:0; padding:32px 48px 96px; max-width:960px; }
+.crumbs { display:flex; align-items:center; gap:6px; margin-bottom:24px; font-size:13px; }
+.crumbs a { color:var(--text-secondary); text-decoration:none; cursor:pointer; }
+.crumbs a:hover { color:var(--accent); }
+.crumbs .sep { color:var(--text-tertiary); }
+.crumbs .here { color:var(--text-primary); font-weight:500; }
+
+h1 { font-size:22px; line-height:28px; font-weight:600; margin-bottom:4px; }
+.sub { color:var(--text-secondary); font-size:13px; margin-bottom:32px; }
+h2 { font-size:17px; line-height:24px; font-weight:600; margin-bottom:16px; }
+section { margin-bottom:48px; }  /* space as divider — no hr anywhere */
+
+/* ---- card grid (stack rows, chunked) ---- */
+.card-row { display:flex; gap:24px; margin-bottom:24px; }
+.card {
+  flex:1; background:var(--bg-surface); border-radius:10px; padding:24px;
+  box-shadow:var(--shadow-sm); cursor:pointer;
+  transition:transform 120ms cubic-bezier(0.2,0,0,1), box-shadow 120ms cubic-bezier(0.2,0,0,1), background 320ms;
+}
+.card:hover { transform:scale(1.02); box-shadow:var(--shadow-md); }
+.card:active { transform:scale(0.99); }
+.card .icon { font-size:22px; color:var(--accent); margin-bottom:12px; }
+.card .name { font-weight:500; margin-bottom:2px; }
+.card .meta { font-size:13px; color:var(--text-tertiary); }
+
+/* ---- form accordion sections (expandable cards) ---- */
+.form-card {
+  background:var(--bg-surface); border-radius:10px; box-shadow:var(--shadow-sm);
+  margin-bottom:16px; overflow:hidden; transition:background 320ms;
+}
+.form-card-header {
+  display:flex; align-items:center; padding:16px 24px; cursor:pointer;
+  transition:background 120ms;
+}
+.form-card-header:hover { background:var(--accent-subtle); }
+.form-card-header .title { font-weight:600; font-size:15px; }
+.form-card-header .done {
+  font-size:13px; color:var(--state-success); margin-left:12px;
+  opacity:0; transition:opacity 200ms;
+}
+.form-card-header .done.show { opacity:1; }
+.form-card-header .chev { margin-left:auto; color:var(--text-secondary); transition:transform 200ms cubic-bezier(0.2,0,0,1); }
+.form-card.open .chev { transform:rotate(180deg); }
+.form-card-body { max-height:0; overflow:hidden; transition:max-height 200ms cubic-bezier(0.2,0,0,1); }
+.form-card.open .form-card-body { max-height:600px; }
+.form-card-inner { padding:8px 24px 24px; }
+
+.field-row { display:flex; gap:16px; margin-bottom:16px; }
+.field { flex:1; display:flex; flex-direction:column; gap:4px; }
+.field label { font-size:13px; font-weight:500; }
+.field .hint { font-size:13px; color:var(--text-tertiary); }
+.field .err { font-size:13px; color:var(--state-danger); min-height:0; display:none; }
+.field.invalid .err { display:block; }
+.field.invalid input { box-shadow:inset 0 0 0 1px var(--state-danger); }
+input[type=text], input[type=tel] {
+  font:inherit; color:var(--text-primary); background:var(--bg-surface);
+  border:none; border-radius:6px; padding:9px 12px;
+  box-shadow:inset 0 0 0 1px var(--border-subtle);
+  outline:none; width:100%;
+  transition:box-shadow 120ms;
+}
+input:focus { box-shadow:inset 0 0 0 2px var(--accent); }
+input::placeholder { color:var(--text-tertiary); }
+
+/* address finder suggestions */
+.addr-wrap { position:relative; }
+.addr-list {
+  position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:20;
+  background:var(--bg-surface-raised); border-radius:10px; box-shadow:var(--shadow-md);
+  overflow:hidden; display:none;
+}
+.addr-list.show { display:block; }
+.addr-item { padding:10px 12px; font-size:14px; cursor:pointer; }
+.addr-item:hover { background:var(--accent-subtle); }
+.addr-detail { display:none; }
+.addr-detail.show { display:flex; }
+
+/* slider */
+.slider-wrap { display:flex; align-items:center; gap:16px; }
+input[type=range] { flex:1; accent-color:var(--accent); height:6px; }
+.slider-val { font-size:13px; font-weight:500; min-width:56px; text-align:right; }
+
+/* buttons */
+.btn {
+  font:inherit; font-size:13px; font-weight:500; cursor:pointer;
+  border:none; border-radius:10px; padding:9px 20px;
+  display:inline-flex; align-items:center; gap:8px; justify-content:center;
+  transition:background 120ms, transform 120ms;
+  min-width:120px; min-height:40px;
+}
+.btn:active { transform:scale(0.98); }
+.btn-primary { background:var(--accent); color:var(--text-on-accent); }
+.btn-primary:hover { background:var(--accent-hover); }
+.btn-primary:disabled { opacity:0.7; cursor:default; }
+.btn-secondary { background:transparent; color:var(--text-primary); box-shadow:inset 0 0 0 1px var(--border-strong); }
+.btn-secondary:hover { background:var(--accent-subtle); }
+.spinner {
+  width:14px; height:14px; border-radius:50%;
+  border:2px solid rgba(255,255,255,0.35); border-top-color:#fff;
+  animation:spin 700ms linear infinite; display:none;
+}
+.btn.loading .spinner { display:block; }
+.btn.loading .btn-label { display:none; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* toasts */
+.toasts { position:fixed; bottom:24px; right:24px; display:flex; flex-direction:column; gap:12px; z-index:100; }
+.toast {
+  background:var(--bg-surface-raised); border-radius:10px; box-shadow:var(--shadow-lg);
+  padding:12px 16px; min-width:260px; max-width:360px; position:relative; overflow:hidden;
+  display:flex; align-items:center; gap:10px;
+  animation:toast-in 200ms cubic-bezier(0.2,0,0,1);
+}
+@keyframes toast-in { from { opacity:0; transform:translateY(8px); } }
+.toast.leaving { opacity:0; transform:translateY(8px); transition:opacity 200ms, transform 200ms; }
+.toast .t-icon { font-size:17px; color:var(--accent); }
+.toast.danger .t-icon { color:var(--state-danger); }
+.toast .t-track { position:absolute; bottom:0; left:0; right:0; height:2px; background:var(--border-subtle); }
+.toast .t-bar { height:2px; background:var(--accent); width:100%; }
+.toast.danger .t-bar { background:var(--state-danger); }
+
+/* command palette */
+.palette-scrim {
+  position:fixed; inset:0; background:var(--bg-overlay); z-index:200;
+  display:none; align-items:flex-start; justify-content:center; padding-top:12vh;
+}
+.palette-scrim.show { display:flex; }
+.palette {
+  width:min(560px, calc(100vw - 32px)); background:var(--bg-surface-raised);
+  border-radius:16px; box-shadow:var(--shadow-lg); overflow:hidden;
+  animation:toast-in 200ms cubic-bezier(0.2,0,0,1);
+}
+.palette input {
+  box-shadow:none; border-radius:0; padding:16px 20px; font-size:15px;
+  background:transparent;
+}
+.palette input:focus { box-shadow:none; }
+.palette-results { max-height:320px; overflow-y:auto; padding:8px; }
+.pal-group { font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-tertiary); padding:8px 12px 4px; }
+.pal-item {
+  display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:8px;
+  cursor:pointer; font-size:14px;
+}
+.pal-item .p-icon { color:var(--text-secondary); font-size:16px; width:20px; text-align:center; }
+.pal-item .p-cap { margin-left:auto; font-size:12px; color:var(--text-tertiary); }
+.pal-item.sel { background:var(--accent-subtle); }
+.pal-item.sel .p-icon { color:var(--accent); }
+.pal-empty { padding:24px; text-align:center; color:var(--text-tertiary); font-size:13px; }
+
+/* views */
+.view { display:none; }
+.view.active { display:block; }
+
+/* ---- responsive: stacks re-chunk, rail becomes bottom bar ---- */
+@media (max-width: 900px) {
+  .card-row { flex-direction:column; }
+  main { padding:24px 20px 120px; }
+}
+@media (max-width: 560px) {
+  .app { flex-direction:column; }
+  .rail {
+    order:2; width:100%; height:auto; flex-direction:row; justify-content:center;
+    position:fixed; bottom:0; top:auto; padding:8px 0;
+    box-shadow:0 -1px 2px rgba(30,41,59,0.06);
+  }
+  .rail-spacer { display:none; }
+  .field-row { flex-direction:column; gap:16px; }
+  .field-row.keep { flex-direction:row; }  /* expiry+cvc stay side by side */
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration:0.01ms !important; animation-duration:0.01ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <nav class="rail" aria-label="Primary">
+    <button class="rail-item active" data-view="home" title="Home" aria-label="Home">⌂</button>
+    <button class="rail-item" data-view="signup" title="New customer" aria-label="New customer">✎</button>
+    <button class="rail-item" data-view="reports" title="Reports" aria-label="Reports">▤</button>
+    <div class="rail-spacer"></div>
+    <button class="rail-item" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <button class="rail-item" id="palette-open" title="Search (Ctrl+K)" aria-label="Search">⌕</button>
+  </nav>
+
+  <main>
+    <!-- HOME -->
+    <div class="view active" id="view-home">
+      <div class="crumbs"><span class="here">Home</span></div>
+      <h1>Good morning</h1>
+      <p class="sub">Press Ctrl+K (⌘K on Mac) to jump anywhere.</p>
+
+      <section>
+        <h2>Quick actions</h2>
+        <div class="card-row">
+          <div class="card" data-goto="signup">
+            <div class="icon">✎</div>
+            <div class="name">New customer</div>
+            <div class="meta">Onboarding form</div>
+          </div>
+          <div class="card" data-goto="reports">
+            <div class="icon">▤</div>
+            <div class="name">Reports</div>
+            <div class="meta">Monthly summaries</div>
+          </div>
+          <div class="card" data-toast="Nothing to review — inbox is clear">
+            <div class="icon">✓</div>
+            <div class="name">Review queue</div>
+            <div class="meta">0 pending</div>
+          </div>
+        </div>
+        <div class="card-row">
+          <div class="card" data-toast="Exports are generated overnight">
+            <div class="icon">↧</div>
+            <div class="name">Exports</div>
+            <div class="meta">Last run 02:00</div>
+          </div>
+          <div class="card" data-toast="3 teammates online">
+            <div class="icon">☺</div>
+            <div class="name">Team</div>
+            <div class="meta">3 online</div>
+          </div>
+          <div class="card" data-toast="All systems normal">
+            <div class="icon">↯</div>
+            <div class="name">Status</div>
+            <div class="meta">Operational</div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- SIGNUP -->
+    <div class="view" id="view-signup">
+      <div class="crumbs">
+        <a data-goto="home">Home</a><span class="sep">›</span>
+        <span class="here">New customer</span>
+      </div>
+      <h1>New customer</h1>
+      <p class="sub">Sections collapse as you complete them. Nothing here asks twice.</p>
+
+      <!-- Personal -->
+      <div class="form-card open" id="sec-personal">
+        <div class="form-card-header">
+          <span class="title">Personal details</span>
+          <span class="done">✓ done</span>
+          <span class="chev">▾</span>
+        </div>
+        <div class="form-card-body"><div class="form-card-inner">
+          <div class="field-row">
+            <div class="field">
+              <label for="fn">First name</label>
+              <input type="text" id="fn" autocomplete="given-name" placeholder="Priya">
+            </div>
+            <div class="field">
+              <label for="ln">Last name</label>
+              <input type="text" id="ln" autocomplete="family-name" placeholder="Sharma">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field" id="dob-field">
+              <label for="dob">Date of birth</label>
+              <input type="tel" id="dob" inputmode="numeric" autocomplete="bday" placeholder="dd/mm/yyyy" maxlength="10">
+              <span class="hint">Digits only — day and month are bounded to real dates</span>
+              <span class="err">Date can't be in the future</span>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- Address -->
+      <div class="form-card" id="sec-address">
+        <div class="form-card-header">
+          <span class="title">Address</span>
+          <span class="done">✓ done</span>
+          <span class="chev">▾</span>
+        </div>
+        <div class="form-card-body"><div class="form-card-inner">
+          <div class="field-row">
+            <div class="field addr-wrap">
+              <label for="addr">Search your address</label>
+              <input type="text" id="addr" autocomplete="street-address" placeholder="Start typing… e.g. 12 Cres">
+              <div class="addr-list" id="addr-list"></div>
+              <span class="hint">One search fills everything below — edit only if it got something wrong</span>
+            </div>
+          </div>
+          <div class="field-row addr-detail" id="addr-detail">
+            <div class="field">
+              <label for="addr-street">Street</label>
+              <input type="text" id="addr-street">
+            </div>
+          </div>
+          <div class="field-row addr-detail" id="addr-detail2">
+            <div class="field">
+              <label for="addr-suburb">Suburb</label>
+              <input type="text" id="addr-suburb">
+            </div>
+            <div class="field">
+              <label for="addr-state">State</label>
+              <input type="text" id="addr-state">
+            </div>
+            <div class="field">
+              <label for="addr-pc">Postcode</label>
+              <input type="tel" id="addr-pc" inputmode="numeric" maxlength="4" autocomplete="postal-code">
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- Payment -->
+      <div class="form-card" id="sec-payment">
+        <div class="form-card-header">
+          <span class="title">Payment</span>
+          <span class="done">✓ done</span>
+          <span class="chev">▾</span>
+        </div>
+        <div class="form-card-body"><div class="form-card-inner">
+          <div class="field-row">
+            <div class="field">
+              <label for="cc">Card number</label>
+              <input type="tel" id="cc" inputmode="numeric" autocomplete="cc-number" placeholder="4111 1111 1111 1111" maxlength="19">
+            </div>
+          </div>
+          <div class="field-row keep">
+            <div class="field" id="exp-field">
+              <label for="exp">Expiry</label>
+              <input type="tel" id="exp" inputmode="numeric" autocomplete="cc-exp" placeholder="mm/yy" maxlength="5">
+              <span class="err">Card has expired</span>
+            </div>
+            <div class="field">
+              <label for="cvc">CVC</label>
+              <input type="tel" id="cvc" inputmode="numeric" autocomplete="cc-csc" placeholder="123" maxlength="3">
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <!-- Preferences -->
+      <div class="form-card" id="sec-prefs">
+        <div class="form-card-header">
+          <span class="title">Preferences</span>
+          <span class="done">✓ done</span>
+          <span class="chev">▾</span>
+        </div>
+        <div class="form-card-body"><div class="form-card-inner">
+          <div class="field-row">
+            <div class="field">
+              <label for="budget">Monthly budget</label>
+              <div class="slider-wrap">
+                <input type="range" id="budget" min="50" max="1000" step="10" value="250">
+                <span class="slider-val" id="budget-val">$250</span>
+              </div>
+            </div>
+          </div>
+        </div></div>
+      </div>
+
+      <div style="display:flex; gap:12px; margin-top:24px;">
+        <button class="btn btn-primary" id="submit-btn">
+          <span class="spinner"></span><span class="btn-label">Create customer</span>
+        </button>
+        <button class="btn btn-secondary" data-goto="home">Cancel</button>
+      </div>
+    </div>
+
+    <!-- REPORTS -->
+    <div class="view" id="view-reports">
+      <div class="crumbs">
+        <a data-goto="home">Home</a><span class="sep">›</span>
+        <span class="here">Reports</span>
+      </div>
+      <h1>Reports</h1>
+      <p class="sub">Placeholder view — exists so the palette has somewhere to go.</p>
+      <section>
+        <div class="card-row">
+          <div class="card" data-toast="July summary opened"><div class="icon">▤</div><div class="name">July summary</div><div class="meta">Generated Aug 1</div></div>
+          <div class="card" data-toast="June summary opened"><div class="icon">▤</div><div class="name">June summary</div><div class="meta">Generated Jul 1</div></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- toasts -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<!-- command palette -->
+<div class="palette-scrim" id="palette-scrim">
+  <div class="palette" role="dialog" aria-label="Search">
+    <input type="text" id="palette-input" placeholder="Search pages, customers, actions…" autocomplete="off">
+    <div class="palette-results" id="palette-results"></div>
+  </div>
+</div>
+
+<script>
+/* ---------- tiny helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+/* ---------- navigation ---------- */
+function goto(view) {
+  $$('.view').forEach(v => v.classList.remove('active'));
+  $('#view-' + view).classList.add('active');
+  $$('.rail-item[data-view]').forEach(b =>
+    b.classList.toggle('active', b.dataset.view === view));
+  window.scrollTo({ top: 0 });
+}
+$$('.rail-item[data-view]').forEach(b => b.addEventListener('click', () => goto(b.dataset.view)));
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-goto]');
+  if (g) goto(g.dataset.goto);
+  const t = e.target.closest('[data-toast]');
+  if (t && !g) toast(t.dataset.toast);
+});
+
+/* ---------- theme ---------- */
+$('#theme-toggle').addEventListener('click', () => {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === 'day' ? 'night' : 'day';
+});
+
+/* ---------- toasts ---------- */
+function toast(msg, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind === 'danger' ? ' danger' : '');
+  el.innerHTML = `<span class="t-icon">${kind === 'danger' ? '✕' : '✓'}</span>
+    <span>${msg}</span>
+    <div class="t-track"><div class="t-bar"></div></div>`;
+  $('#toasts').appendChild(el);
+  const bar = el.querySelector('.t-bar');
+  const DUR = 4200;
+  let start = performance.now(), remaining = DUR, raf, paused = false;
+  function tick(now) {
+    if (!paused) {
+      const left = Math.max(0, remaining - (now - start));
+      bar.style.width = (left / DUR * 100) + '%';
+      if (left <= 0) return dismiss();
+    }
+    raf = requestAnimationFrame(tick);
+  }
+  function dismiss() {
+    cancelAnimationFrame(raf);
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 220);
+  }
+  el.addEventListener('mouseenter', () => { paused = true; remaining -= performance.now() - start; });
+  el.addEventListener('mouseleave', () => { paused = false; start = performance.now(); });
+  el.addEventListener('click', dismiss);
+  raf = requestAnimationFrame(tick);
+}
+
+/* ---------- accordion form cards ---------- */
+$$('.form-card-header').forEach(h => {
+  h.addEventListener('click', () => h.parentElement.classList.toggle('open'));
+});
+function markDone(secId, done) {
+  $('#' + secId + ' .done').classList.toggle('show', done);
+}
+
+/* ---------- masked date input, bounded by real calendar ---------- */
+function daysInMonth(m, y) { return new Date(y || 2000, m, 0).getDate(); }
+function maskDate(input, opts) {
+  input.addEventListener('input', () => {
+    let d = input.value.replace(/\D/g, '').slice(0, 8);
+    // clamp day as typed: first digit >3 → pad; full day clamps to month length later
+    let out = '';
+    if (d.length >= 1) {
+      if (+d[0] > 3) d = '0' + d;            // "7" → "07"
+    }
+    if (d.length >= 2) {
+      let day = +d.slice(0,2);
+      if (day === 0) d = '01' + d.slice(2);
+      if (day > 31) d = '31' + d.slice(2);
+    }
+    if (d.length >= 3 && +d[2] > 1) d = d.slice(0,2) + '0' + d.slice(2); // month "9" → "09"
+    if (d.length >= 4) {
+      let mo = +d.slice(2,4);
+      if (mo === 0) d = d.slice(0,2) + '01' + d.slice(4);
+      if (mo > 12) d = d.slice(0,2) + '12' + d.slice(4);
+      // re-clamp day to this month's real length
+      let day = +d.slice(0,2), y = d.length === 8 ? +d.slice(4,8) : undefined;
+      const max = daysInMonth(+d.slice(2,4), y);
+      if (day > max) d = String(max).padStart(2,'0') + d.slice(2);
+    }
+    out = d.slice(0,2);
+    if (d.length > 2) out += '/' + d.slice(2,4);
+    if (d.length > 4) out += '/' + d.slice(4,8);
+    input.value = out;
+
+    const field = input.closest('.field');
+    field.classList.remove('invalid');
+    if (d.length === 8) {
+      const dt = new Date(+d.slice(4,8), +d.slice(2,4)-1, +d.slice(0,2));
+      if (opts.noFuture && dt > new Date()) field.classList.add('invalid');
+      else if (opts.onValid) opts.onValid();
+    }
+  });
+}
+maskDate($('#dob'), { noFuture: true, onValid: () => checkPersonal() });
+
+function checkPersonal() {
+  const ok = $('#fn').value.trim() && $('#ln').value.trim()
+    && $('#dob').value.length === 10 && !$('#dob-field').classList.contains('invalid');
+  markDone('sec-personal', !!ok);
+  if (ok) setTimeout(() => {
+    $('#sec-personal').classList.remove('open');
+    $('#sec-address').classList.add('open');
+  }, 400);
+}
+['fn','ln'].forEach(id => $('#' + id).addEventListener('blur', checkPersonal));
+
+/* ---------- address finder ---------- */
+const FAKE_ADDRS = [
+  { label: '12 Crescent St, Marrickville NSW 2204', street:'12 Crescent St', suburb:'Marrickville', state:'NSW', pc:'2204' },
+  { label: '12 Cresswell Ave, Chatswood NSW 2067', street:'12 Cresswell Ave', suburb:'Chatswood', state:'NSW', pc:'2067' },
+  { label: '4/128 Crest Rd, Bondi NSW 2026', street:'4/128 Crest Rd', suburb:'Bondi', state:'NSW', pc:'2026' },
+  { label: '77 Kent St, Millers Point NSW 2000', street:'77 Kent St', suburb:'Millers Point', state:'NSW', pc:'2000' },
+  { label: '3 Banks Rd, Earlwood NSW 2206', street:'3 Banks Rd', suburb:'Earlwood', state:'NSW', pc:'2206' },
+];
+const addrInput = $('#addr'), addrList = $('#addr-list');
+addrInput.addEventListener('input', () => {
+  const q = addrInput.value.trim().toLowerCase();
+  if (q.length < 2) { addrList.classList.remove('show'); return; }
+  const hits = FAKE_ADDRS.filter(a => a.label.toLowerCase().includes(q)).slice(0,4);
+  addrList.innerHTML = hits.map((a,i) =>
+    `<div class="addr-item" data-i="${FAKE_ADDRS.indexOf(a)}">${a.label}</div>`).join('')
+    || '<div class="addr-item" style="cursor:default;color:var(--text-tertiary)">No matches — keep typing</div>';
+  addrList.classList.add('show');
+});
+addrList.addEventListener('click', e => {
+  const it = e.target.closest('.addr-item[data-i]');
+  if (!it) return;
+  const a = FAKE_ADDRS[+it.dataset.i];
+  addrInput.value = a.label;
+  $('#addr-street').value = a.street; $('#addr-suburb').value = a.suburb;
+  $('#addr-state').value = a.state; $('#addr-pc').value = a.pc;
+  addrList.classList.remove('show');
+  $$('.addr-detail').forEach(d => d.classList.add('show'));
+  markDone('sec-address', true);
+  setTimeout(() => {
+    $('#sec-address').classList.remove('open');
+    $('#sec-payment').classList.add('open');
+  }, 400);
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.addr-wrap')) addrList.classList.remove('show');
+});
+
+/* ---------- payment masks ---------- */
+$('#cc').addEventListener('input', () => {
+  const d = $('#cc').value.replace(/\D/g,'').slice(0,16);
+  $('#cc').value = d.replace(/(.{4})/g, '$1 ').trim();
+  checkPayment();
+});
+$('#exp').addEventListener('input', () => {
+  let d = $('#exp').value.replace(/\D/g,'').slice(0,4);
+  if (d.length >= 1 && +d[0] > 1) d = '0' + d;
+  if (d.length >= 2 && +d.slice(0,2) > 12) d = '12' + d.slice(2);
+  $('#exp').value = d.length > 2 ? d.slice(0,2) + '/' + d.slice(2) : d;
+  const f = $('#exp-field'); f.classList.remove('invalid');
+  if (d.length === 4) {
+    const now = new Date(), yy = 2000 + +d.slice(2), mm = +d.slice(0,2);
+    if (yy < now.getFullYear() || (yy === now.getFullYear() && mm < now.getMonth()+1))
+      f.classList.add('invalid');
+  }
+  checkPayment();
+});
+$('#cvc').addEventListener('input', () => {
+  $('#cvc').value = $('#cvc').value.replace(/\D/g,'').slice(0,3);
+  checkPayment();
+});
+function checkPayment() {
+  const ok = $('#cc').value.replace(/\s/g,'').length === 16
+    && $('#exp').value.length === 5 && !$('#exp-field').classList.contains('invalid')
+    && $('#cvc').value.length === 3;
+  markDone('sec-payment', ok);
+  if (ok) setTimeout(() => {
+    $('#sec-payment').classList.remove('open');
+    $('#sec-prefs').classList.add('open');
+    markDone('sec-prefs', true);
+  }, 400);
+}
+
+/* ---------- slider ---------- */
+$('#budget').addEventListener('input', () =>
+  $('#budget-val').textContent = '$' + $('#budget').value);
+
+/* ---------- submit: immediate loading, then server-ack toast ---------- */
+$('#submit-btn').addEventListener('click', () => {
+  const btn = $('#submit-btn');
+  if (btn.classList.contains('loading')) return;
+  btn.classList.add('loading'); btn.disabled = true;         // immediate feedback
+  setTimeout(() => {                                          // simulated server
+    btn.classList.remove('loading'); btn.disabled = false;
+    const name = $('#fn').value.trim() || 'Customer';
+    toast(name + ' created');                                 // server ack
+    goto('home');
+  }, 1400);
+});
+
+/* ---------- command palette ---------- */
+const PAL = [
+  { g:'Pages',   icon:'⌂', title:'Home',           cap:'',            go:() => goto('home') },
+  { g:'Pages',   icon:'✎', title:'New customer',   cap:'form',        go:() => goto('signup') },
+  { g:'Pages',   icon:'▤', title:'Reports',        cap:'',            go:() => goto('reports') },
+  { g:'Sections',icon:'☰', title:'Personal details', cap:'signup',    go:() => { goto('signup'); openSec('sec-personal'); } },
+  { g:'Sections',icon:'☰', title:'Address',        cap:'signup',      go:() => { goto('signup'); openSec('sec-address'); } },
+  { g:'Sections',icon:'☰', title:'Payment',        cap:'signup',      go:() => { goto('signup'); openSec('sec-payment'); } },
+  { g:'Actions', icon:'◐', title:'Toggle theme',   cap:'day / night', go:() => $('#theme-toggle').click() },
+  { g:'Actions', icon:'✓', title:'Show a test toast', cap:'',         go:() => toast('This is a toast') },
+];
+function openSec(id) {
+  $$('.form-card').forEach(c => c.classList.remove('open'));
+  const s = $('#' + id); s.classList.add('open');
+  s.scrollIntoView({ behavior:'smooth', block:'center' });
+  s.querySelector('input')?.focus();
+}
+const scrim = $('#palette-scrim'), palInput = $('#palette-input'), palRes = $('#palette-results');
+let palSel = 0, palHits = [];
+function palOpen() {
+  scrim.classList.add('show'); palInput.value = ''; palRender('');
+  palInput.focus();
+}
+function palClose() { scrim.classList.remove('show'); }
+function palRender(q) {
+  palHits = PAL.filter(p => (p.title + ' ' + p.cap).toLowerCase().includes(q.toLowerCase()));
+  palSel = 0;
+  if (!palHits.length) { palRes.innerHTML = '<div class="pal-empty">Nothing matches</div>'; return; }
+  let html = '', lastG = '';
+  palHits.forEach((p, i) => {
+    if (p.g !== lastG) { html += `<div class="pal-group">${p.g}</div>`; lastG = p.g; }
+    html += `<div class="pal-item ${i===palSel?'sel':''}" data-i="${i}">
+      <span class="p-icon">${p.icon}</span><span>${p.title}</span>
+      ${p.cap ? `<span class="p-cap">${p.cap}</span>` : ''}</div>`;
+  });
+  palRes.innerHTML = html;
+}
+palInput.addEventListener('input', () => palRender(palInput.value));
+palRes.addEventListener('click', e => {
+  const it = e.target.closest('.pal-item');
+  if (it) { palClose(); palHits[+it.dataset.i].go(); }
+});
+scrim.addEventListener('click', e => { if (e.target === scrim) palClose(); });
+$('#palette-open').addEventListener('click', palOpen);
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palOpen(); return; }
+  if (!scrim.classList.contains('show')) return;
+  if (e.key === 'Escape') palClose();
+  if (e.key === 'ArrowDown') { e.preventDefault(); palSel = Math.min(palSel+1, palHits.length-1); syncSel(); }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); palSel = Math.max(palSel-1, 0); syncSel(); }
+  if (e.key === 'Enter' && palHits[palSel]) { palClose(); palHits[palSel].go(); }
+});
+function syncSel() {
+  $$('.pal-item').forEach((el,i) => el.classList.toggle('sel', i === palSel));
+  $('.pal-item.sel')?.scrollIntoView({ block:'nearest' });
+}
+</script>
+</body>
+</html>
