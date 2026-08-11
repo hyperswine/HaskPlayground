@@ -49,6 +49,7 @@ library
       FPLStuff.RcLRUFuel
       FPRLive
       FPXSyn
+      FRPStuffs
       FullAST
       Fusion
       Gameloop
