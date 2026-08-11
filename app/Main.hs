@@ -59,3 +59,5 @@ main = do
     _ -> do
       putStrLn "Not supplied, running QuantUI"
       QuantUI.main
+
+--- >>> [(x,y) | x <- [1,2], y <- ['a','b']]

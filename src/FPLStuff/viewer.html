@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pkgstore</title>
+<style>
+  :root {
+    --paper:#eef0f3; --card:#ffffff; --ink:#1d2733; --dim:#6b7686;
+    --line:#d4d9e0; --accent:#245ea8; --add:#e8f5ec; --add-ink:#1c6b38;
+    --del:#fbeaea; --del-ink:#9c2b2b; --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--paper); color:var(--ink);
+         font:15px/1.5 "Avenir Next","Segoe UI",system-ui,sans-serif; }
+  header { padding:20px 28px 14px; border-bottom:1px solid var(--line); background:var(--card);
+           display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.02em; }
+  header h1::before { content:"§ "; color:var(--accent); }
+  select { font:inherit; padding:4px 8px; border:1px solid var(--line); border-radius:4px;
+           background:var(--card); color:var(--ink); }
+  .hash { font-family:var(--mono); font-size:12px; color:var(--dim); }
+  main { display:grid; grid-template-columns:260px 1fr; gap:0; min-height:calc(100vh - 60px); }
+  nav { border-right:1px solid var(--line); padding:16px 0; background:var(--card); }
+  nav .file { padding:5px 20px; cursor:pointer; font-family:var(--mono); font-size:13px;
+              display:flex; justify-content:space-between; gap:8px; }
+  nav .file:hover { background:var(--paper); }
+  nav .file.active { background:var(--paper); border-right:2px solid var(--accent); }
+  nav .tag { font-size:11px; align-self:center; }
+  .tag.added { color:var(--add-ink); } .tag.removed { color:var(--del-ink); }
+  .tag.changed { color:var(--accent); } .tag.unchanged { color:var(--line); }
+  section { padding:18px 24px; overflow-x:auto; }
+  pre { font-family:var(--mono); font-size:13px; line-height:1.45; margin:0;
+        background:var(--card); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
+  pre .l { display:block; padding:0 6px; white-space:pre-wrap; }
+  pre .add { background:var(--add); color:var(--add-ink); }
+  pre .del { background:var(--del); color:var(--del-ink); }
+  pre .hunk { color:var(--accent); }
+  .empty { color:var(--dim); padding:40px; text-align:center; }
+  @media (max-width:720px){ main { grid-template-columns:1fr; } nav { border-right:0; border-bottom:1px solid var(--line);} }
+</style>
+</head>
+<body>
+<header>
+  <h1>pkgstore</h1>
+  <label>package <select id="pkg"></select></label>
+  <label>version <select id="va"></select></label>
+  <label>compare to <select id="vb"><option value="">(none — just browse)</option></select></label>
+  <span class="hash" id="meta"></span>
+</header>
+<main>
+  <nav id="files"></nav>
+  <section><div id="content" class="empty">pick a package</div></section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let state = { browse:null, diff:null, file:null };
+
+async function j(url){ const r = await fetch(url); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+async function loadIndex(){
+  const all = await j('/index');
+  const names = [...new Set(all.map(p => p.name))];
+  $('pkg').innerHTML = names.map(n => `<option>${esc(n)}</option>`).join('');
+  if (names.length) loadVersions();
+}
+
+async function loadVersions(){
+  const { versions } = await j('/index/' + $('pkg').value);
+  const opts = versions.map(v => `<option>${esc(v.version)}</option>`).join('');
+  $('va').innerHTML = opts;
+  $('vb').innerHTML = '<option value="">(none — just browse)</option>' + opts;
+  $('va').value = versions[versions.length - 1].version;
+  refresh();
+}
+
+async function refresh(){
+  const name = $('pkg').value, va = $('va').value, vb = $('vb').value;
+  state.file = null;
+  state.browse = await j(`/browse/${name}/${va}`);
+  state.diff = vb && vb !== va ? await j(`/diff/${name}/${va}/${vb}`) : null;
+  $('meta').textContent = state.browse.hash.slice(0, 23) + '…';
+  renderNav();
+  $('content').innerHTML = '<div class="empty">pick a file</div>';
+}
+
+function renderNav(){
+  const items = state.diff
+    ? state.diff.files.map(f => ({ path:f.path, tag:f.status }))
+    : Object.keys(state.browse.files).sort().map(p => ({ path:p, tag:'' }));
+  $('files').innerHTML = items.map(f =>
+    `<div class="file" data-p="${esc(f.path)}"><span>${esc(f.path)}</span>` +
+    (f.tag ? `<span class="tag ${f.tag}">${f.tag}</span>` : '') + `</div>`).join('');
+  for (const el of $('files').children)
+    el.onclick = () => { state.file = el.dataset.p; renderFile(); 
+      [...$('files').children].forEach(x => x.classList.toggle('active', x === el)); };
+}
+
+function renderFile(){
+  const p = state.file;
+  if (state.diff){
+    const f = state.diff.files.find(x => x.path === p);
+    if (f.status === 'changed' && f.diff){
+      $('content').innerHTML = '<pre>' + f.diff.map(l => {
+        const cls = l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('@@') ? 'hunk' : '';
+        return `<span class="l ${cls}">${esc(l)}</span>`; }).join('') + '</pre>';
+      return;
+    }
+    $('content').innerHTML = `<div class="empty">${f.status}</div>`;
+    if (f.status !== 'removed' && state.browse.files[p] != null)
+      $('content').innerHTML = '<pre>' + `<span class="l ${f.status==='added'?'add':''}">` +
+        esc(state.browse.files[p]) + '</span></pre>';
+    return;
+  }
+  const text = state.browse.files[p];
+  $('content').innerHTML = text == null
+    ? '<div class="empty">binary file</div>'
+    : '<pre><span class="l">' + esc(text) + '</span></pre>';
+}
+
+$('pkg').onchange = loadVersions;
+$('va').onchange = refresh;
+$('vb').onchange = refresh;
+loadIndex().catch(e => $('content').innerHTML = `<div class="empty">${esc(e.message)}</div>`);
+</script>
+</body>
+</html>
