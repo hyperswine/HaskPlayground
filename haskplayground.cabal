@@ -47,6 +47,7 @@ library
       FPL1Examples
       FPL1Runner
       FPLStuff.RcLRUFuel
+      FPLStuff.TypeChecking
       FPRLive
       FPXSyn
       FRPStuffs
