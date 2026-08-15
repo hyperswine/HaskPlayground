@@ -28,7 +28,8 @@ from pathlib import Path
 import httpx
 
 SERVER = os.environ.get("PKGSTORE_URL", "http://127.0.0.1:8323")
-CACHE = Path(os.environ.get("PKGSTORE_CACHE", Path.home() / ".cache" / "pkgstore"))
+CACHE = Path(os.environ.get("PKGSTORE_CACHE",
+             Path.home() / ".cache" / "pkgstore"))
 
 
 def die(msg: str) -> None:
@@ -63,7 +64,8 @@ def publish(src: str, name: str, version: str) -> None:
     server_hash = r.json()["hash"]
     if server_hash != local_hash:
         die(f"server hash mismatch: {server_hash} != {local_hash}")
-    r = httpx.post(f"{SERVER}/index/{name}/{version}", json={"hash": local_hash})
+    r = httpx.post(f"{SERVER}/index/{name}/{version}",
+                   json={"hash": local_hash})
     if r.status_code == 409:
         die(r.json()["detail"])
     r.raise_for_status()
@@ -131,7 +133,8 @@ def show_cache() -> None:
 
 
 if __name__ == "__main__":
-    cmds = {"publish": publish, "resolve": resolve, "install": install, "cache": show_cache}
+    cmds = {"publish": publish, "resolve": resolve,
+            "install": install, "cache": show_cache}
     if len(sys.argv) < 2 or sys.argv[1] not in cmds:
         die(f"usage: {sys.argv[0]} {{publish <dir> <name> <ver> | resolve | install | cache}}")
     cmds[sys.argv[1]](*sys.argv[2:])

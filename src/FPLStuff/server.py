@@ -79,7 +79,8 @@ async def upload(request: Request):
     if not p.exists():
         tmp = p.with_suffix(".tmp")
         tmp.write_bytes(body)
-        tmp.rename(p)  # atomic-ish; content-addressed so a race writes same bytes
+        # atomic-ish; content-addressed so a race writes same bytes
+        tmp.rename(p)
     return {"hash": h, "size": len(body), "existed": p.stat().st_size == len(body)}
 
 
@@ -122,7 +123,8 @@ async def register(name: str, version: str, request: Request):
 def _lookup(name: str, version: str) -> sqlite3.Row:
     with db() as conn:
         row = conn.execute(
-            "SELECT * FROM packages WHERE name=? AND version=?", (name, version)
+            "SELECT * FROM packages WHERE name=? AND version=?", (name,
+                                                                  version)
         ).fetchone()
     if row is None:
         raise HTTPException(404, f"no such package version: {name}@{version}")
