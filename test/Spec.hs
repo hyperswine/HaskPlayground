@@ -9,12 +9,6 @@ import qualified Data.Text as T
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
-import CPURiscVTest (cpuRiscVGroup)
-import HuffmanClashTest (huffmanClashGroup)
-import ProcessorTest (processorGroup)
-import RVAsm
-import TrafficLightTest (trafficLightGroup)
-import System.Exit (exitFailure)
 
 -- ---------------------------------------------------------------------------
 -- Generators
@@ -373,8 +367,4 @@ main = do
           ("translate: labels unchanged", prop_translate_labelsUnchanged),
           ("translate: empty program", prop_translate_emptyProgram)
         ]
-  okProc <- checkParallel processorGroup
-  okTL   <- checkParallel trafficLightGroup
-  okHC   <- checkParallel huffmanClashGroup
-  okRV32 <- checkParallel $ Group "CPURiscV" cpuRiscVGroup
-  unless (okRV && okProc && okTL && okHC && okRV32) exitFailure
+  unless okRV exitFailure

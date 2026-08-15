@@ -1,63 +1,16 @@
--- stack exec haskplayground-exe -- dumpasm
+-- stack exec haskplayground-exe -- quantui
 
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 module Main where
 
-import qualified ARC
-import qualified AsmPlan
-import qualified DumpAsm
-import qualified HaskSim1
-import qualified MVULog
-import qualified MVUModLiveView
-import qualified MailboxResponse
-import qualified MemoryModel
-import qualified MiniBrowser
-import qualified PEDemo
-import qualified PortSim
-import qualified QosModel
 import qualified QuantUI
-import qualified SPSCArc
-import qualified SolcMain
-import qualified Solx
 import System.Environment (getArgs)
-import qualified TUIMVUProofOfConcept
-import qualified TubeFem
-import qualified WasmMain
-import qualified ZoneSim
-import qualified FPRLive
-import qualified MiniBrowser
 
 main :: IO ()
 main = do
   args <- getArgs
   case args of
     ["quantui"] -> QuantUI.main
-    ["dumpasm"] -> DumpAsm.main
-    ["arc"] -> ARC.main
-    ["mailbox"] -> MailboxResponse.main
-    ["mvu"] -> MVUModLiveView.main
-    -- ["full"] -> FullAST.main
-    ["mem"] -> MemoryModel.main
-    ["spsc"] -> SPSCArc.main
-    ["sim1"] -> HaskSim1.main
-    ["solc", args] -> SolcMain.main args
-    ["solx", args] -> Solx.main [args]
-    ["mvulog"] -> MVULog.main
-    ["mvupoc"] -> TUIMVUProofOfConcept.main
-    ["asmplan"] -> AsmPlan.main
-    ["minibrowser"] -> MiniBrowser.main
-    ["portsim", args] -> PortSim.main [args]
-    ["qosmodel"] -> QosModel.main
-    ["wasm"] -> WasmMain.main
-    ["partialeval"] -> PEDemo.main
-    ["fem"] -> TubeFem.main
-    ["zonesim"] -> ZoneSim.main
-    ["live"] -> FPRLive.main
-    ["browser"] -> MiniBrowser.main
-    _ -> do
-      putStrLn "Not supplied, running QuantUI"
-      QuantUI.main
-
---- >>> [(x,y) | x <- [1,2], y <- ['a','b']]
+    _ -> putStrLn "Not supplied, exiting..."

@@ -1,5 +1,0 @@
-*.fs
-config_pnr.json
-config.json
-.venv
-__pycache__/

@@ -1,9 +1,0 @@
-# Record update sugar --> setter lenses. Nested path {p | pos.x = 10}
-# desugars to {p | pos = {p.pos | x = 10}} (p referenced twice: watch
-# stage 8 insert the dup).
-
-main =
-  p = {pos = {x = 1, y = 2}, vel = 7};
-  p2 = {p | pos.x = 10};
-  q = {p2 | vel = p2.vel + 1};
-  q.pos.x + q.vel.
