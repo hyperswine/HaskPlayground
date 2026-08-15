@@ -25,88 +25,8 @@ source-repository head
 
 library
   exposed-modules:
-      ARC
-      AsmPlan
-      BetterFiles
-      Civ4x
-      Clash3X
-      CPU3
-      CPURiscV
-      CPURiscVSimple
-      CPURiscVTop
-      CRPBC
-      CryptSim
-      DirectLang
-      EncDecClash
-      ExActors
-      Fir
-      FPFS
-      FPFSActor
-      FPipeline
-      FPL1
-      FPL1Examples
-      FPL1Runner
-      FPLStuff.RcLRUFuel
-      FPLStuff.TypeChecking
-      FPRLive
-      FPXSyn
-      FRPStuffs
-      FullAST
-      Fusion
-      Gameloop
-      HaskSim1
-      HuffmanClash
-      Lib
-      Linear
-      LinFile
-      Lower
-      MailboxResponse
-      MemoryModel
-      MiniBrowser
-      MVULog
-      MVUMod
-      MVUModLiveView
-      MVUPipelineHardwareSim
       MyClash
-      MyHardware
-      ParserFull
-      PEDemo
-      Pipeline
-      PipelinePrime
-      PortSim
-      Processor
-      Proto
-      QosModel
       QuantUI
-      Rc
-      RealWorld
-      RVAsm
-      RVLang
-      SMT
-      SolcMain
-      SolParser
-      Solx
-      SPSCArc
-      StreamFusion
-      T2
-      TerraII.AI
-      TerraII.GameLoop
-      TerraII.Main
-      TerraII.Render
-      TerraII.Types
-      TerraII.World
-      TrafficLight
-      TubeFem
-      TUIMVUProofOfConcept
-      URLFS
-      VListDual
-      VListFP
-      VM
-      WasmMain
-      WasmModel
-      WatParser
-      WindowSystem
-      ZoneSim
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
@@ -208,12 +128,6 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
-      CPURiscVTest
-      HuffmanClashTest
-      ProcessorTest
-      RVLangTest
-      SpikeRun
-      TrafficLightTest
       Paths_haskplayground
   hs-source-dirs:
       test
