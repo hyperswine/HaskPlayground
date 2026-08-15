@@ -4,22 +4,25 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE NoStarIsType #-}
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# HLINT ignore "Use underscore" #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
 
 module MyClash where
 
 import qualified Clash.Explicit.Prelude as CP
 import Clash.Prelude hiding (mux)
 import qualified Data.List as L
-import Prelude hiding (map, not)
 import qualified GHC.Num as Num
+import Prelude hiding (map, not)
 
 infixl 0 |>
 
@@ -184,29 +187,23 @@ data OnOff on off = On (Index on) | Off (Index off) deriving (Generic, NFDataX)
 isOn On {} = True
 isOn Off {} = False
 
--- type Seconds (s :: Nat) = Milliseconds (1_000 * s)
+type Seconds (s :: Nat) = Milliseconds (1_000 * s)
 
--- type Milliseconds (ms :: Nat) = Microseconds (1_000 (*) ms)
+type Milliseconds (ms :: Nat) = Microseconds (1_000 * ms)
 
--- type Microseconds (us :: Nat) = Nanoseconds (1_000 (*) us)
+type Microseconds (us :: Nat) = Nanoseconds (1_000 * us)
 
--- type Nanoseconds (ns :: Nat) = Picoseconds (1_000 * ns)
+type Nanoseconds (ns :: Nat) = Picoseconds (1_000 * ns)
 
--- type Picoseconds (ps :: Nat) = ps
+type Picoseconds (ps :: Nat) = ps
 
--- Type of the input is active high, to active high out
--- does not directly say low, so unmapped, but can do active low to high or low
--- success-safe
--- to be failsafe do (Active High, Active Low) -> (Active High, Active Low)
+-- Type of the input is active high, to active high out does not directly say low, so unmapped, but can do active low to high or low success-safe to be failsafe do (Active High, Active Low) -> (Active High, Active Low)
 
--- topEntity2
---   :: "CLK" ::: Clock System
---   -> "BTN" ::: Signal System (Active High)
---   -> "LED" ::: Signal System (Active High)
--- topEntity2 = withResetEnableGen board
---   where
---   board btn = toActive <$> led
---     where
---     btn' = fromActive <$> btn
---     click = btn' .&&. (not <$> register False btn')
---     led = register False $ mux click (not <$> led) led
+topEntity2 :: "CLK" ::: Clock System -> "BTN" ::: Signal System (Active High) -> "LED" ::: Signal System (Active High)
+topEntity2 = withResetEnableGen board
+  where
+  board btn = toActive <$> led
+    where
+    btn' = fromActive <$> btn
+    click = btn' .&&. (not <$> register False btn')
+    led = register False $ mux click (not <$> led) led
