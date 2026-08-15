@@ -166,19 +166,17 @@ blinkingSecond' clk rst en = msb <$> r
 
 res2 = [minBound .. maxBound] :: [Index 14]
 
--- blink :: forall dom. (KnownDomain dom, KnownNat (ClockDivider dom (HzToPeriod 2))) => Clock dom -> Reset dom -> Enable dom -> Signal dom Bit
--- blink clk rst en = oscillate False (SNat @(ClockDivider dom (HzToPeriod 2)))
+blink :: forall dom. (KnownDomain dom, KnownNat (ClockDivider dom (HzToPeriod 2))) => Clock dom -> Reset dom -> Enable dom -> Signal dom Bit
+blink clk rst en = withClockResetEnable clk rst en $ boolToBit <$> oscillate False (SNat @(ClockDivider dom (HzToPeriod 2)))
 
 -- safe successor function, pareto optimal
 succIdx :: (Eq a, Enum a, Bounded a) => a -> Maybe a
-succIdx x
-  | x == maxBound = Nothing
-  | otherwise = Just $ succ x
+succIdx x | x == maxBound = Nothing
+succIdx x = Just $ succ x
 
 predIdx :: (Eq a, Enum a, Bounded a) => a -> Maybe a
-predIdx x
-  | x == minBound = Nothing
-  | otherwise = Just $ pred x
+predIdx x | x == minBound = Nothing
+predIdx x = Just $ pred x
 
 -- NFData is haskell base thing for normal form, X for exception at simulation - runtime. Needs to normalize
 data OnOff on off = On (Index on) | Off (Index off) deriving (Generic, NFDataX)
@@ -200,10 +198,10 @@ type Picoseconds (ps :: Nat) = ps
 -- Type of the input is active high, to active high out does not directly say low, so unmapped, but can do active low to high or low success-safe to be failsafe do (Active High, Active Low) -> (Active High, Active Low)
 
 topEntity2 :: "CLK" ::: Clock System -> "BTN" ::: Signal System (Active High) -> "LED" ::: Signal System (Active High)
-topEntity2 = withResetEnableGen board
+topEntity2 clk btn = withClockResetEnable clk resetGen enableGen (board btn)
   where
-  board btn = toActive <$> led
+  board button = toActive <$> led
     where
-    btn' = fromActive <$> btn
+    btn' = fromActive <$> button
     click = btn' .&&. (not <$> register False btn')
     led = register False $ mux click (not <$> led) led
