@@ -5,6 +5,7 @@ module MyStuff where
 import qualified Data.ByteString.Lazy.Char8 as L8
 import qualified Data.ByteString.Lazy as L
 import Data.Char (isSpace)
+import Data.Int (Int64)
 
 data Greymap = Greymap {greyWidth :: Int, greyHeight :: Int, greyMax :: Int, greyData :: L.ByteString} deriving (Eq, Show)
 
@@ -59,3 +60,14 @@ parseP5 s =
   >>? \(maxGrey, s) -> getBytes 1 s
   >>? (getBytes (width * height) . snd)
   >>? \(bitmap, s) -> Just (Greymap width height maxGrey bitmap, s)
+
+-- can use ParseState instead of manually doing it yourself or having to do _ / empty everywhere
+firstParserFunction ==> secondParserFunction = Parse chainedParser where
+  chainedParser initState = case (runParse firstParserFunction) initState of
+    Left err -> Left err
+    Right (res, state') -> runParse (secondParserFunction res) state'
+
+-- file: ch10/Parse.hs
+data ParseState = ParseState {string :: L.ByteString, offset :: Int64} deriving (Show)
+
+newtype Parse a = Parse {runParse :: ParseState -> Either String (a, ParseState)}
