@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# ~/.local/bin/normalize
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+usage: normalize [file] [options] [-- word word ...]
+
+Reads from a file, stdin, or trailing positional args, splits on any
+run of whitespace into one-token-per-line canonical form, then emits
+it in the requested shape.
+
+  --to FORMAT     csv | ssv | tsv | lines | json   (default: lines)
+  --sep CHAR      use CHAR as output separator (overrides --to)
+  --keep-blank    don't drop blank lines during normalization
+  -h, --help      this message
+
+Examples:
+  normalize myjunk.txt --csv
+  printf 'a b\tc\n\nd\n' | normalize --ssv
+  normalize --to json -- a b c
+EOF
+}
+
+to=lines
+sep=""
+keep_blank=0
+file=""
+declare -a words=()
+
+# --- arg parsing ---
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --to) to="$2"; shift 2 ;;
+    --to=*) to="${1#*=}"; shift ;;
+    --csv) to=csv; shift ;;
+    --ssv) to=ssv; shift ;;
+    --tsv) to=tsv; shift ;;
+    --json) to=json; shift ;;
+    --lines) to=lines; shift ;;
+    --sep) sep="$2"; shift 2 ;;
+    --sep=*) sep="${1#*=}"; shift ;;
+    --keep-blank) keep_blank=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; words+=("$@"); break ;;
+    *)
+      if [[ -z "$file" && -f "$1" ]]; then
+        file="$1"; shift
+      else
+        words+=("$1"); shift
+      fi
+      ;;
+  esac
+done
+
+# --- gather raw input ---
+if [[ ${#words[@]} -gt 0 ]]; then
+  raw="$(printf '%s\n' "${words[@]}")"
+elif [[ -n "$file" ]]; then
+  raw="$(cat -- "$file")"
+elif [[ ! -t 0 ]]; then
+  raw="$(cat)"
+else
+  echo "normalize: no input (file, stdin, or -- words required)" >&2
+  usage >&2
+  exit 1
+fi
+
+# --- normalize to canonical one-token-per-line ---
+canon="$(printf '%s' "$raw" | tr -d '\r' | tr -s '[:space:]' '\n')"
+if [[ "$keep_blank" -eq 0 ]]; then
+  canon="$(printf '%s\n' "$canon" | sed '/^$/d')"
+fi
+
+# --- resolve separator ---
+if [[ -z "$sep" ]]; then
+  case "$to" in
+    csv)   sep=', ' ;;
+    ssv)   sep=' '  ;;
+    tsv)   sep=$'\t' ;;
+    lines) sep=$'\n' ;;
+    json)  sep=''    ;;  # handled specially
+    *) echo "normalize: unknown format '$to'" >&2; exit 1 ;;
+  esac
+fi
+
+# awK: good for parsing nested records and often used for generating reports
+
+# --- emit ---
+if [[ "$to" == json && -z "$sep" ]]; then
+  printf '%s\n' "$canon" | awk '
+    BEGIN{print "["}
+    {
+      gsub(/\\/,"\\\\"); gsub(/"/,"\\\"");
+      printf "%s\"%s\"", (NR>1?",\n":""), $0
+    }
+    END{print "\n]"}'
+else
+  printf '%s\n' "$canon" | paste -sd"$sep" -
+fi
