@@ -6,6 +6,7 @@
 module Main where
 
 import qualified QuantUI
+import qualified DTs
 import System.Environment (getArgs)
 
 main :: IO ()
@@ -13,4 +14,5 @@ main = do
   args <- getArgs
   case args of
     ["quantui"] -> QuantUI.main
+    ["dt"] -> DTs.main
     _ -> putStrLn "Not supplied, exiting..."

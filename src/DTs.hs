@@ -86,10 +86,7 @@ argmax = U.maxIndex
 -- ---------------------------------------------------------------------------
 -- Split search: one column
 
--- | Best (gain, binThreshold) for one column at this node, or Nothing if no
--- threshold leaves >= pMinLeaf samples on both sides. Semantics of a result
--- @(g, t)@: send row left iff its bin code <= t.
--- | @parentH@ is the entropy of the parent node, @codes@ is the bin code per
+-- | Best (gain, binThreshold) for one column at this node, or Nothing if no threshold leaves >= pMinLeaf samples on both sides. Semantics of a result @(g, t)@: send row left iff its bin code <= t. @parentH@ is the entropy of the parent node, @codes@ is the bin code per row for this column, @ys@ is the class label per row, and @idxs@ is the subset of rows at this node.
 bestSplitCol :: Params -> Double -> U.Vector Word8 -> Labels -> U.Vector Int -> Maybe (Double, Int)
 bestSplitCol Params {..} parentH codes ys idxs = sweep
   where
@@ -144,35 +141,23 @@ build ps@Params {..} bn ys depth idxs
               let codes = bCodes bn V.! col
                   (l, r) = U.partition (\i -> codes U.! i <= fromIntegral t) idxs
                   thr = (bEdges bn V.! col) U.! t
-               in Split
-                    col
-                    thr
-                    (build ps bn ys (depth + 1) l)
-                    (build ps bn ys (depth + 1) r)
+               in Split col thr (build ps bn ys (depth + 1) l) (build ps bn ys (depth + 1) r)
         _ -> leaf -- nothing clears pMinGain
   where
     counts = classCounts pClasses ys idxs
     parentH = entropy counts
     leaf = Leaf (argmax counts)
 
-    bestOverall =
-      V.ifoldl' step Nothing (bCodes bn)
+    bestOverall = V.ifoldl' step Nothing (bCodes bn)
       where
-        step acc col codes =
-          case bestSplitCol ps parentH codes ys idxs of
-            Nothing -> acc
-            Just (g, t) -> case acc of
-              Just (g0, _, _) | g0 >= g -> acc
-              _ -> Just (g, col, t)
+        step acc col codes = case bestSplitCol ps parentH codes ys idxs of
+          Nothing -> acc
+          Just (g, t) -> case acc of
+            Just (g0, _, _) | g0 >= g -> acc
+            _ -> Just (g, col, t)
 
 fit :: Params -> Dataset -> Labels -> Tree
-fit ps ds ys =
-  build
-    ps
-    (binAll (pBins ps) ds)
-    ys
-    0
-    (U.enumFromN 0 (U.length ys))
+fit ps ds ys = build ps (binAll (pBins ps) ds) ys 0 (U.enumFromN 0 (U.length ys))
 
 predict :: Tree -> U.Vector Double -> Int
 predict (Leaf c) _ = c
@@ -184,10 +169,7 @@ predict (Split col thr l r) x
 -- Demo: noisy XOR — the canonical "no linear tally can do this" dataset
 
 lcg :: Int -> [Double] -- crude deterministic uniforms in [0,1)
-lcg =
-  map (\s -> fromIntegral s / 2147483648)
-    . tail
-    . iterate (\s -> (1103515245 * s + 12345) `mod` 2147483648)
+lcg = map (\s -> fromIntegral s / 2147483648) . tail . iterate (\s -> (1103515245 * s + 12345) `mod` 2147483648)
 
 xorData :: Int -> Int -> (Dataset, Labels)
 xorData seed n = (V.fromList [xs, zs], ls)
@@ -196,13 +178,8 @@ xorData seed n = (V.fromList [xs, zs], ls)
     xs = U.fromList (map (\u -> u * 2 - 1) (take n us))
     zs = U.fromList (map (\u -> u * 2 - 1) (take n (drop n us)))
     noise = take n (drop (2 * n) us)
-    ls =
-      U.fromList
-        [ if nz < 0.05 then 1 - c else c -- 5% label noise
-          | i <- [0 .. n - 1],
-            let c = if (xs U.! i > 0) /= (zs U.! i > 0) then 1 else 0
-                nz = noise !! i
-        ]
+    -- 5% label noise
+    ls = U.fromList [if nz < 0.05 then 1 - c else c | i <- [0 .. n - 1], let c = if (xs U.! i > 0) /= (zs U.! i > 0) then 1 else 0; nz = noise !! i]
 
 accuracy :: Tree -> Dataset -> Labels -> Double
 accuracy t ds ys = fromIntegral hits / fromIntegral n
@@ -231,9 +208,5 @@ main = do
   -- top of the tree should be x<~0 then y<~0 (or vice versa)
   case tree of
     Split c thr _ _ ->
-      putStrLn $
-        "root split: col "
-          ++ show c
-          ++ " @ "
-          ++ show thr
+      putStrLn $ "root split: col " ++ show c ++ " @ " ++ show thr
     _ -> pure ()
