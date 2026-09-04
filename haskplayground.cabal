@@ -29,6 +29,7 @@ library
       MyClash
       MyStuff
       QuantUI
+      SimpleRisc
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
