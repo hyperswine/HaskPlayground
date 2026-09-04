@@ -3,11 +3,13 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Replace case with maybe" #-}
 
 -- | A deliberately small, unpipelined RV32I computer.
 --
@@ -39,7 +41,9 @@ module SimpleRisc where
 import Clash.Prelude
 
 type Word32 = Unsigned 32
+
 type Byte = Unsigned 8
+
 type MemAddr = Unsigned 10
 
 data CpuPhase
@@ -61,28 +65,28 @@ data ReplyState = NoReply | DoneReply (Unsigned 3)
   deriving (Generic, NFDataX, Show, Eq)
 
 data Machine = Machine
-  { cpuRegs :: Vec 32 Word32
-  , cpuPc :: Word32
-  , cpuPhase :: CpuPhase
-  , cpuRunning :: Bool
-  , programEnd :: Word32
-  , hostState :: HostState
-  , rxHolding :: Maybe Byte
-  , replyState :: ReplyState
+  { cpuRegs :: Vec 32 Word32,
+    cpuPc :: Word32,
+    cpuPhase :: CpuPhase,
+    cpuRunning :: Bool,
+    programEnd :: Word32,
+    hostState :: HostState,
+    rxHolding :: Maybe Byte,
+    replyState :: ReplyState
   }
   deriving (Generic, NFDataX)
 
 initialMachine :: Machine
 initialMachine =
   Machine
-    { cpuRegs = repeat 0
-    , cpuPc = 0
-    , cpuPhase = Fetch
-    , cpuRunning = False
-    , programEnd = 0
-    , hostState = HostIdle
-    , rxHolding = Nothing
-    , replyState = NoReply
+    { cpuRegs = repeat 0,
+      cpuPc = 0,
+      cpuPhase = Fetch,
+      cpuRunning = False,
+      programEnd = 0,
+      hostState = HostIdle,
+      rxHolding = Nothing,
+      replyState = NoReply
     }
 
 -- UART -----------------------------------------------------------------------
@@ -103,7 +107,7 @@ data RxState
   | RxStop BaudCounter Byte
   deriving (Generic, NFDataX)
 
-uartRx :: HiddenClockResetEnable dom => Signal dom Bit -> Signal dom (Maybe Byte)
+uartRx :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom (Maybe Byte)
 uartRx = mealy rxStep RxIdle
 
 rxStep :: RxState -> Bit -> (RxState, Maybe Byte)
@@ -133,7 +137,7 @@ data TxState
   | TxStop BaudCounter
   deriving (Generic, NFDataX)
 
-uartTx :: HiddenClockResetEnable dom => Signal dom (Maybe Byte) -> (Signal dom Bit, Signal dom Bool)
+uartTx :: (HiddenClockResetEnable dom) => Signal dom (Maybe Byte) -> (Signal dom Bit, Signal dom Bool)
 uartTx request = unbundle (mealy txStep TxIdle request)
 
 txStep :: TxState -> Maybe Byte -> (TxState, (Bit, Bool))
@@ -152,68 +156,71 @@ txStep (TxStop n) _
 
 -- Top level ------------------------------------------------------------------
 
-{-# ANN topEntity
-  (Synthesize
-    { t_name = "simple_risc"
-    , t_inputs = [PortName "clk", PortName "reset", PortName "enable", PortName "uart_rx"]
-    , t_output = PortName "uart_tx"
-    }) #-}
-topEntity
-  :: "CLK" ::: Clock System
-  -> "RESET" ::: Reset System
-  -> "ENABLE" ::: Enable System
-  -> "UART_RX" ::: Signal System Bit
-  -> "UART_TX" ::: Signal System Bit
+{-# ANN
+  topEntity
+  ( Synthesize
+      { t_name = "simple_risc",
+        t_inputs = [PortName "clk", PortName "reset", PortName "enable", PortName "uart_rx"],
+        t_output = PortName "uart_tx"
+      }
+  )
+  #-}
+topEntity ::
+  "CLK" ::: Clock System ->
+  "RESET" ::: Reset System ->
+  "ENABLE" ::: Enable System ->
+  "UART_RX" ::: Signal System Bit ->
+  "UART_TX" ::: Signal System Bit
 topEntity clk rst en serialRx = withClockResetEnable clk rst en (simpleRisc serialRx)
 
-simpleRisc :: HiddenClockResetEnable dom => Signal dom Bit -> Signal dom Bit
+simpleRisc :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
 simpleRisc serialRx = serialTx
- where
-  received = uartRx serialRx
-  (serialTx, txReady) = uartTx txRequest
+  where
+    received = uartRx serialRx
+    (serialTx, txReady) = uartTx txRequest
 
-  machineInput = bundle (memoryOut, received, txReady)
-  machineOutput = mealy machineStep initialMachine machineInput
-  (memoryAddress, memoryWrite, txRequest) = unbundle machineOutput
+    machineInput = bundle (memoryOut, received, txReady)
+    machineOutput = mealy machineStep initialMachine machineInput
+    (memoryAddress, memoryWrite, txRequest) = unbundle machineOutput
 
-  -- A synchronous 1024 x 32-bit RAM.  Reads take one cycle; writes are visible
-  -- on the following read.  This shape maps naturally to FPGA block RAM.
-  memoryOut = blockRamPow2 (repeat 0) memoryAddress memoryWrite
+    -- A synchronous 1024 x 32-bit RAM.  Reads take one cycle; writes are visible
+    -- on the following read.  This shape maps naturally to FPGA block RAM.
+    memoryOut = blockRamPow2 (repeat 0) memoryAddress memoryWrite
 
 -- | Result wires from the machine controller: BRAM read address, optional BRAM
 -- write, and an optional byte offered to the UART transmitter.
-machineStep
-  :: Machine
-  -> (Word32, Maybe Byte, Bool)
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+machineStep ::
+  Machine ->
+  (Word32, Maybe Byte, Bool) ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 machineStep machine (memoryWord, received, txReady) =
   case hostState machine of
     ClearMemory address -> clearStep address
     _
       | cpuRunning machine -> runningStep machine memoryWord received txReady
       | otherwise -> stoppedStep machine received txReady
- where
-  clearStep address =
-    let lastAddress = address == maxBound
-        machine' =
-          machine
-            { hostState = if lastAddress then HostIdle else ClearMemory (address + 1)
-            , cpuRegs = repeat 0
-            , cpuPc = 0
-            , cpuPhase = Fetch
-            , cpuRunning = False
-            , programEnd = 0
-            , rxHolding = Nothing
-            }
-     in (machine', (address, Just (address, 0), Nothing))
+  where
+    clearStep address =
+      let lastAddress = address == maxBound
+          machine' =
+            machine
+              { hostState = if lastAddress then HostIdle else ClearMemory (address + 1),
+                cpuRegs = repeat 0,
+                cpuPc = 0,
+                cpuPhase = Fetch,
+                cpuRunning = False,
+                programEnd = 0,
+                rxHolding = Nothing
+              }
+       in (machine', (address, Just (address, 0), Nothing))
 
 -- Host controller ------------------------------------------------------------
 
-stoppedStep
-  :: Machine
-  -> Maybe Byte
-  -> Bool
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+stoppedStep ::
+  Machine ->
+  Maybe Byte ->
+  Bool ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 stoppedStep machine received txReady =
   let (machineWithReply, replyByte) = sendReply machine txReady
    in case (hostState machineWithReply, received) of
@@ -221,20 +228,20 @@ stoppedStep machine received txReady =
         (HostIdle, Just 0x52) ->
           idleOut
             machineWithReply
-              { cpuRegs = repeat 0
-              , cpuPc = 0
-              , cpuPhase = Fetch
-              , cpuRunning = programEnd machineWithReply /= 0
-              , rxHolding = Nothing
+              { cpuRegs = repeat 0,
+                cpuPc = 0,
+                cpuPhase = Fetch,
+                cpuRunning = programEnd machineWithReply /= 0,
+                rxHolding = Nothing
               }
             replyByte
         (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
         (HostIdle, Just 0x4d) ->
           idleOut
             (resetCpu machineWithReply)
-              { hostState = ClearMemory 0
-              , programEnd = 0
-              , replyState = NoReply
+              { hostState = ClearMemory 0,
+                programEnd = 0,
+                replyState = NoReply
               }
             Nothing
         (ProgramCountLo, Just lowByte) ->
@@ -245,11 +252,11 @@ stoppedStep machine received txReady =
               nextHost = if count == 0 then HostIdle else ProgramBytes count 0 0 0
            in idleOut
                 machineWithReply
-                  { hostState = nextHost
-                  , programEnd = 0
-                  , cpuRegs = repeat 0
-                  , cpuPc = 0
-                  , cpuPhase = Fetch
+                  { hostState = nextHost,
+                    programEnd = 0,
+                    cpuRegs = repeat 0,
+                    cpuPc = 0,
+                    cpuPhase = Fetch
                   }
                 replyByte
         (ProgramBytes wordsLeft address byteNo partial, Just byte) ->
@@ -260,14 +267,14 @@ stoppedStep machine received txReady =
                   let isLast = wordsLeft == 1
                       machine' =
                         machineWithReply
-                          { hostState = if isLast then HostIdle else ProgramBytes (wordsLeft - 1) (address + 1) 0 0
-                          , programEnd = if isLast then (resize address + 1) `shiftL` 2 else programEnd machineWithReply
+                          { hostState = if isLast then HostIdle else ProgramBytes (wordsLeft - 1) (address + 1) 0 0,
+                            programEnd = if isLast then (resize address + 1) `shiftL` 2 else programEnd machineWithReply
                           }
                    in (machine', (address, Just (address, partial'), replyByte))
                 else idleOut machineWithReply {hostState = ProgramBytes wordsLeft address (succ byteNo) partial'} replyByte
         _ -> idleOut machineWithReply replyByte
- where
-  idleOut m replyByte = (m, (0, Nothing, replyByte))
+  where
+    idleOut m replyByte = (m, (0, Nothing, replyByte))
 
 sendReply :: Machine -> Bool -> (Machine, Maybe Byte)
 sendReply machine False = (machine, Nothing)
@@ -285,21 +292,21 @@ sendReply machine True = case replyState machine of
 resetCpu :: Machine -> Machine
 resetCpu machine =
   machine
-    { cpuRegs = repeat 0
-    , cpuPc = 0
-    , cpuPhase = Fetch
-    , cpuRunning = False
-    , rxHolding = Nothing
+    { cpuRegs = repeat 0,
+      cpuPc = 0,
+      cpuPhase = Fetch,
+      cpuRunning = False,
+      rxHolding = Nothing
     }
 
 -- CPU ------------------------------------------------------------------------
 
-runningStep
-  :: Machine
-  -> Word32
-  -> Maybe Byte
-  -> Bool
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+runningStep ::
+  Machine ->
+  Word32 ->
+  Maybe Byte ->
+  Bool ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 runningStep machine memoryWord received txReady
   | received == Just 0x03 = (resetCpu machine, (0, Nothing, Nothing))
   | otherwise =
@@ -308,8 +315,8 @@ runningStep machine memoryWord received txReady
             _ -> machine
        in case cpuPhase machineRx of
             Fetch ->
-              ( machineRx {cpuPhase = FetchWait}
-              , (memoryIndex (cpuPc machineRx), Nothing, Nothing)
+              ( machineRx {cpuPhase = FetchWait},
+                (memoryIndex (cpuPc machineRx), Nothing, Nothing)
               )
             FetchWait -> executeInstruction machineRx memoryWord txReady
             LoadWait rd funct3 byteOffset finalInstruction ->
@@ -320,11 +327,11 @@ runningStep machine memoryWord received txReady
               let merged = storeValue funct3 byteOffset value memoryWord
                in finishInstruction finalInstruction machineRx (Just (address, merged))
 
-executeInstruction
-  :: Machine
-  -> Word32
-  -> Bool
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+executeInstruction ::
+  Machine ->
+  Word32 ->
+  Bool ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 executeInstruction machine instruction txReady =
   let opcode = instruction .&. 0x7f
       rd = regIndex ((instruction `shiftR` 7) .&. 0x1f)
@@ -343,17 +350,21 @@ executeInstruction machine instruction txReady =
    in case opcode of
         0x37 -> normal (immU instruction) -- LUI
         0x17 -> normal (pc + immU instruction) -- AUIPC
-        0x6f -> -- JAL
+        0x6f ->
+          -- JAL
           finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = pc + immJ instruction}) Nothing
-        0x67 -> -- JALR
+        0x67 ->
+          -- JALR
           if funct3 == 0
             then finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = (a + immI instruction) .&. complement 1}) Nothing
             else invalid
-        0x63 -> -- branches
+        0x63 ->
+          -- branches
           case branchTaken funct3 a b of
             Just takeBranch -> noWrite (if takeBranch then pc + immB instruction else nextPc)
             Nothing -> invalid
-        0x03 -> -- loads
+        0x03 ->
+          -- loads
           let address = a + immI instruction
            in if isUartAddress address
                 then
@@ -362,11 +373,12 @@ executeInstruction machine instruction txReady =
                 else
                   if validMemoryAddress address && validLoad funct3
                     then
-                      ( machine {cpuPc = nextPc, cpuPhase = LoadWait rd funct3 (resize address) isFinal}
-                      , (memoryIndex address, Nothing, Nothing)
+                      ( machine {cpuPc = nextPc, cpuPhase = LoadWait rd funct3 (resize address) isFinal},
+                        (memoryIndex address, Nothing, Nothing)
                       )
                     else invalid
-        0x23 -> -- stores
+        0x23 ->
+          -- stores
           let address = a + immS instruction
            in if address == uartTxData
                 then
@@ -379,8 +391,8 @@ executeInstruction machine instruction txReady =
                       if funct3 == 0b010
                         then finishInstructionWithWrite isFinal machine {cpuPc = nextPc} (memoryIndex address, b)
                         else
-                          ( machine {cpuPc = nextPc, cpuPhase = StoreWait funct3 (resize address) (memoryIndex address) b isFinal}
-                          , (memoryIndex address, Nothing, Nothing)
+                          ( machine {cpuPc = nextPc, cpuPhase = StoreWait funct3 (resize address) (memoryIndex address) b isFinal},
+                            (memoryIndex address, Nothing, Nothing)
                           )
                     else invalid
         0x13 -> case opImmediate funct3 funct7 a (immI instruction) instruction of
@@ -393,28 +405,28 @@ executeInstruction machine instruction txReady =
         0x73 -> haltMachine machine -- ECALL / EBREAK terminate the program.
         _ -> invalid
 
-finishInstruction
-  :: Bool
-  -> Machine
-  -> Maybe (MemAddr, Word32)
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+finishInstruction ::
+  Bool ->
+  Machine ->
+  Maybe (MemAddr, Word32) ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 finishInstruction finalInstruction machine write =
   if finalInstruction
     then (halt machine, (0, write, Nothing))
     else (machine {cpuPhase = Fetch}, (0, write, Nothing))
 
-finishInstructionWithWrite
-  :: Bool
-  -> Machine
-  -> (MemAddr, Word32)
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+finishInstructionWithWrite ::
+  Bool ->
+  Machine ->
+  (MemAddr, Word32) ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 finishInstructionWithWrite finalInstruction machine write = finishInstruction finalInstruction machine (Just write)
 
-finishInstructionWithTx
-  :: Bool
-  -> Machine
-  -> Maybe Byte
-  -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+finishInstructionWithTx ::
+  Bool ->
+  Machine ->
+  Maybe Byte ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 finishInstructionWithTx finalInstruction machine request =
   if finalInstruction
     then (halt machine, (0, Nothing, request))
@@ -454,15 +466,15 @@ isUartAddress address = address == uartTxData || address == uartStatus || addres
 readUart :: Word32 -> Bool -> Machine -> (Word32, Machine)
 readUart address txReady machine
   | address == uartStatus =
-      ( (if txReady then 1 else 0) .|. (if hasByte (rxHolding machine) then 2 else 0)
-      , machine
+      ( (if txReady then 1 else 0) .|. (if hasByte (rxHolding machine) then 2 else 0),
+        machine
       )
   | address == uartRxData =
       (maybe 0 resize (rxHolding machine), machine {rxHolding = Nothing})
   | otherwise = (0, machine)
- where
-  hasByte Nothing = False
-  hasByte Just {} = True
+  where
+    hasByte Nothing = False
+    hasByte Just {} = True
 
 validLoad :: BitVector 3 -> Bool
 validLoad funct3 = funct3 == 0b000 || funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b100 || funct3 == 0b101
@@ -478,18 +490,18 @@ loadValue funct3 byteOffset word = case funct3 of
   0b100 -> resize byte
   0b101 -> resize half
   _ -> 0
- where
-  shiftAmount = fromIntegral byteOffset * 8
-  byte = resize (word `shiftR` shiftAmount) :: Unsigned 8
-  half = resize (word `shiftR` shiftAmount) :: Unsigned 16
+  where
+    shiftAmount = fromIntegral byteOffset * 8
+    byte = resize (word `shiftR` shiftAmount) :: Unsigned 8
+    half = resize (word `shiftR` shiftAmount) :: Unsigned 16
 
 storeValue :: BitVector 3 -> Unsigned 2 -> Word32 -> Word32 -> Word32
 storeValue funct3 byteOffset value oldWord = case funct3 of
   0b000 -> (oldWord .&. complement (0xff `shiftL` shiftAmount)) .|. ((value .&. 0xff) `shiftL` shiftAmount)
   0b001 -> (oldWord .&. complement (0xffff `shiftL` shiftAmount)) .|. ((value .&. 0xffff) `shiftL` shiftAmount)
   _ -> value
- where
-  shiftAmount = fromIntegral byteOffset * 8
+  where
+    shiftAmount = fromIntegral byteOffset * 8
 
 -- Decode/execute helpers ------------------------------------------------------
 
@@ -507,8 +519,8 @@ opImmediate funct3 funct7 a immediate instruction = case funct3 of
     | funct7 == 0x20 -> Just (unsigned32 (signed32 a `shiftR` shamt)) -- SRAI
     | otherwise -> Nothing
   _ -> Nothing
- where
-  shamt = fromIntegral ((instruction `shiftR` 20) .&. 0x1f)
+  where
+    shamt = fromIntegral ((instruction `shiftR` 20) .&. 0x1f)
 
 opRegister :: BitVector 3 -> Word32 -> Word32 -> Word32 -> Maybe Word32
 opRegister funct3 funct7 a b = case (funct3, funct7) of
@@ -523,8 +535,8 @@ opRegister funct3 funct7 a b = case (funct3, funct7) of
   (0b110, 0x00) -> Just (a .|. b)
   (0b111, 0x00) -> Just (a .&. b)
   _ -> Nothing
- where
-  shamt = fromIntegral (b .&. 0x1f)
+  where
+    shamt = fromIntegral (b .&. 0x1f)
 
 branchTaken :: BitVector 3 -> Word32 -> Word32 -> Maybe Bool
 branchTaken funct3 a b = case funct3 of

@@ -8,6 +8,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import System.Exit (exitFailure)
+import qualified SimpleRisc as SimpleRiscTests
 
 prop_example :: Property
 prop_example = property $ do
@@ -17,6 +18,8 @@ prop_example = property $ do
   annotate $ "x: " <> show x <> ", y: " <> show y <> ", result: " <> show result
   result === x + y
 
+main :: IO ()
 main = do
-  result <- checkParallel $ Group "test" [("prop_example", prop_example)]
-  unless result exitFailure
+  exampleResult <- checkParallel $ Group "test" [("prop_example", prop_example)]
+  simpleRiscResult <- checkParallel SimpleRiscTests.simpleRiscGroup
+  unless (exampleResult && simpleRiscResult) exitFailure

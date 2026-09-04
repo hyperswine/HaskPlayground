@@ -131,6 +131,7 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      SimpleRisc
       Paths_haskplayground
   hs-source-dirs:
       test
