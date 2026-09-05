@@ -25,10 +25,10 @@ import Data.Word (Word8)
 
 type Col = U.Vector Double
 
--- \| ncols entries, each of length nrows
+-- | ncols entries, each of length nrows
 type Dataset = V.Vector Col
 
--- \| class ids in [0 .. pClasses-1]
+-- | class ids in [0 .. pClasses-1]
 type Labels = U.Vector Int
 
 -- | pBins: histogram bins per column (<= 256), pMaxDepth: max tree depth, pMinGain: ditch a split if gain below this, pMinLeaf: min samples on each side of a split, pClasses: number of classes
@@ -39,6 +39,8 @@ defaultParams k = Params {pBins = 256, pMaxDepth = 8, pMinGain = 1e-3, pMinLeaf 
 
 -- | Leaf: predicted class; Split: column, raw threshold; left if x < thr
 data Tree = Leaf !Int | Split !Int !Double !Tree !Tree deriving (Show)
+
+-- The "codes" are the pre-binned representations of the dataset columns, where each value is replaced by its corresponding bin index. Uses unboxed Vector of vectors of Word8 for storage.
 
 -- Pre-binned view of the dataset. bCodes: per column, bin code per row; bEdges: per column, upper edge of bin i
 data Binned = Binned {bCodes :: !(V.Vector (U.Vector Word8)), bEdges :: !(V.Vector (U.Vector Double))}
@@ -131,18 +133,18 @@ bestSplitCol Params {..} parentH codes ys idxs = sweep
 
 build :: Params -> Binned -> Labels -> Int -> U.Vector Int -> Tree
 build ps@Params {..} bn ys depth idxs
-  | depth >= pMaxDepth = leaf
-  | U.length idxs < 2 * pMinLeaf = leaf
-  | parentH == 0 = leaf -- already pure
-  | otherwise =
-      case bestOverall of
-        Just (gain, col, t)
-          | gain >= pMinGain ->
-              let codes = bCodes bn V.! col
-                  (l, r) = U.partition (\i -> codes U.! i <= fromIntegral t) idxs
-                  thr = (bEdges bn V.! col) U.! t
-               in Split col thr (build ps bn ys (depth + 1) l) (build ps bn ys (depth + 1) r)
-        _ -> leaf -- nothing clears pMinGain
+  | depth >= pMaxDepth = leaf -- when depth exceeds maximum allowed
+  | U.length idxs < 2 * pMinLeaf = leaf -- not enough samples to split
+  | parentH == 0 = leaf -- already pure, no further split needed, just return a leaf
+  -- otherwise, try to find the best split
+  | otherwise = case bestOverall of
+    Just (gain, col, t) | gain >= pMinGain ->
+      -- this is just a standard split based on the best gain found. first, we retrieve the codes for the best column and partition the indices accordingly. then, we determine the threshold and recursively build the left and right subtrees.
+      let codes = bCodes bn V.! col
+          (l, r) = U.partition (\i -> codes U.! i <= fromIntegral t) idxs
+          thr = (bEdges bn V.! col) U.! t
+       in Split col thr (build ps bn ys (depth + 1) l) (build ps bn ys (depth + 1) r)
+    _ -> leaf -- nothing clears pMinGain
   where
     counts = classCounts pClasses ys idxs
     parentH = entropy counts

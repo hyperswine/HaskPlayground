@@ -1,11 +1,14 @@
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Eta reduce" #-}
+{-# HLINT ignore "Use catMaybes" #-}
 
 module SimpleRisc where
 
@@ -22,10 +25,10 @@ type Ram = Vec 1024 Word32
 -- This mirrors blockRamPow2: the read address selected in one cycle produces
 -- the input word for the following machineStep, and writes happen on the edge.
 data Sim = Sim
-  { simMachine :: Machine
-  , simRam :: Ram
-  , simRamOutput :: Word32
-  , simTransmitted :: [Byte]
+  { simMachine :: Machine,
+    simRam :: Ram,
+    simRamOutput :: Word32,
+    simTransmitted :: [Byte]
   }
 
 stepSim :: Sim -> Maybe Byte -> Sim
@@ -49,10 +52,10 @@ startSim machine ram = Sim machine ram 0 []
 
 ramFromList :: [Word32] -> Ram
 ramFromList = go 0 (repeat 0)
- where
-  go :: Index 1024 -> Ram -> [Word32] -> Ram
-  go _ ram [] = ram
-  go address ram (word : rest) = go (address + 1) (replace address word ram) rest
+  where
+    go :: Index 1024 -> Ram -> [Word32] -> Ram
+    go _ ram [] = ram
+    go address ram (word : rest) = go (address + 1) (replace address word ram) rest
 
 -- RV32I execution -------------------------------------------------------------
 
@@ -104,8 +107,8 @@ arithmeticResult operation a b = case operation of
   ShiftRightArithmetic -> fromSigned (asSigned a `shiftR` shiftAmount)
   Or -> a .|. b
   And -> a .&. b
- where
-  shiftAmount = fromIntegral (b .&. 0x1f)
+  where
+    shiftAmount = fromIntegral (b .&. 0x1f)
 
 asSigned :: Word32 -> Signed 32
 asSigned = bitCoerce
@@ -126,11 +129,11 @@ prop_arithmetic_instruction_stores_expected_result = property $ do
   let registers = replace (2 :: Index 32) b (replace (1 :: Index 32) a (repeat 0))
       machine =
         initialMachine
-          { cpuRegs = registers
-          , cpuRunning = True
-          , cpuPhase = Fetch
-          , cpuPc = 0
-          , programEnd = 8
+          { cpuRegs = registers,
+            cpuRunning = True,
+            cpuPhase = Fetch,
+            cpuPc = 0,
+            programEnd = 8
           }
       -- op x3,x1,x2; sw x3,256(x0)
       ram = ramFromList [encodeArithmetic operation, 0x1030_2023]
@@ -155,13 +158,13 @@ prop_program_loads_up_to_fifty_words = property $ do
   actual === wordsToProgram
   programEnd (simMachine programmed) === fromIntegral (count * 4)
   hostState (simMachine programmed) === HostIdle
- where
-  wordBytes word =
-    [ resize word
-    , resize (word `shiftR` 8)
-    , resize (word `shiftR` 16)
-    , resize (word `shiftR` 24)
-    ]
+  where
+    wordBytes word =
+      [ resize word,
+        resize (word `shiftR` 8),
+        resize (word `shiftR` 16),
+        resize (word `shiftR` 24)
+      ]
 
 prop_reset_memory_takes_exactly_1024_clear_cycles :: Property
 prop_reset_memory_takes_exactly_1024_clear_cycles = withTests 1 . property $ do
@@ -186,10 +189,10 @@ txTrace byte ignoredByte =
   let requests = Just byte : P.replicate (10 * clocksPerBit) (Just ignoredByte) P.++ [Nothing]
       (_, outputs) = List.mapAccumL step TxIdle requests
    in outputs
- where
-  step state request =
-    let (state', output) = txStep state request
-     in (state', output)
+  where
+    step state request =
+      let (state', output) = txStep state request
+       in (state', output)
 
 prop_uart_tx_is_cycle_exact_and_latches_byte :: Property
 prop_uart_tx_is_cycle_exact_and_latches_byte = property $ do
@@ -211,8 +214,8 @@ prop_uart_tx_is_cycle_exact_and_latches_byte = property $ do
 
 rxTrace :: [Bit] -> [Maybe Byte]
 rxTrace inputBits = P.snd (List.mapAccumL step RxIdle inputBits)
- where
-  step state serialBit = rxStep state serialBit
+  where
+    step state serialBit = rxStep state serialBit
 
 prop_uart_rx_samples_115200_8n1 :: Property
 prop_uart_rx_samples_115200_8n1 = property $ do
@@ -250,10 +253,10 @@ simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result)
-    , ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words)
-    , ("RESET-MEM is exactly 1024 clear cycles", prop_reset_memory_takes_exactly_1024_clear_cycles)
-    , ("UART TX timing and byte latch", prop_uart_tx_is_cycle_exact_and_latches_byte)
-    , ("UART RX 8-N-1 sampling", prop_uart_rx_samples_115200_8n1)
-    , ("UART RX holding register", prop_uart_rx_holding_register_is_one_byte_deep)
+    [ ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
+      ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
+      ("RESET-MEM is exactly 1024 clear cycles", prop_reset_memory_takes_exactly_1024_clear_cycles),
+      ("UART TX timing and byte latch", prop_uart_tx_is_cycle_exact_and_latches_byte),
+      ("UART RX 8-N-1 sampling", prop_uart_rx_samples_115200_8n1),
+      ("UART RX holding register", prop_uart_rx_holding_register_is_one_byte_deep)
     ]
