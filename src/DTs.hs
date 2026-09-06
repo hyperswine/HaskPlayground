@@ -212,5 +212,3 @@ main = do
     Split c thr _ _ ->
       putStrLn $ "root split: col " ++ show c ++ " @ " ++ show thr
     _ -> pure ()
-
--- Demo end
