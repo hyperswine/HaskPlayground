@@ -9,6 +9,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Replace case with maybe" #-}
 
 -- | A deliberately small, unpipelined RV32I computer.
@@ -196,8 +197,7 @@ machineStep ::
 machineStep machine (memoryWord, received, txReady) =
   case hostState machine of
     ClearMemory address -> clearStep address
-    _
-      | cpuRunning machine -> runningStep machine memoryWord received txReady
+    _ | cpuRunning machine -> runningStep machine memoryWord received txReady
       | otherwise -> stoppedStep machine received txReady
   where
     clearStep address =
@@ -216,6 +216,8 @@ machineStep machine (memoryWord, received, txReady) =
 
 -- Host controller ------------------------------------------------------------
 
+-- Stopped step of the host controller: handles the case when the CPU is not running and the host is idle or programming memory.
+-- Basically what runs when machineStep is called and the CPU is not running. Otherwise it should call runningStep
 stoppedStep ::
   Machine ->
   Maybe Byte ->
@@ -225,51 +227,22 @@ stoppedStep machine received txReady =
   let (machineWithReply, replyByte) = sendReply machine txReady
    in case (hostState machineWithReply, received) of
         (HostIdle, Just 0x50) -> idleOut machineWithReply {hostState = ProgramCountLo} replyByte
-        (HostIdle, Just 0x52) ->
-          idleOut
-            machineWithReply
-              { cpuRegs = repeat 0,
-                cpuPc = 0,
-                cpuPhase = Fetch,
-                cpuRunning = programEnd machineWithReply /= 0,
-                rxHolding = Nothing
-              }
-            replyByte
+        (HostIdle, Just 0x52) -> idleOut machineWithReply {cpuRegs = repeat 0, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, rxHolding = Nothing} replyByte
         (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
-        (HostIdle, Just 0x4d) ->
-          idleOut
-            (resetCpu machineWithReply)
-              { hostState = ClearMemory 0,
-                programEnd = 0,
-                replyState = NoReply
-              }
-            Nothing
-        (ProgramCountLo, Just lowByte) ->
-          idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
+        (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
+        (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
         (ProgramCountHi lowByte, Just highByte) ->
           let requested = (resize highByte `shiftL` 8) .|. resize lowByte :: Unsigned 11
               count = min requested 1024
               nextHost = if count == 0 then HostIdle else ProgramBytes count 0 0 0
-           in idleOut
-                machineWithReply
-                  { hostState = nextHost,
-                    programEnd = 0,
-                    cpuRegs = repeat 0,
-                    cpuPc = 0,
-                    cpuPhase = Fetch
-                  }
-                replyByte
+           in idleOut machineWithReply {hostState = nextHost, programEnd = 0, cpuRegs = repeat 0, cpuPc = 0, cpuPhase = Fetch} replyByte
         (ProgramBytes wordsLeft address byteNo partial, Just byte) ->
           let shiftAmount = fromIntegral byteNo * 8
               partial' = partial .|. (resize byte `shiftL` shiftAmount)
            in if byteNo == maxBound
                 then
                   let isLast = wordsLeft == 1
-                      machine' =
-                        machineWithReply
-                          { hostState = if isLast then HostIdle else ProgramBytes (wordsLeft - 1) (address + 1) 0 0,
-                            programEnd = if isLast then (resize address + 1) `shiftL` 2 else programEnd machineWithReply
-                          }
+                      machine' = machineWithReply {hostState = if isLast then HostIdle else ProgramBytes (wordsLeft - 1) (address + 1) 0 0, programEnd = if isLast then (resize address + 1) `shiftL` 2 else programEnd machineWithReply}
                    in (machine', (address, Just (address, partial'), replyByte))
                 else idleOut machineWithReply {hostState = ProgramBytes wordsLeft address (succ byteNo) partial'} replyByte
         _ -> idleOut machineWithReply replyByte
@@ -333,6 +306,7 @@ executeInstruction ::
   Bool ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 executeInstruction machine instruction txReady =
+  -- kind of a cheat way to pre-parse all the formats, U, B, J, I, S, R
   let opcode = instruction .&. 0x7f
       rd = regIndex ((instruction `shiftR` 7) .&. 0x1f)
       funct3 = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
@@ -348,23 +322,25 @@ executeInstruction machine instruction txReady =
       noWrite newPc = finishInstruction isFinal machine {cpuPc = newPc} Nothing
       invalid = haltMachine machine
    in case opcode of
-        0x37 -> normal (immU instruction) -- LUI
-        0x17 -> normal (pc + immU instruction) -- AUIPC
+        -- LUI
+        0x37 -> normal (immU instruction)
+        -- AUIPC
+        0x17 -> normal (pc + immU instruction)
+        -- JAL
         0x6f ->
-          -- JAL
           finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = pc + immJ instruction}) Nothing
+        -- JALR
         0x67 ->
-          -- JALR
           if funct3 == 0
             then finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = (a + immI instruction) .&. complement 1}) Nothing
             else invalid
+        -- branches
         0x63 ->
-          -- branches
           case branchTaken funct3 a b of
             Just takeBranch -> noWrite (if takeBranch then pc + immB instruction else nextPc)
             Nothing -> invalid
+        -- loads
         0x03 ->
-          -- loads
           let address = a + immI instruction
            in if isUartAddress address
                 then
@@ -377,8 +353,8 @@ executeInstruction machine instruction txReady =
                         (memoryIndex address, Nothing, Nothing)
                       )
                     else invalid
+        -- stores
         0x23 ->
-          -- stores
           let address = a + immS instruction
            in if address == uartTxData
                 then
@@ -405,6 +381,7 @@ executeInstruction machine instruction txReady =
         0x73 -> haltMachine machine -- ECALL / EBREAK terminate the program.
         _ -> invalid
 
+-- check if the instruction is the final instruction in the current sequence
 finishInstruction ::
   Bool ->
   Machine ->
@@ -463,6 +440,7 @@ uartRxData = 0x1000_0008
 isUartAddress :: Word32 -> Bool
 isUartAddress address = address == uartTxData || address == uartStatus || address == uartRxData
 
+-- read an UART register
 readUart :: Word32 -> Bool -> Machine -> (Word32, Machine)
 readUart address txReady machine
   | address == uartStatus =
@@ -474,7 +452,7 @@ readUart address txReady machine
   | otherwise = (0, machine)
   where
     hasByte Nothing = False
-    hasByte Just {} = True
+    hasByte (Just {}) = True
 
 validLoad :: BitVector 3 -> Bool
 validLoad funct3 = funct3 == 0b000 || funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b100 || funct3 == 0b101
@@ -558,6 +536,8 @@ signed32 = bitCoerce
 unsigned32 :: Signed 32 -> Word32
 unsigned32 = bitCoerce
 
+-- NEEDED FOR SIGN EXTENSION OF VALUES SINCE THE REGISTER SIZE IS 32 BITS
+
 signExtend8 :: Unsigned 8 -> Word32
 signExtend8 value = if testBit value 7 then resize value .|. 0xffff_ff00 else resize value
 
@@ -572,6 +552,8 @@ signExtend16 value = if testBit value 15 then resize value .|. 0xffff_0000 else 
 
 signExtend21 :: Unsigned 21 -> Word32
 signExtend21 value = if testBit value 20 then resize value .|. 0xffe0_0000 else resize value
+
+-- DIFFERENT FORMATS have different immediate extraction methods
 
 immI :: Word32 -> Word32
 immI instruction = signExtend12 (resize (instruction `shiftR` 20))
