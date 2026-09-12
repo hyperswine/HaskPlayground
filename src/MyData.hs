@@ -6,6 +6,7 @@ type Sequence = [Complex Double]
 
 dft :: Sequence -> Sequence
 -- twiddle just means the complex exponential term e^(-2*pi*i*n*k/N)
+-- sum over all elements multiplied by their corresponding twiddle factors
 dft xs = [sum [x * twiddle n k | (n, x) <- zip [0 ..] xs] | k <- [0 .. length xs - 1]]
   where
     len = length xs
