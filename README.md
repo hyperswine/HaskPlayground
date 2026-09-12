@@ -12,3 +12,7 @@ There's a script to auto copy stuff from verilog output to examples. Use lushay 
 `stack exec haskplayground-exe -- examples/fact.fpl` For speed.
 
 `stack run -- zonesim` to run a thing.
+
+## NeoMusic
+
+An algebraic music prototype with WAV, MP3 and FLAC export. See [the runnable guide](examples/NeoMusic.md) and [design draft](neo-music-design.md).

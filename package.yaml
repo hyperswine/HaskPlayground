@@ -68,6 +68,11 @@ library:
   source-dirs: src
 
 executables:
+  neo-music:
+    main: Main.hs
+    source-dirs: app/neo-music
+    ghc-options: [-O2]
+    dependencies: [haskplayground]
   haskplayground-exe:
     main:                Main.hs
     source-dirs:         app
