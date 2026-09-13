@@ -4,9 +4,11 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PackageImports #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+
 {-# HLINT ignore "Eta reduce" #-}
 {-# HLINT ignore "Use catMaybes" #-}
 
@@ -32,9 +34,12 @@ data Sim = Sim
   }
 
 stepSim :: Sim -> Maybe Byte -> Sim
-stepSim Sim {..} received =
+stepSim = stepSimReady True
+
+stepSimReady :: Bool -> Sim -> Maybe Byte -> Sim
+stepSimReady txReady Sim {..} received =
   let (machine', (readAddress, writeCommand, txByte)) =
-        machineStep simMachine (simRamOutput, received, True)
+        machineStep simMachine (simRamOutput, received, txReady)
       nextRamOutput = simRam !! readAddress
       ram' = case writeCommand of
         Nothing -> simRam
@@ -56,6 +61,64 @@ ramFromList = go 0 (repeat 0)
     go :: Index 1024 -> Ram -> [Word32] -> Ram
     go _ ram [] = ram
     go address ram (word : rest) = go (address + 1) (replace address word ram) rest
+
+-- | Step with no UART input until the CPU stops, returning the cycles taken.
+runUntilHalt :: Int -> Sim -> (Int, Sim)
+runUntilHalt fuel = go 0
+  where
+    go cycles sim
+      | not (cpuRunning (simMachine sim)) || cycles >= fuel = (cycles, sim)
+      | otherwise = go (cycles + 1) (stepSim sim Nothing)
+
+runningMachine :: [(Index 32, Word32)] -> Word32 -> Machine
+runningMachine registers end =
+  initialMachine
+    { cpuRegs = P.foldr (P.uncurry replace) (repeat 0) registers,
+      cpuRunning = True,
+      cpuPhase = Fetch,
+      cpuPc = 0,
+      programEnd = end
+    }
+
+doneBytes :: [Byte]
+doneBytes = [0x44, 0x4f, 0x4e, 0x45]
+
+wordBytes :: Word32 -> [Byte]
+wordBytes word =
+  [ resize word,
+    resize (word `shiftR` 8),
+    resize (word `shiftR` 16),
+    resize (word `shiftR` 24)
+  ]
+
+-- Instruction encoders -------------------------------------------------------
+
+addi :: Word32 -> Word32 -> Word32 -> Word32
+addi rd rs1 imm = ((imm .&. 0xfff) `shiftL` 20) .|. (rs1 `shiftL` 15) .|. (rd `shiftL` 7) .|. 0x13
+
+lui :: Word32 -> Word32 -> Word32
+lui rd imm20 = (imm20 `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x37
+
+-- | @sw rs2, imm(rs1)@
+sw :: Word32 -> Word32 -> Word32 -> Word32
+sw rs2 rs1 imm =
+  (((imm `shiftR` 5) .&. 0x7f) `shiftL` 25)
+    .|. (rs2 `shiftL` 20)
+    .|. (rs1 `shiftL` 15)
+    .|. (0b010 `shiftL` 12)
+    .|. ((imm .&. 0x1f) `shiftL` 7)
+    .|. 0x23
+
+bne :: Word32 -> Word32 -> Word32 -> Word32
+bne rs1 rs2 imm =
+  (((imm `shiftR` 12) .&. 1) `shiftL` 31)
+    .|. (((imm `shiftR` 5) .&. 0x3f) `shiftL` 25)
+    .|. (rs2 `shiftL` 20)
+    .|. (rs1 `shiftL` 15)
+    .|. (0b001 `shiftL` 12)
+    .|. (((imm `shiftR` 1) .&. 0xf) `shiftL` 8)
+    .|. (((imm `shiftR` 11) .&. 1) `shiftL` 7)
+    .|. 0x63
 
 -- RV32I execution -------------------------------------------------------------
 
@@ -158,13 +221,87 @@ prop_program_loads_up_to_fifty_words = property $ do
   actual === wordsToProgram
   programEnd (simMachine programmed) === fromIntegral (count * 4)
   hostState (simMachine programmed) === HostIdle
-  where
-    wordBytes word =
-      [ resize word,
-        resize (word `shiftR` 8),
-        resize (word `shiftR` 16),
-        resize (word `shiftR` 24)
-      ]
+
+-- Control flow and fetch timing -------------------------------------------------
+
+prop_encoders_match_known_instructions :: Property
+prop_encoders_match_known_instructions = withTests 1 . property $ do
+  sw 3 0 256 === 0x1030_2023
+  bne 1 0 (0 - 4) === 0xfe00_9ee3
+  addi 1 1 (0 - 1) === 0xfff0_8093
+
+prop_backward_branch_in_final_word_loops :: Property
+prop_backward_branch_in_final_word_loops = property $ do
+  n <- forAll (Gen.integral (Range.linear 1 20))
+  -- addi x1,x0,n; loop: addi x1,x1,-1; bne x1,x0,loop
+  let ram = ramFromList [addi 1 0 n, addi 1 1 (0 - 1), bne 1 0 (0 - 4)]
+      (_, halted) = runUntilHalt 1000 (startSim (runningMachine [] 12) ram)
+      finished = runInputs halted (P.replicate 4 Nothing)
+
+  assert (not (cpuRunning (simMachine halted)))
+  cpuRegs (simMachine finished) !! (1 :: Index 32) === 0
+  cpuPc (simMachine finished) === 12
+  simTransmitted finished === doneBytes
+
+prop_simple_instructions_take_one_cycle_each :: Property
+prop_simple_instructions_take_one_cycle_each = property $ do
+  n <- forAll (Gen.int (Range.linear 1 50))
+  let ram = ramFromList (P.replicate n (addi 1 1 1))
+      (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
+
+  -- One initial Fetch cycle, then every instruction executes in a single cycle.
+  cycles === n + 1
+  cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
+
+prop_store_into_next_instruction_is_fetched_fresh :: Property
+prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
+  -- addi x1,x0,1; sw x5,8(x0) where x5 holds "addi x6,x0,42"; <word 2 overwritten>
+  let ram = ramFromList [addi 1 0 1, sw 5 0 8, 0]
+      (_, halted) = runUntilHalt 1000 (startSim (runningMachine [(5, addi 6 0 42)] 12) ram)
+
+  cpuRegs (simMachine halted) !! (6 :: Index 32) === 42
+  cpuPc (simMachine halted) === 12
+
+prop_uart_tx_store_waits_for_ready :: Property
+prop_uart_tx_store_waits_for_ready = property $ do
+  bytes <- forAll (Gen.list (Range.singleton 3) (Gen.integral Range.constantBounded))
+  readiness <- forAll (Gen.list (Range.linear 0 60) Gen.bool)
+  let registers = (2, uartTxData) : P.zip [1, 3, 4] (P.map resize bytes)
+      -- sw x1,0(x2); sw x3,0(x2); sw x4,0(x2)
+      ram = ramFromList [sw 1 2 0, sw 3 2 0, sw 4 2 0]
+      schedule = readiness P.++ P.replicate 40 True
+      finished = P.foldl (\sim ready -> stepSimReady ready sim Nothing) (startSim (runningMachine registers 12) ram) schedule
+
+  simTransmitted finished === bytes P.++ doneBytes
+  assert (not (cpuRunning (simMachine finished)))
+
+-- Whole circuit ----------------------------------------------------------------
+
+uartFrame :: Byte -> [Bit]
+uartFrame byte =
+  P.concatMap
+    (P.replicate clocksPerBit)
+    (low : P.map (boolToBit . testBit byte) [0 .. 7] P.++ [high])
+
+prop_circuit_programs_and_runs_over_uart :: Property
+prop_circuit_programs_and_runs_over_uart = withTests 1 . property $ do
+  let program =
+        [ lui 2 0x10000, -- x2 = UART TXDATA
+          addi 1 0 0x48, -- 'H'
+          sw 1 2 0,
+          addi 1 0 0x69, -- 'i' (stalls while 'H' is still being sent)
+          sw 1 2 0
+        ]
+      hostBytes = [0x50, fromIntegral (P.length program), 0] P.++ P.concatMap wordBytes program P.++ [0x52]
+      idle k = P.replicate k high
+      waveform =
+        idle 20
+          P.++ P.concatMap (\byte -> uartFrame byte P.++ idle 20) hostBytes
+          P.++ idle (8 * 10 * clocksPerBit)
+      output = simulateN @System (P.length waveform) simpleRisc waveform
+      received = [value | Just value <- rxTrace output]
+
+  received === [0x48, 0x69] P.++ doneBytes
 
 prop_reset_memory_takes_exactly_1024_clear_cycles :: Property
 prop_reset_memory_takes_exactly_1024_clear_cycles = withTests 1 . property $ do
@@ -256,6 +393,12 @@ simpleRiscGroup =
     [ ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
       ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
       ("RESET-MEM is exactly 1024 clear cycles", prop_reset_memory_takes_exactly_1024_clear_cycles),
+      ("Test encoders match known instructions", prop_encoders_match_known_instructions),
+      ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
+      ("Simple instructions take one cycle each", prop_simple_instructions_take_one_cycle_each),
+      ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
+      ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
+      ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),
       ("UART TX timing and byte latch", prop_uart_tx_is_cycle_exact_and_latches_byte),
       ("UART RX 8-N-1 sampling", prop_uart_rx_samples_115200_8n1),
       ("UART RX holding register", prop_uart_rx_holding_register_is_one_byte_deep)
