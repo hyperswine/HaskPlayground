@@ -32,8 +32,10 @@
 --                                      1024 clocks to zero the BRAM.
 --
 -- PROGRAM replaces words starting at address zero and records the end of the
--- program.  After the instruction in the final programmed word retires, the
--- CPU stops and transmits the four ASCII bytes "DONE".  ECALL, EBREAK and an
+-- program.  When an instruction retires with its next PC at or beyond the end
+-- of the program (falling off the end, or jumping past it), the CPU stops and
+-- transmits the four ASCII bytes "DONE".  A backward branch in the final word
+-- therefore loops as expected.  ECALL, EBREAK and an
 -- illegal instruction also stop the CPU and produce DONE.  While running,
 -- received UART bytes are placed in the one-byte RXDATA register; byte 0x03
 -- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
@@ -177,7 +179,8 @@ topEntity clk rst en serialRx = withClockResetEnable clk rst en (simpleRisc seri
 simpleRisc :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
 simpleRisc serialRx = serialTx
   where
-    received = uartRx serialRx
+    -- Two flip-flops resynchronise the asynchronous RX pin before sampling.
+    received = uartRx (register high (register high serialRx))
     (serialTx, txReady) = uartTx txRequest
 
     machineInput = bundle (memoryOut, received, txReady)
@@ -197,7 +200,8 @@ machineStep ::
 machineStep machine (memoryWord, received, txReady) =
   case hostState machine of
     ClearMemory address -> clearStep address
-    _ | cpuRunning machine -> runningStep machine memoryWord received txReady
+    _
+      | cpuRunning machine -> runningStep machine memoryWord received txReady
       | otherwise -> stoppedStep machine received txReady
   where
     clearStep address =
@@ -317,9 +321,13 @@ executeInstruction machine instruction txReady =
       b = readRegister rs2 machine
       pc = cpuPc machine
       nextPc = pc + 4
-      isFinal = nextPc >= programEnd machine
+      -- The program ends when control leaves it, judged by the PC that will
+      -- actually run next (so a taken backward branch keeps running).
+      finalAt newPc = newPc >= programEnd machine
+      isFinal = finalAt nextPc
       normal value = finishInstruction isFinal (writeRegister rd value machine {cpuPc = nextPc}) Nothing
-      noWrite newPc = finishInstruction isFinal machine {cpuPc = newPc} Nothing
+      noWrite newPc = finishInstruction (finalAt newPc) machine {cpuPc = newPc} Nothing
+      jumpAndLink newPc = finishInstruction (finalAt newPc) (writeRegister rd nextPc machine {cpuPc = newPc}) Nothing
       invalid = haltMachine machine
    in case opcode of
         -- LUI
@@ -327,12 +335,11 @@ executeInstruction machine instruction txReady =
         -- AUIPC
         0x17 -> normal (pc + immU instruction)
         -- JAL
-        0x6f ->
-          finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = pc + immJ instruction}) Nothing
+        0x6f -> jumpAndLink (pc + immJ instruction)
         -- JALR
         0x67 ->
           if funct3 == 0
-            then finishInstruction isFinal (writeRegister rd nextPc machine {cpuPc = (a + immI instruction) .&. complement 1}) Nothing
+            then jumpAndLink ((a + immI instruction) .&. complement 1)
             else invalid
         -- branches
         0x63 ->
@@ -358,8 +365,10 @@ executeInstruction machine instruction txReady =
           let address = a + immS instruction
            in if address == uartTxData
                 then
-                  let request = if txReady then Just (resize b) else Nothing
-                   in finishInstructionWithTx isFinal machine {cpuPc = nextPc} request
+                  if txReady
+                    then finishInstructionWithTx isFinal machine {cpuPc = nextPc} (Just (resize b))
+                    else -- Stall until the transmitter is free, re-reading this instruction.
+                      (machine, (memoryIndex pc, Nothing, Nothing))
                 else
                   if validMemoryAddress address && validStore funct3
                     then
@@ -387,10 +396,7 @@ finishInstruction ::
   Machine ->
   Maybe (MemAddr, Word32) ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-finishInstruction finalInstruction machine write =
-  if finalInstruction
-    then (halt machine, (0, write, Nothing))
-    else (machine {cpuPhase = Fetch}, (0, write, Nothing))
+finishInstruction finalInstruction machine write = finishWith finalInstruction machine write Nothing
 
 finishInstructionWithWrite ::
   Bool ->
@@ -404,10 +410,26 @@ finishInstructionWithTx ::
   Machine ->
   Maybe Byte ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-finishInstructionWithTx finalInstruction machine request =
-  if finalInstruction
-    then (halt machine, (0, Nothing, request))
-    else (machine {cpuPhase = Fetch}, (0, Nothing, request))
+finishInstructionWithTx finalInstruction machine request = finishWith finalInstruction machine Nothing request
+
+-- | Retire an instruction.  Unless halting, the next instruction's address is
+-- put on the BRAM bus in this same cycle so it can execute on the next one.
+finishWith ::
+  Bool ->
+  Machine ->
+  Maybe (MemAddr, Word32) ->
+  Maybe Byte ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+finishWith finalInstruction machine write request
+  | finalInstruction = (halt machine, (0, write, request))
+  | otherwise = (machine {cpuPhase = phase}, (fetchAddress, write, request))
+  where
+    fetchAddress = memoryIndex (cpuPc machine)
+    -- BRAM returns the old word when one address is read and written in the
+    -- same cycle, so if this instruction overwrote the next one, fetch again.
+    phase = case write of
+      Just (writeAddress, _) | writeAddress == fetchAddress -> Fetch
+      _ -> FetchWait
 
 haltMachine :: Machine -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 haltMachine machine = (halt machine, (0, Nothing, Nothing))
