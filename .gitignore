@@ -10,3 +10,5 @@ verilog/
 dist-newstyle/
 nprolog.conf
 file.txt
+*.o
+*.hi

@@ -249,8 +249,9 @@ prop_simple_instructions_take_one_cycle_each = property $ do
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
 
-  -- One initial Fetch cycle, then every instruction executes in a single cycle.
-  cycles === n + 1
+  -- One initial Fetch cycle, a single cycle per instruction, then one cycle to
+  -- notice the PC has left the program.
+  cycles === n + 2
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
