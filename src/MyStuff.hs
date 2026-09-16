@@ -71,3 +71,76 @@ firstParserFunction ==> secondParserFunction = Parse chainedParser where
 data ParseState = ParseState {string :: L.ByteString, offset :: Int64} deriving (Show)
 
 newtype Parse a = Parse {runParse :: ParseState -> Either String (a, ParseState)}
+
+lostNumbers = [4,8,15,16,23,42]
+
+r1 = [1,2,3,4] ++ [9,10,11,12] -- ++ means append. Append means combining two lists into one. concat actually means combining a list of lists into a single list.
+r2 = "hello" ++ " " ++ "world" -- uses [Char] by default rather than ByteString
+
+r3 = 'A' : "Small Cat" -- ':' prepends a single element to the front of a list
+
+r4 = "Steve Buscemi" !! 6 -- '!!' accesses the element at the given index in a list
+
+-- 0 indexed, so 7th element
+--- >>> r4
+-- 'B'
+
+r5 = [9.4, 33.2, 96.2, 11.2, 23.25] !! 1 -- defaults to Double because of literal decimal
+
+--- >>> r5
+-- 33.2
+
+r6 = [[1,2,3,4], [5,3,3,3], [1,2,2,3,4], [1,2,3]] -- notice all literal ints, so it defaults to Integer, not Int or Float
+
+-- notice how you have to ++ another list of lists
+--- >>> r6 ++ [[1,1,1,1]]
+-- [[1,2,3,4],[5,3,3,3],[1,2,2,3,4],[1,2,3],[1,1,1,1]]
+
+--- >>> [42,42,42] : r6
+-- [[42,42,42],[1,2,3,4],[5,3,3,3],[1,2,2,3,4],[1,2,3]]
+
+--- >>> head [5,4,3,2,1]
+-- 5
+
+--- >>> init [5,4,3,2,1]
+-- [5,4,3,2]
+
+mynull = null [5,4,3,2,1]
+
+--- >>> mynull
+-- False
+
+mydroppedlist = drop 3 [8,4,2,1,5,6] -- drop the first 3 elements of the list
+
+--- >>> mydroppedlist
+-- [1,5,6]
+
+mysum = sum [5,2,1,6,3,2,5,7]
+
+--- >>> mysum
+-- 31
+
+myproduct = product [1,2,5,6,7,9,2,0]
+
+--- >>> myproduct
+-- 0
+
+myrange = ['a'..'k']
+
+--- >>> myrange
+-- "abcdefghijk"
+
+evennumbers = [2,4..20] -- start at 2, end at 20, step by 2
+
+--- >>> evennumbers
+-- [2,4,6,8,10,12,14,16,18,20]
+
+mytaker = take 10 $ cycle [1,2,3] -- this cycles with 1 -> 2 -> 3 only rather than (1, 2, 3)
+
+--- >>> mytaker
+-- [1,2,3,1,2,3,1,2,3,1]
+
+mytaker12 = take 12 $ cycle "LOL "
+
+--- >>> mytaker12
+-- "LOL LOL LOL "

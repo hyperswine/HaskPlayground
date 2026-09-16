@@ -7,6 +7,7 @@ import qualified Hedgehog.Range as Range
 import Data.Either (isLeft)
 import NeoMusic
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Vector.Unboxed as VU
 import System.IO.Temp (withSystemTempFile)
 import System.IO (hClose)
 
@@ -41,9 +42,11 @@ neoMusicGroup = Group "NeoMusic"
       seconds silent === 2
       notes silent === [])
   , ("invalid inputs are rejected", withTests 1 $ property $ do
-      let p = Part (Tuning 220 2) (Tempo 60) Sine (n 0) [1]
+      let p = Part (Tuning 220 2) (Tempo 60) Sine (n 0) [1] [1]
       mapM_ (assert . isLeft . render . FromPart)
         [p {rhythm = []}, p {rhythm = [0]}, p {rhythm = [-1]},
+         p {dynamics = []}, p {dynamics = [1.5]}, p {dynamics = [0/0]},
+         p {timbre = Synth basicPatch {resonance = 1}},
          p {tempo = Tempo 0}, p {tuning = Tuning (0/0) 2}]
       assert (isLeft (parseSeq "1x"))
       assert (isLeft (parseSeq "(1 2"))
@@ -65,4 +68,33 @@ neoMusicGroup = Group "NeoMusic"
       BL.take 4 bytes === "RIFF"
       BL.take 4 (BL.drop 8 bytes) === "WAVE"
       BL.take 4 (BL.drop 40 bytes) === BL.pack [0,125,0,0])
+  , ("velocity, gain, pan and send", withTests 1 $ property $ do
+      let t = Tuning 440 2
+          quietSecond = FromPart (Part t (Tempo 60) Sine (n 0 <> n 0) [1, 1] [1, 0.5])
+      Timeline _ ns <- evalEither (render (Gain 0.5 (Pan (-0.5) (Pan (-1) (Send 0.3 quietSecond)))))
+      map velocity ns === [1, 0.5]
+      map gain ns === [0.5, 0.5]
+      map pan ns === [-1, -1]
+      map send ns === [0.3, 0.3]
+      xs <- evalEither (samples 8000 quietSecond)
+      let peakIn a b = maximum (map abs (take (b - a) (drop a xs)))
+      assert (abs (peakIn 8000 16000 / peakIn 0 8000 - 0.5) < 1e-3)
+      (l, r) <- evalEither (renderMix (defaultMix 8000) (Pan (-1) quietSecond))
+      assert (VU.all (== 0) r && VU.any (/= 0) l))
+  , ("reverb tails and synth releases", withTests 1 $ property $ do
+      let t = Tuning 220 2
+          blip = part t (Tempo 60) Sine (n 0)
+          mix = (defaultMix 8000) {mixReverb = hall, mixTail = 1}
+      (dryL, _) <- evalEither (renderMix mix blip)
+      (wetL, wetR) <- evalEither (renderMix mix (Send 1 blip))
+      VU.length wetL === 16000
+      assert (VU.all (== 0) (VU.drop 8000 dryL))
+      assert (VU.any ((> 1e-3) . abs) (VU.drop 8400 wetL) && VU.any (/= 0) (VU.drop 8400 wetR))
+      assert (VU.all (\x -> abs x <= 0.8) wetL)
+      let synth = part t (Tempo 60) (Synth pluck {ampEnvelope = Envelope 0.01 0 1 0.5}) (n 0)
+      (sl, sr) <- evalEither (renderMix (defaultMix 8000) synth)
+      VU.length sl === 12000
+      assert (VU.any ((> 1e-3) . abs) (VU.drop 8000 sl) && VU.all (not . isNaN) sr)
+      noise <- evalEither (samples 8000 (part t (Tempo 60) (Synth hat) (n 0)))
+      assert (any (/= 0) noise && all (\x -> abs x <= 0.8) noise))
   ]

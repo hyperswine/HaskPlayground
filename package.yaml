@@ -73,6 +73,11 @@ executables:
     source-dirs: app/neo-music
     ghc-options: [-O2]
     dependencies: [haskplayground]
+  screw-bgm:
+    main: Main.hs
+    source-dirs: app/screw-bgm
+    ghc-options: [-O2]
+    dependencies: [haskplayground]
   haskplayground-exe:
     main:                Main.hs
     source-dirs:         app
