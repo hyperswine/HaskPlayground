@@ -200,7 +200,7 @@ prop_arithmetic_instruction_stores_expected_result = property $ do
           }
       -- op x3,x1,x2; sw x3,256(x0)
       ram = ramFromList [encodeArithmetic operation, 0x1030_2023]
-      finished = runInputs (startSim machine ram) (P.replicate 8 Nothing)
+      finished = runInputs (startSim machine ram) (P.replicate 12 Nothing)
       expected = arithmeticResult operation a b
 
   cpuRegs (simMachine finished) !! (3 :: Index 32) === expected
@@ -243,15 +243,15 @@ prop_backward_branch_in_final_word_loops = property $ do
   cpuPc (simMachine finished) === 12
   simTransmitted finished === doneBytes
 
-prop_simple_instructions_take_one_cycle_each :: Property
-prop_simple_instructions_take_one_cycle_each = property $ do
+prop_simple_instructions_take_two_cycles_each :: Property
+prop_simple_instructions_take_two_cycles_each = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
 
-  -- One initial Fetch cycle, a single cycle per instruction, then one cycle to
-  -- notice the PC has left the program.
-  cycles === n + 2
+  -- One initial Fetch cycle, decode + execute per instruction, then one cycle
+  -- to notice the PC has left the program.
+  cycles === 2 * n + 2
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
@@ -396,7 +396,7 @@ simpleRiscGroup =
       ("RESET-MEM is exactly 1024 clear cycles", prop_reset_memory_takes_exactly_1024_clear_cycles),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
-      ("Simple instructions take one cycle each", prop_simple_instructions_take_one_cycle_each),
+      ("Simple instructions take two cycles each", prop_simple_instructions_take_two_cycles_each),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
       ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),

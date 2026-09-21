@@ -52,6 +52,9 @@ type MemAddr = Unsigned 10
 data CpuPhase
   = Fetch
   | FetchWait
+  | -- | The instruction and its two source-register values, registered so the
+    -- execute cycle starts from flip-flops rather than the BRAM output.
+    Execute Word32 Word32 Word32
   | LoadWait (Index 32) (BitVector 3) (Unsigned 2)
   | StoreWait (BitVector 3) (Unsigned 2) MemAddr Word32
   deriving (Generic, NFDataX, Show, Eq)
@@ -314,9 +317,17 @@ cpuStep machine memoryWord received txReady
               -- Stop once control leaves the program.  Checking the registered
               -- PC here, instead of the next PC computed at the end of the
               -- previous instruction, keeps a 32-bit compare off the critical
-              -- path (instruction -> register mux -> adder -> state).
+              -- path.
               | cpuPc machineRx >= programEnd machineRx -> withoutRegister (haltMachine machineRx)
-              | otherwise -> executeInstruction machineRx memoryWord txReady
+              -- Decode stage: latch the instruction and read its operands.  On the
+              -- GW2A, BRAM output -> register mux -> 32-bit adder in a single
+              -- cycle fails at 51 MHz even though nextpnr reports it passing.
+              | otherwise ->
+                  let rs1 = regIndex ((memoryWord `shiftR` 15) .&. 0x1f)
+                      rs2 = regIndex ((memoryWord `shiftR` 20) .&. 0x1f)
+                      operands = Execute memoryWord (readRegister rs1 machineRx) (readRegister rs2 machineRx)
+                   in withoutRegister (machineRx {cpuPhase = operands}, (0, Nothing, Nothing))
+            Execute instruction a b -> executeInstruction machineRx instruction a b txReady
             LoadWait rd funct3 byteOffset ->
               let value = loadValue funct3 byteOffset memoryWord
                in withRegister rd value (finishInstruction machineRx Nothing)
@@ -333,18 +344,16 @@ withoutRegister (machine, output) = (machine, Nothing, output)
 executeInstruction ::
   Machine ->
   Word32 ->
+  Word32 ->
+  Word32 ->
   Bool ->
   (Machine, RegisterWrite, StepOutput)
-executeInstruction machine instruction txReady =
+executeInstruction machine instruction a b txReady =
   -- kind of a cheat way to pre-parse all the formats, U, B, J, I, S, R
   let opcode = instruction .&. 0x7f
       rd = regIndex ((instruction `shiftR` 7) .&. 0x1f)
       funct3 = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
-      rs1 = regIndex ((instruction `shiftR` 15) .&. 0x1f)
-      rs2 = regIndex ((instruction `shiftR` 20) .&. 0x1f)
       funct7 = (instruction `shiftR` 25) .&. 0x7f
-      a = readRegister rs1 machine
-      b = readRegister rs2 machine
       pc = cpuPc machine
       nextPc = pc + 4
       normal value = withRegister rd value (finishInstruction machine {cpuPc = nextPc} Nothing)
@@ -391,7 +400,7 @@ executeInstruction machine instruction txReady =
                   withoutRegister $
                     if txReady
                       then finishInstructionWithTx machine {cpuPc = nextPc} (Just (resize b))
-                      else -- Stall until the transmitter is free, re-reading this instruction.
+                      else -- Stay in Execute until the transmitter is free.
                         (machine, (memoryIndex pc, Nothing, Nothing))
                 else
                   if validMemoryAddress address && validStore funct3
