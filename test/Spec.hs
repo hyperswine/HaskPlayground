@@ -9,6 +9,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import System.Exit (exitFailure)
 import qualified SimpleRisc as SimpleRiscTests
+import qualified PsramRegs as PsramRegsTests
 import qualified NeoMusicTests
 
 prop_example :: Property
@@ -24,4 +25,5 @@ main = do
   exampleResult <- checkParallel $ Group "test" [("prop_example", prop_example)]
   simpleRiscResult <- checkParallel SimpleRiscTests.simpleRiscGroup
   neoMusicResult <- checkParallel NeoMusicTests.neoMusicGroup
-  unless (exampleResult && simpleRiscResult && neoMusicResult) exitFailure
+  psramRegsResult <- checkParallel PsramRegsTests.psramRegsGroup
+  unless (exampleResult && simpleRiscResult && neoMusicResult && psramRegsResult) exitFailure

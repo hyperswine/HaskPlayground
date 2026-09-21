@@ -30,6 +30,7 @@ library
       MyData
       MyStuff
       NeoMusic
+      PsramRegs
       QuantUI
       SimpleRisc
   other-modules:
@@ -284,6 +285,7 @@ test-suite haskplayground-test
   main-is: Spec.hs
   other-modules:
       NeoMusicTests
+      PsramRegs
       SimpleRisc
       Paths_haskplayground
   hs-source-dirs:

@@ -111,6 +111,10 @@ data Machine = Machine
     cpuPastEnd :: Bool,
     cpuA :: Word32,
     cpuB :: Word32,
+    -- | The instruction's immediate, whichever format it uses.
+    cpuImm :: Word32,
+    -- | The ALU's second operand: rs2 for OP, the immediate otherwise.
+    cpuOp2 :: Word32,
     cpuComputed :: Computed,
     cpuMemoryWord :: Word32,
     cpuRunning :: Bool,
@@ -141,6 +145,8 @@ initialMachine =
       cpuPastEnd = False,
       cpuA = 0,
       cpuB = 0,
+      cpuImm = 0,
+      cpuOp2 = 0,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
       cpuMemoryWord = 0,
       cpuRunning = False,
@@ -355,6 +361,8 @@ resetCpu machine =
       cpuPastEnd = False,
       cpuA = 0,
       cpuB = 0,
+      cpuImm = 0,
+      cpuOp2 = 0,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
       cpuMemoryWord = 0,
       cpuRunning = False,
@@ -399,13 +407,17 @@ cpuStep machine memoryWord received txReady
                Decode
                  | cpuPastEnd -> withoutRegister (haltMachine machineRx)
                  | otherwise ->
-                     next
-                       machineRx
-                         { cpuPhase = Execute,
-                           cpuA = readRegister (instructionRs1 instruction) machineRx,
-                           cpuB = readRegister (instructionRs2 instruction) machineRx
-                         }
-               Execute -> next machineRx {cpuPhase = Commit, cpuComputed = compute cpuPc instruction cpuA cpuB}
+                     let b = readRegister (instructionRs2 instruction) machineRx
+                         imm = decodeImmediate instruction
+                      in next
+                           machineRx
+                             { cpuPhase = Execute,
+                               cpuA = readRegister (instructionRs1 instruction) machineRx,
+                               cpuB = b,
+                               cpuImm = imm,
+                               cpuOp2 = if instruction .&. 0x7f == 0x33 then b else imm
+                             }
+               Execute -> next machineRx {cpuPhase = Commit, cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm cpuOp2}
                Commit -> commitInstruction machineRx txReady
                LoadWait -> next machineRx {cpuPhase = LoadAlign, cpuMemoryWord = memoryWord}
                LoadAlign ->
@@ -424,27 +436,38 @@ withoutRegister (machine, output) = (machine, Nothing, output)
 
 -- | Execute stage: every adder and the ALU, in parallel, for whichever
 -- instruction this turns out to be.
-compute :: Word32 -> Word32 -> Word32 -> Word32 -> Computed
-compute pc instruction a b =
+-- The immediate has already been decoded for the instruction's format, so
+-- each adder has fixed, registered inputs and nothing is muxed in front of it.
+compute :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Computed
+compute pc instruction a b imm op2 =
   Computed
     { cAlu = case opcode of
-        0x37 -> Just (immU instruction) -- LUI
-        0x17 -> Just (pc + immU instruction) -- AUIPC
-        0x13 -> opImmediate funct3 funct7 a (immI instruction) instruction
-        0x33 -> opRegister funct3 funct7 a b
+        0x37 -> Just imm -- LUI
+        0x17 -> Just pcPlusImm -- AUIPC
+        0x13 -> alu funct3 funct7 False a op2
+        0x33 -> alu funct3 funct7 True a op2
         _ -> Nothing,
       cLink = pc + 4,
-      cTarget = case opcode of
-        0x6f -> pc + immJ instruction -- JAL
-        0x67 -> (a + immI instruction) .&. complement 1 -- JALR
-        _ -> pc + immB instruction, -- branches
+      cTarget = if opcode == 0x67 then aPlusImm .&. complement 1 else pcPlusImm, -- JALR; JAL and branches
       cTaken = branchTaken funct3 a b,
-      cAddress = if opcode == 0x23 then a + immS instruction else a + immI instruction
+      cAddress = aPlusImm
     }
   where
     opcode = instruction .&. 0x7f
-    funct3 = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
+    funct3 = instructionFunct3 instruction
     funct7 = (instruction `shiftR` 25) .&. 0x7f
+    pcPlusImm = pc + imm
+    aPlusImm = a + imm
+
+-- | The immediate in whichever format the opcode uses.
+decodeImmediate :: Word32 -> Word32
+decodeImmediate instruction = case instruction .&. 0x7f of
+  0x37 -> immU instruction -- LUI
+  0x17 -> immU instruction -- AUIPC
+  0x6f -> immJ instruction -- JAL
+  0x63 -> immB instruction -- branches
+  0x23 -> immS instruction -- stores
+  _ -> immI instruction -- OP-IMM, loads, JALR
 
 instructionRd, instructionRs1, instructionRs2 :: Word32 -> Index 32
 instructionRd instruction = regIndex ((instruction `shiftR` 7) .&. 0x1f)
@@ -567,7 +590,7 @@ memoryIndex :: Word32 -> MemAddr
 memoryIndex address = resize (address `shiftR` 2)
 
 validMemoryAddress :: Word32 -> Bool
-validMemoryAddress address = address < 4096
+validMemoryAddress address = address .&. 0xffff_f000 == 0 -- < 4096, as a bit test
 
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
@@ -620,38 +643,26 @@ storeValue funct3 byteOffset value oldWord = case funct3 of
 
 -- Decode/execute helpers ------------------------------------------------------
 
-opImmediate :: BitVector 3 -> Word32 -> Word32 -> Word32 -> Word32 -> Maybe Word32
-opImmediate funct3 funct7 a immediate instruction = case funct3 of
-  0b000 -> Just (a + immediate) -- ADDI
-  0b010 -> Just (boolWord (signed32 a < signed32 immediate)) -- SLTI
-  0b011 -> Just (boolWord (a < immediate)) -- SLTIU
-  0b100 -> Just (a `xor` immediate) -- XORI
-  0b110 -> Just (a .|. immediate) -- ORI
-  0b111 -> Just (a .&. immediate) -- ANDI
-  0b001 -> if funct7 == 0 then Just (a `shiftL` shamt) else Nothing -- SLLI
-  0b101
-    | funct7 == 0 -> Just (a `shiftR` shamt) -- SRLI
-    | funct7 == 0x20 -> Just (unsigned32 (signed32 a `shiftR` shamt)) -- SRAI
-    | otherwise -> Nothing
-  _ -> Nothing
+-- | OP (register-register) and OP-IMM arithmetic on @a@ and @op2@; Nothing for
+-- an illegal funct7.
+alu :: BitVector 3 -> Word32 -> Bool -> Word32 -> Word32 -> Maybe Word32
+alu funct3 funct7 isRegister a op2 = if legal then Just value else Nothing
   where
-    shamt = fromIntegral ((instruction `shiftR` 20) .&. 0x1f)
-
-opRegister :: BitVector 3 -> Word32 -> Word32 -> Word32 -> Maybe Word32
-opRegister funct3 funct7 a b = case (funct3, funct7) of
-  (0b000, 0x00) -> Just (a + b)
-  (0b000, 0x20) -> Just (a - b)
-  (0b001, 0x00) -> Just (a `shiftL` shamt)
-  (0b010, 0x00) -> Just (boolWord (signed32 a < signed32 b))
-  (0b011, 0x00) -> Just (boolWord (a < b))
-  (0b100, 0x00) -> Just (a `xor` b)
-  (0b101, 0x00) -> Just (a `shiftR` shamt)
-  (0b101, 0x20) -> Just (unsigned32 (signed32 a `shiftR` shamt))
-  (0b110, 0x00) -> Just (a .|. b)
-  (0b111, 0x00) -> Just (a .&. b)
-  _ -> Nothing
-  where
-    shamt = fromIntegral (b .&. 0x1f)
+    alternate = funct7 == 0x20 -- SUB and SRA/SRAI
+    isShift = funct3 == 0b001 || funct3 == 0b101
+    legal
+      | isRegister = funct7 == 0 || (alternate && (funct3 == 0b000 || funct3 == 0b101))
+      | otherwise = not isShift || funct7 == 0 || (alternate && funct3 == 0b101)
+    shamt = fromIntegral (op2 .&. 0x1f)
+    value = case funct3 of
+      0b000 -> if isRegister && alternate then a - op2 else a + op2 -- ADD(I), SUB
+      0b001 -> a `shiftL` shamt -- SLL(I)
+      0b010 -> boolWord (signed32 a < signed32 op2) -- SLT(I)
+      0b011 -> boolWord (a < op2) -- SLT(I)U
+      0b100 -> a `xor` op2 -- XOR(I)
+      0b101 -> if alternate then unsigned32 (signed32 a `shiftR` shamt) else a `shiftR` shamt -- SRL(I), SRA(I)
+      0b110 -> a .|. op2 -- OR(I)
+      _ -> a .&. op2 -- AND(I)
 
 branchTaken :: BitVector 3 -> Word32 -> Word32 -> Maybe Bool
 branchTaken funct3 a b = case funct3 of
