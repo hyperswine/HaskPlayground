@@ -21,7 +21,7 @@
 --   * 0x1000_0004: UART STATUS (bit 0 = TX ready, bit 1 = RX byte ready)
 --   * 0x1000_0008: UART RXDATA (read low byte, consuming it)
 --
--- The physical UART is 115200 8-N-1 at a 50 MHz input clock.  While the CPU
+-- The physical UART is 8-N-1 at clock / 868 baud: 115200 at 100 MHz.  While the CPU
 -- is stopped the host protocol consists of single-byte commands:
 --
 --   * 'P', countLo, countHi, words...  PROGRAM @count@ little-endian RV32
@@ -49,14 +49,47 @@ type Byte = Unsigned 8
 
 type MemAddr = Unsigned 10
 
+-- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
+-- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
+-- a simple instruction takes FetchWait, Decode, Execute and Commit.  The
+-- values passed between stages live in their own 'Machine' fields, each
+-- written by a single stage, rather than in the phase: overlapping them in one
+-- register put a many-way mux in front of every bit.
 data CpuPhase
-  = Fetch
-  | FetchWait
-  | -- | The instruction and its two source-register values, registered so the
-    -- execute cycle starts from flip-flops rather than the BRAM output.
-    Execute Word32 Word32 Word32
-  | LoadWait (Index 32) (BitVector 3) (Unsigned 2)
-  | StoreWait (BitVector 3) (Unsigned 2) MemAddr Word32
+  = -- | Put the PC on the BRAM address bus.
+    Fetch
+  | -- | Latch the instruction word from the BRAM into 'cpuInstruction' and
+    -- compare the PC against the end of the program.
+    FetchWait
+  | -- | Read the operands into 'cpuA' and 'cpuB', or halt if past the end.
+    Decode
+  | -- | Do the arithmetic into 'cpuComputed'.
+    Execute
+  | -- | Write back, update the PC and start the next fetch or the memory/UART
+    -- access.
+    Commit
+  | LoadWait
+  | -- | Align the loaded word latched in 'cpuMemoryWord'.
+    LoadAlign
+  | StoreWait
+  | -- | Merge a byte or halfword into the old word latched in 'cpuMemoryWord'.
+    StoreMerge
+  deriving (Generic, NFDataX, Show, Eq)
+
+-- | Everything an instruction needs from the adders and the ALU, computed in
+-- the Execute stage so the Commit stage only selects between registers.
+data Computed = Computed
+  { -- | Result for LUI, AUIPC, OP-IMM and OP; Nothing for an illegal encoding.
+    cAlu :: Maybe Word32,
+    -- | PC + 4: the fall-through PC and the JAL/JALR link value.
+    cLink :: Word32,
+    -- | Jump or taken-branch target.
+    cTarget :: Word32,
+    -- | Branch condition; Nothing for an illegal funct3.
+    cTaken :: Maybe Bool,
+    -- | Load/store effective address.
+    cAddress :: Word32
+  }
   deriving (Generic, NFDataX, Show, Eq)
 
 data HostState
@@ -74,11 +107,21 @@ data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     cpuPc :: Word32,
     cpuPhase :: CpuPhase,
+    cpuInstruction :: Word32,
+    cpuPastEnd :: Bool,
+    cpuA :: Word32,
+    cpuB :: Word32,
+    cpuComputed :: Computed,
+    cpuMemoryWord :: Word32,
     cpuRunning :: Bool,
     programEnd :: Word32,
     hostState :: HostState,
     rxHolding :: Maybe Byte,
-    replyState :: ReplyState
+    replyState :: ReplyState,
+    -- | Zero all registers on the next cycle.  Commands and resets set this
+    -- rather than clearing the 1024 register bits directly, so the clear is
+    -- driven straight from one flip-flop.
+    clearRegisters :: Bool
   }
   deriving (Generic, NFDataX)
 
@@ -94,23 +137,34 @@ initialMachine =
     { cpuRegs = repeat 0,
       cpuPc = 0,
       cpuPhase = Fetch,
+      cpuInstruction = 0,
+      cpuPastEnd = False,
+      cpuA = 0,
+      cpuB = 0,
+      cpuComputed = Computed Nothing 0 0 Nothing 0,
+      cpuMemoryWord = 0,
       cpuRunning = False,
       programEnd = 0,
       hostState = HostIdle,
       rxHolding = Nothing,
-      replyState = NoReply
+      replyState = NoReply,
+      clearRegisters = False
     }
 
 -- UART -----------------------------------------------------------------------
 
--- 50 MHz / 115200 is 434 clocks per bit (0.006% baud-rate error).
-type BaudCounter = Unsigned 9
+-- 100 MHz / 115200 is 868 clocks per bit (0.007% baud-rate error).  At any
+-- other clock f the UART runs at f / 868 baud.
+type BaudCounter = Unsigned 10
+
+uartClocksPerBit :: BaudCounter
+uartClocksPerBit = 868
 
 fullBit :: BaudCounter
-fullBit = 433
+fullBit = uartClocksPerBit - 1
 
 halfBit :: BaudCounter
-halfBit = 216
+halfBit = uartClocksPerBit `div` 2 - 1
 
 data RxState
   = RxIdle
@@ -177,19 +231,24 @@ txStep (TxStop n) _
       }
   )
   #-}
+-- XilinxSystem is System with a synchronous reset.  Gowin flip-flops have a
+-- synchronous-reset pin, and it keeps nextpnr from timing paths through
+-- every flip-flop's asynchronous clear.
 topEntity ::
-  "CLK" ::: Clock System ->
-  "RESET" ::: Reset System ->
-  "ENABLE" ::: Enable System ->
-  "UART_RX" ::: Signal System Bit ->
-  "UART_TX" ::: Signal System Bit
+  "CLK" ::: Clock XilinxSystem ->
+  "RESET" ::: Reset XilinxSystem ->
+  "ENABLE" ::: Enable XilinxSystem ->
+  "UART_RX" ::: Signal XilinxSystem Bit ->
+  "UART_TX" ::: Signal XilinxSystem Bit
 topEntity clk rst en serialRx = withClockResetEnable clk rst en (simpleRisc serialRx)
 
 simpleRisc :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
 simpleRisc serialRx = serialTx
   where
-    -- Two flip-flops resynchronise the asynchronous RX pin before sampling.
-    received = uartRx (register high (register high serialRx))
+    -- Two flip-flops resynchronise the asynchronous RX pin before sampling, and
+    -- the received byte is registered before it reaches the CPU: a Ctrl-C
+    -- resets the whole CPU, so that compare fans out to every state bit.
+    received = register Nothing (uartRx (register high (register high serialRx)))
     (serialTx, txReady) = uartTx txRequest
 
     machineInput = bundle (memoryOut, received, txReady)
@@ -206,7 +265,15 @@ machineStep ::
   Machine ->
   (Word32, Maybe Byte, Bool) ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-machineStep machine (memoryWord, received, txReady) =
+machineStep machine input =
+  let (machine', output) = machineStepCore machine {clearRegisters = False} input
+   in (if clearRegisters machine then machine' {cpuRegs = repeat 0} else machine', output)
+
+machineStepCore ::
+  Machine ->
+  (Word32, Maybe Byte, Bool) ->
+  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
+machineStepCore machine (memoryWord, received, txReady) =
   case hostState machine of
     ClearMemory address -> clearStep address
     _
@@ -218,7 +285,7 @@ machineStep machine (memoryWord, received, txReady) =
           machine' =
             machine
               { hostState = if lastAddress then HostIdle else ClearMemory (address + 1),
-                cpuRegs = repeat 0,
+                clearRegisters = True,
                 cpuPc = 0,
                 cpuPhase = Fetch,
                 cpuRunning = False,
@@ -240,18 +307,21 @@ stoppedStep machine received txReady =
   let (machineWithReply, replyByte) = sendReply machine txReady
    in case (hostState machineWithReply, received) of
         (HostIdle, Just 0x50) -> idleOut machineWithReply {hostState = ProgramCountLo} replyByte
-        (HostIdle, Just 0x52) -> idleOut machineWithReply {cpuRegs = repeat 0, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, rxHolding = Nothing} replyByte
+        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, rxHolding = Nothing} replyByte
         (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
         (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
         (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
         (ProgramCountHi lowByte, Just highByte) ->
-          let requested = (resize highByte `shiftL` 8) .|. resize lowByte :: Unsigned 11
-              count = min requested 1024
-              nextHost = if count == 0 then HostIdle else ProgramBytes count 0 0 0
-           in idleOut machineWithReply {hostState = nextHost, programEnd = 0, cpuRegs = repeat 0, cpuPc = 0, cpuPhase = Fetch} replyByte
+          -- Clamp to the 1024-word memory with bit tests rather than
+          -- comparators, which synthesise to carry chains.
+          let requested = (resize highByte `shiftL` 8) .|. resize lowByte :: Unsigned 16
+              tooMany = requested .&. 0xfc00 /= 0
+              count = if tooMany then 1024 else resize requested :: Unsigned 11
+              nextHost = if requested == 0 then HostIdle else ProgramBytes count 0 0 0
+           in idleOut machineWithReply {hostState = nextHost, programEnd = 0, clearRegisters = True, cpuPc = 0, cpuPhase = Fetch} replyByte
         (ProgramBytes wordsLeft address byteNo partial, Just byte) ->
-          let shiftAmount = fromIntegral byteNo * 8
-              partial' = partial .|. (resize byte `shiftL` shiftAmount)
+          -- Bytes arrive least significant first: shift each one in from the top.
+          let partial' = (resize byte `shiftL` 24) .|. (partial `shiftR` 8)
            in if byteNo == maxBound
                 then
                   let isLast = wordsLeft == 1
@@ -278,9 +348,15 @@ sendReply machine True = case replyState machine of
 resetCpu :: Machine -> Machine
 resetCpu machine =
   machine
-    { cpuRegs = repeat 0,
+    { clearRegisters = True,
       cpuPc = 0,
       cpuPhase = Fetch,
+      cpuInstruction = 0,
+      cpuPastEnd = False,
+      cpuA = 0,
+      cpuB = 0,
+      cpuComputed = Computed Nothing 0 0 Nothing 0,
+      cpuMemoryWord = 0,
       cpuRunning = False,
       rxHolding = Nothing
     }
@@ -307,33 +383,38 @@ cpuStep machine memoryWord received txReady
       let machineRx = case (received, rxHolding machine) of
             (Just byte, Nothing) -> machine {rxHolding = Just byte}
             _ -> machine
-       in case cpuPhase machineRx of
-            Fetch ->
-              withoutRegister
-                ( machineRx {cpuPhase = FetchWait},
-                  (memoryIndex (cpuPc machineRx), Nothing, Nothing)
-                )
-            FetchWait
-              -- Stop once control leaves the program.  Checking the registered
-              -- PC here, instead of the next PC computed at the end of the
-              -- previous instruction, keeps a 32-bit compare off the critical
-              -- path.
-              | cpuPc machineRx >= programEnd machineRx -> withoutRegister (haltMachine machineRx)
-              -- Decode stage: latch the instruction and read its operands.  On the
-              -- GW2A, BRAM output -> register mux -> 32-bit adder in a single
-              -- cycle fails at 51 MHz even though nextpnr reports it passing.
-              | otherwise ->
-                  let rs1 = regIndex ((memoryWord `shiftR` 15) .&. 0x1f)
-                      rs2 = regIndex ((memoryWord `shiftR` 20) .&. 0x1f)
-                      operands = Execute memoryWord (readRegister rs1 machineRx) (readRegister rs2 machineRx)
-                   in withoutRegister (machineRx {cpuPhase = operands}, (0, Nothing, Nothing))
-            Execute instruction a b -> executeInstruction machineRx instruction a b txReady
-            LoadWait rd funct3 byteOffset ->
-              let value = loadValue funct3 byteOffset memoryWord
-               in withRegister rd value (finishInstruction machineRx Nothing)
-            StoreWait funct3 byteOffset address value ->
-              let merged = storeValue funct3 byteOffset value memoryWord
-               in withoutRegister (finishInstruction machineRx (Just (address, merged)))
+          next m = withoutRegister (m, (0, Nothing, Nothing))
+       in let Machine {..} = machineRx
+              instruction = cpuInstruction
+              address = cAddress cpuComputed
+           in case cpuPhase of
+               Fetch ->
+                 withoutRegister
+                   ( machineRx {cpuPhase = FetchWait},
+                     (memoryIndex cpuPc, Nothing, Nothing)
+                   )
+               -- The program stops once control leaves it.  The compare is
+               -- registered here and acted on in Decode.
+               FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord, cpuPastEnd = cpuPc >= programEnd}
+               Decode
+                 | cpuPastEnd -> withoutRegister (haltMachine machineRx)
+                 | otherwise ->
+                     next
+                       machineRx
+                         { cpuPhase = Execute,
+                           cpuA = readRegister (instructionRs1 instruction) machineRx,
+                           cpuB = readRegister (instructionRs2 instruction) machineRx
+                         }
+               Execute -> next machineRx {cpuPhase = Commit, cpuComputed = compute cpuPc instruction cpuA cpuB}
+               Commit -> commitInstruction machineRx txReady
+               LoadWait -> next machineRx {cpuPhase = LoadAlign, cpuMemoryWord = memoryWord}
+               LoadAlign ->
+                 let value = loadValue (instructionFunct3 instruction) (resize address) cpuMemoryWord
+                  in withRegister (instructionRd instruction) value (finishInstruction machineRx Nothing)
+               StoreWait -> next machineRx {cpuPhase = StoreMerge, cpuMemoryWord = memoryWord}
+               StoreMerge ->
+                 let merged = storeValue (instructionFunct3 instruction) (resize address) cpuB cpuMemoryWord
+                  in withoutRegister (finishInstruction machineRx (Just (memoryIndex address, merged)))
 
 withRegister :: Index 32 -> Word32 -> (Machine, StepOutput) -> (Machine, RegisterWrite, StepOutput)
 withRegister index value (machine, output) = (machine, Just (index, value), output)
@@ -341,85 +422,104 @@ withRegister index value (machine, output) = (machine, Just (index, value), outp
 withoutRegister :: (Machine, StepOutput) -> (Machine, RegisterWrite, StepOutput)
 withoutRegister (machine, output) = (machine, Nothing, output)
 
-executeInstruction ::
-  Machine ->
-  Word32 ->
-  Word32 ->
-  Word32 ->
-  Bool ->
-  (Machine, RegisterWrite, StepOutput)
-executeInstruction machine instruction a b txReady =
-  -- kind of a cheat way to pre-parse all the formats, U, B, J, I, S, R
-  let opcode = instruction .&. 0x7f
-      rd = regIndex ((instruction `shiftR` 7) .&. 0x1f)
-      funct3 = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
-      funct7 = (instruction `shiftR` 25) .&. 0x7f
-      pc = cpuPc machine
-      nextPc = pc + 4
-      normal value = withRegister rd value (finishInstruction machine {cpuPc = nextPc} Nothing)
+-- | Execute stage: every adder and the ALU, in parallel, for whichever
+-- instruction this turns out to be.
+compute :: Word32 -> Word32 -> Word32 -> Word32 -> Computed
+compute pc instruction a b =
+  Computed
+    { cAlu = case opcode of
+        0x37 -> Just (immU instruction) -- LUI
+        0x17 -> Just (pc + immU instruction) -- AUIPC
+        0x13 -> opImmediate funct3 funct7 a (immI instruction) instruction
+        0x33 -> opRegister funct3 funct7 a b
+        _ -> Nothing,
+      cLink = pc + 4,
+      cTarget = case opcode of
+        0x6f -> pc + immJ instruction -- JAL
+        0x67 -> (a + immI instruction) .&. complement 1 -- JALR
+        _ -> pc + immB instruction, -- branches
+      cTaken = branchTaken funct3 a b,
+      cAddress = if opcode == 0x23 then a + immS instruction else a + immI instruction
+    }
+  where
+    opcode = instruction .&. 0x7f
+    funct3 = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
+    funct7 = (instruction `shiftR` 25) .&. 0x7f
+
+instructionRd, instructionRs1, instructionRs2 :: Word32 -> Index 32
+instructionRd instruction = regIndex ((instruction `shiftR` 7) .&. 0x1f)
+instructionRs1 instruction = regIndex ((instruction `shiftR` 15) .&. 0x1f)
+instructionRs2 instruction = regIndex ((instruction `shiftR` 20) .&. 0x1f)
+
+instructionFunct3 :: Word32 -> BitVector 3
+instructionFunct3 instruction = pack (resize ((instruction `shiftR` 12) .&. 7) :: Unsigned 3)
+
+-- | Commit stage: act on the values the Execute stage computed.
+commitInstruction :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
+commitInstruction machine txReady =
+  let instruction = cpuInstruction machine
+      b = cpuB machine
+      Computed {..} = cpuComputed machine
+      opcode = instruction .&. 0x7f
+      rd = instructionRd instruction
+      funct3 = instructionFunct3 instruction
+      nextPc = cLink
+      normal = case cAlu of
+        Just value -> withRegister rd value (finishInstruction machine {cpuPc = nextPc} Nothing)
+        Nothing -> invalid
       noWrite newPc = withoutRegister (finishInstruction machine {cpuPc = newPc} Nothing)
       jumpAndLink newPc = withRegister rd nextPc (finishInstruction machine {cpuPc = newPc} Nothing)
       invalid = withoutRegister (haltMachine machine)
+      address = cAddress
    in case opcode of
-        -- LUI
-        0x37 -> normal (immU instruction)
-        -- AUIPC
-        0x17 -> normal (pc + immU instruction)
+        0x37 -> normal -- LUI
+        0x17 -> normal -- AUIPC
+        0x13 -> normal -- OP-IMM
+        0x33 -> normal -- OP
         -- JAL
-        0x6f -> jumpAndLink (pc + immJ instruction)
+        0x6f -> jumpAndLink cTarget
         -- JALR
-        0x67 ->
-          if funct3 == 0
-            then jumpAndLink ((a + immI instruction) .&. complement 1)
-            else invalid
+        0x67 -> if funct3 == 0 then jumpAndLink cTarget else invalid
         -- branches
         0x63 ->
-          case branchTaken funct3 a b of
-            Just takeBranch -> noWrite (if takeBranch then pc + immB instruction else nextPc)
+          case cTaken of
+            Just takeBranch -> noWrite (if takeBranch then cTarget else nextPc)
             Nothing -> invalid
         -- loads
         0x03 ->
-          let address = a + immI instruction
-           in if isUartAddress address
+          if isUartAddress address
+            then
+              let (value, machine') = readUart address txReady machine
+               in withRegister rd value (finishInstruction machine' {cpuPc = nextPc} Nothing)
+            else
+              if validMemoryAddress address && validLoad funct3
                 then
-                  let (value, machine') = readUart address txReady machine
-                   in withRegister rd value (finishInstruction machine' {cpuPc = nextPc} Nothing)
-                else
-                  if validMemoryAddress address && validLoad funct3
-                    then
-                      withoutRegister
-                        ( machine {cpuPc = nextPc, cpuPhase = LoadWait rd funct3 (resize address)},
-                          (memoryIndex address, Nothing, Nothing)
-                        )
-                    else invalid
+                  withoutRegister
+                    ( machine {cpuPc = nextPc, cpuPhase = LoadWait},
+                      (memoryIndex address, Nothing, Nothing)
+                    )
+                else invalid
         -- stores
         0x23 ->
-          let address = a + immS instruction
-           in if address == uartTxData
+          if address == uartTxData
+            then
+              withoutRegister $
+                if txReady
+                  then finishInstructionWithTx machine {cpuPc = nextPc} (Just (resize b))
+                  else -- Stay in Commit until the transmitter is free.
+                    (machine, (0, Nothing, Nothing))
+            else
+              if validMemoryAddress address && validStore funct3
                 then
+                  -- Word stores need no read/modify/write cycle.
                   withoutRegister $
-                    if txReady
-                      then finishInstructionWithTx machine {cpuPc = nextPc} (Just (resize b))
-                      else -- Stay in Execute until the transmitter is free.
-                        (machine, (memoryIndex pc, Nothing, Nothing))
-                else
-                  if validMemoryAddress address && validStore funct3
-                    then
-                      -- Word stores need no read/modify/write cycle.
-                      withoutRegister $
-                        if funct3 == 0b010
-                          then finishInstructionWithWrite machine {cpuPc = nextPc} (memoryIndex address, b)
-                          else
-                            ( machine {cpuPc = nextPc, cpuPhase = StoreWait funct3 (resize address) (memoryIndex address) b},
-                              (memoryIndex address, Nothing, Nothing)
-                            )
-                    else invalid
-        0x13 -> case opImmediate funct3 funct7 a (immI instruction) instruction of
-          Just value -> normal value
-          Nothing -> invalid
-        0x33 -> case opRegister funct3 funct7 a b of
-          Just value -> normal value
-          Nothing -> invalid
+                    if funct3 == 0b010
+                      then finishInstructionWithWrite machine {cpuPc = nextPc} (memoryIndex address, b)
+                      else
+                        ( machine {cpuPc = nextPc, cpuPhase = StoreWait},
+                          (memoryIndex address, Nothing, Nothing)
+                        )
+                else invalid
         0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
         0x73 -> invalid -- ECALL / EBREAK terminate the program.
         _ -> invalid

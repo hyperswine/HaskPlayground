@@ -7,7 +7,7 @@
 `default_nettype none
 
 module tb_simple_risc;
-  localparam integer CPB = 434;  // clocks per UART bit at 50 MHz
+  localparam integer CPB = 868;  // clocks per UART bit (uartClocksPerBit)
 
   reg clk = 1'b0;
   reg reset = 1'b1;
