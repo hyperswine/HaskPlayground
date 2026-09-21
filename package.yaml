@@ -68,6 +68,11 @@ library:
   source-dirs: src
 
 executables:
+  terra-bgm:
+    main: Main.hs
+    source-dirs: app/terra-bgm
+    ghc-options: [-O2]
+    dependencies: [haskplayground]
   neo-music:
     main: Main.hs
     source-dirs: app/neo-music
