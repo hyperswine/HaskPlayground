@@ -12,3 +12,4 @@ nprolog.conf
 file.txt
 *.o
 *.hi
+top

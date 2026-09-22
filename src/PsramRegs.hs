@@ -39,7 +39,9 @@ module PsramRegs
     -- * Byte-level core
     psramStep,
     initialState,
-    State (..),
+    State,
+    Core,
+    Emitter,
     StepInput,
     StepOutput,
     RamPort,
@@ -81,9 +83,6 @@ ctrlEnable = 1
 ctrlFlush = 2
 stErr = 2 -- STATUS bit 1: sticky, write 1 to clear.  Bit 0 (BUSY) is never
 -- visible: snapshots only start while the PSRAM machine is idle.
-
-slotReg :: SlotIdx -> RegIdx
-slotReg n = resize n + 4
 
 -- Messages ---------------------------------------------------------------------
 
@@ -211,58 +210,78 @@ data Snap
 
 data Emit
   = EIdle
-  | EMsg (Vec 32 (Maybe Byte)) (Index 32)
+  | EMsg Msg (Index 32) -- message, next character position
   | ESnap Snap
   deriving (Generic, NFDataX, Eq, Show)
 
-data State = State
-  { sCtrl :: Word32,
-    sStatus :: Word32,
-    sShadowCtrl :: Word32, -- CTRL and STATUS as of the snapshot being printed
-    sShadowStatus :: Word32,
-    sSeq :: Word32,
-    sSeqDigits :: Vec 10 (Index 10), -- sSeq in decimal, most significant first
-    sShadowSeq :: Vec 10 (Index 10), -- sequence number of the snapshot being printed
-    sSnapCrc :: Byte,
-    sDirty :: Bool, -- registers changed (or a snapshot was requested) since the last snapshot began
-    sFrame :: Vec 8 Byte,
-    sFrameLen :: Index 9,
-    sFrameAge :: Unsigned 32, -- cycles since the partial frame's first byte
-    sPending :: Maybe (Vec 8 Byte),
-    sOverruns :: Byte, -- frames dropped because one was still pending (saturates)
-    sOp :: Op,
-    sQueue :: Vec 8 Msg,
-    sQueueHead :: Index 8,
-    sQueueCount :: Index 9,
-    sDropped :: Byte,
-    sEmit :: Emit
+-- | The core: frame assembly, CTRL/STATUS, and the sequencer that owns the
+-- slot RAM, the PSRAM and the shadow RAM's write port.
+--
+-- The core and the emitter are separate machines with separate state records
+-- on purpose: Clash multiplexes a whole record through every branch of a case
+-- that returns it, so each case should only carry the fields it owns.
+data Core = Core
+  { cCtrl :: Word32,
+    cStatus :: Word32,
+    cShadowCtrl :: Word32, -- CTRL and STATUS as of the snapshot being printed
+    cShadowStatus :: Word32,
+    cDirty :: Bool, -- registers changed (or a snapshot was requested) since the last snapshot began
+    cFrame :: Vec 8 Byte,
+    cFrameLen :: Index 9,
+    cFrameAge :: Unsigned 32, -- cycles since the partial frame's first byte
+    cPending :: Maybe (Vec 8 Byte),
+    cOverruns :: Byte, -- frames dropped because one was still pending (saturates)
+    cOp :: Op
   }
   deriving (Generic, NFDataX, Show)
 
-initialState :: State
-initialState =
-  State
-    { sCtrl = 0,
-      sStatus = 0,
-      sShadowCtrl = 0,
-      sShadowStatus = 0,
-      sSeq = 0,
-      sSeqDigits = repeat 0,
-      sShadowSeq = repeat 0,
-      sSnapCrc = 0,
-      sDirty = True, -- the boot snapshot
-      sFrame = repeat 0,
-      sFrameLen = 0,
-      sFrameAge = 0,
-      sPending = Nothing,
-      sOverruns = 0,
-      sOp = OpIdle,
-      sQueue = MBoot :> repeat MBadCrc,
-      sQueueHead = 0,
-      sQueueCount = 1,
-      sDropped = 0,
-      sEmit = EIdle
+-- | The emitter: the message queue and everything the UART prints.
+data Emitter = Emitter
+  { eQueue :: Vec 8 Msg,
+    eQueueHead :: Index 8,
+    eQueueCount :: Index 9,
+    eDropped :: Byte, -- messages lost to a full queue (saturates)
+    eEmit :: Emit,
+    eSnapCrc :: Byte,
+    eSeq :: Word32,
+    eSeqDigits :: Vec 10 (Index 10) -- eSeq in decimal, most significant first
+  }
+  deriving (Generic, NFDataX, Show)
+
+-- | Both machines' state, for stepping the design as one function in tests.
+type State = (Core, Emitter)
+
+initialCore :: Core
+initialCore =
+  Core
+    { cCtrl = 0,
+      cStatus = 0,
+      cShadowCtrl = 0,
+      cShadowStatus = 0,
+      cDirty = True, -- the boot snapshot
+      cFrame = repeat 0,
+      cFrameLen = 0,
+      cFrameAge = 0,
+      cPending = Nothing,
+      cOverruns = 0,
+      cOp = OpIdle
     }
+
+initialEmitter :: Emitter
+initialEmitter =
+  Emitter
+    { eQueue = MBoot :> repeat MBadCrc,
+      eQueueHead = 0,
+      eQueueCount = 1,
+      eDropped = 0,
+      eEmit = EIdle,
+      eSnapCrc = 0,
+      eSeq = 0,
+      eSeqDigits = repeat 0
+    }
+
+initialState :: State
+initialState = (initialCore, initialEmitter)
 
 deviceId, version :: Word32
 deviceId = 0x5053_5231 -- "PSR1"
@@ -271,165 +290,192 @@ version = 0x0001_0000 -- 1.0
 -- | A block RAM port: read address, optional write.
 type RamPort = (SlotIdx, Maybe (SlotIdx, Word32))
 
+type RamWrite = Maybe (SlotIdx, Word32)
+
 -- | (received byte, UART transmitter ready, PSRAM / slot / shadow RAM read data)
 type StepInput = (Maybe Byte, Bool, Word32, Word32, Word32)
 
 -- | (byte to transmit, PSRAM port, slot RAM port, shadow RAM port)
 type StepOutput = (Maybe Byte, RamPort, RamPort, RamPort)
 
+-- | What the core tells the emitter each cycle: a message (at most one), start
+-- printing a snapshot (the shadow copy is complete), and CTRL/STATUS as of
+-- that snapshot.
+type CoreToEmitter = (Maybe Msg, Bool, Word32, Word32)
+
 -- Step -------------------------------------------------------------------------
 
--- | One clock cycle.  frameTimeout is in cycles (the sketch's 50 ms).
+-- | One clock cycle of the whole design, the two machines wired as in
+-- 'psramRegs'.  frameTimeout is in cycles (the sketch's 50 ms).
 psramStep :: Unsigned 32 -> State -> StepInput -> (State, StepOutput)
-psramStep frameTimeout s0 (rxByte, txReady, psramOut, slotOut, shadowOut) =
-  (s4, (txByte, (psramAddr, psramWr), (slotAddr, slotWr), (shadowAddr, shadowWr)))
+psramStep frameTimeout (core, emitter) (rxByte, txReady, psramOut, slotOut, shadowOut) =
+  ((core', emitter'), (txByte, psramPort, slotPort, (shadowAddr, shadowWr)))
   where
-    s1 = receive frameTimeout rxByte s0
-    (s2, psramWr, slotWr, shadowWr) = sequencer psramOut slotOut s1
-    s3 = if snapshotDue s2 then beginSnapshot s2 else s2
-    -- read addresses for the state being entered
-    psramAddr = case sOp s3 of OpPsCheck n _ _ -> n; _ -> 0
-    slotAddr = case sOp s3 of
+    (core', (toEmitter, psramPort, slotPort, shadowWr)) =
+      coreStep frameTimeout core (rxByte, emitterQuiet emitter, psramOut, slotOut)
+    (emitter', (txByte, shadowAddr, _)) = emitStep emitter (txReady, toEmitter, shadowOut)
+
+-- | Nothing queued or being printed.  A function of the emitter's registers
+-- only, so the core can read it without a combinational loop.
+emitterQuiet :: Emitter -> Bool
+emitterQuiet Emitter {..} = eEmit == EIdle && eQueueCount == 0 && eDropped == 0
+
+-- Core -------------------------------------------------------------------------
+
+-- | Input: (received byte, emitter quiet, PSRAM read data, slot RAM read data).
+coreStep ::
+  Unsigned 32 ->
+  Core ->
+  (Maybe Byte, Bool, Word32, Word32) ->
+  (Core, (CoreToEmitter, RamPort, RamPort, RamWrite))
+coreStep frameTimeout c0 (rxByte, quiet, psramOut, slotOut) =
+  (c3, ((msg, startPrinting, cShadowCtrl c0, cShadowStatus c0), (psramAddr, psramWr), (slotAddr, slotWr), shadowWr))
+  where
+    c1 = receive frameTimeout rxByte c0
+    (c2, msg, startPrinting, psramWr, slotWr, shadowWr) = sequencer quiet psramOut slotOut c1
+    -- a batch's messages precede its snapshot, as in the sketch
+    c3 = if quiet && msg == Nothing && snapshotDue c2 then beginSnapshot c2 else c2
+    -- read addresses for the state being entered (block RAM reads take a cycle)
+    psramAddr = case cOp c3 of OpPsCheck n _ _ -> n; _ -> 0
+    slotAddr = case cOp c3 of
       OpSlotWrite n _ -> n
       OpFlushWrite n -> n
       OpCopy n -> n
       _ -> 0
-    word = shadowWord s0 shadowOut (emitReg (sEmit s3))
-    (s4, txByte) = emit txReady word s3
-    shadowAddr = slotOf (emitReg (sEmit s4))
-
--- | Register r of the snapshot being printed.  Slots come from the shadow RAM,
--- whose read port was pointed at r last cycle.
-shadowWord :: State -> Word32 -> RegIdx -> Word32
-shadowWord s shadowOut r
-  | r == regDeviceId = deviceId
-  | r == regVersion = version
-  | r == regCtrl = sShadowCtrl s
-  | r == regStatus = sShadowStatus s
-  | otherwise = shadowOut
-
-slotOf :: RegIdx -> SlotIdx
-slotOf r = if r >= 4 then resize (r - 4) else 0
 
 -- | Frame assembly, mirroring the sketch's loop(): a partial frame older than
 -- the timeout is dropped when the next byte arrives, 0xA5 starts a frame.
-receive :: Unsigned 32 -> Maybe Byte -> State -> State
-receive timeout rxByte s@State {..} = case rxByte of
-  Nothing -> s {sFrameAge = aged}
+receive :: Unsigned 32 -> Maybe Byte -> Core -> Core
+receive timeout rxByte c@Core {..} = case rxByte of
+  Nothing -> c {cFrameAge = aged}
   Just b
-    | len == 0 && b /= 0xA5 -> s {sFrameLen = 0, sFrameAge = 0}
-    | len == 0 -> s {sFrame = replace (0 :: Index 8) b sFrame, sFrameLen = 1, sFrameAge = 0}
+    | len == 0 && b /= 0xA5 -> c {cFrameLen = 0, cFrameAge = 0}
+    | len == 0 -> c {cFrame = replace (0 :: Index 8) b cFrame, cFrameLen = 1, cFrameAge = 0}
     | len == 7 ->
-        let s' = s {sFrameLen = 0, sFrameAge = 0}
-         in case sPending of
-              Nothing -> s' {sPending = Just (replace (7 :: Index 8) b sFrame)}
-              Just _ -> s' {sOverruns = if sOverruns == maxBound then sOverruns else sOverruns + 1}
-    | otherwise -> s {sFrame = replace len b sFrame, sFrameLen = len + 1, sFrameAge = aged}
+        let c' = c {cFrameLen = 0, cFrameAge = 0}
+         in case cPending of
+              Nothing -> c' {cPending = Just (replace (7 :: Index 8) b cFrame)}
+              Just _ -> c' {cOverruns = if cOverruns == maxBound then cOverruns else cOverruns + 1}
+    | otherwise -> c {cFrame = replace len b cFrame, cFrameLen = len + 1, cFrameAge = aged}
   where
-    stale = sFrameLen /= 0 && sFrameAge > timeout
-    len = if stale then 0 else sFrameLen
-    aged = if sFrameLen /= 0 && sFrameAge /= maxBound then sFrameAge + 1 else sFrameAge
-
--- | Queue a message; count it as lost when the queue is full.
-push :: Msg -> State -> State
-push m s@State {..}
-  | sQueueCount == 8 = s {sDropped = if sDropped == maxBound then sDropped else sDropped + 1}
-  | otherwise =
-      s
-        { sQueue = replace (satAdd SatWrap sQueueHead (resize sQueueCount)) m sQueue,
-          sQueueCount = sQueueCount + 1
-        }
+    stale = cFrameLen /= 0 && cFrameAge > timeout
+    len = if stale then 0 else cFrameLen
+    aged = if cFrameLen /= 0 && cFrameAge /= maxBound then cFrameAge + 1 else cFrameAge
 
 -- | Set STATUS.ERR (a change if it was clear) and report m.
-failWith :: Msg -> State -> State
-failWith m s = push m s {sStatus = sStatus s .|. stErr, sDirty = sDirty s || sStatus s .&. stErr == 0}
+failWith :: Msg -> Core -> (Core, Maybe Msg)
+failWith m c = (c {cStatus = cStatus c .|. stErr, cDirty = cDirty c || cStatus c .&. stErr == 0}, Just m)
 
 -- | One step of the RAM sequencer, or the pending frame when it is idle.
--- Returns the PSRAM, slot RAM and shadow RAM writes for this cycle.
-sequencer :: Word32 -> Word32 -> State -> (State, Maybe (SlotIdx, Word32), Maybe (SlotIdx, Word32), Maybe (SlotIdx, Word32))
-sequencer psramOut slotOut s = case sOp s of
+-- Returns the message for the emitter, whether the shadow copy just
+-- finished, and the PSRAM, slot RAM and shadow RAM writes.
+sequencer :: Bool -> Word32 -> Word32 -> Core -> (Core, Maybe Msg, Bool, RamWrite, RamWrite, RamWrite)
+sequencer quiet psramOut slotOut c = case cOp c of
   OpSlotWrite n v ->
-    let s' = s {sDirty = sDirty s || slotOut /= v}
-        enabled = sCtrl s .&. ctrlEnable /= 0
-     in ( s' {sOp = if enabled then OpPsRead n v False else OpIdle},
+    let enabled = cCtrl c .&. ctrlEnable /= 0
+     in ( c {cDirty = cDirty c || slotOut /= v, cOp = if enabled then OpPsRead n v False else OpIdle},
+          Nothing,
+          False,
           if enabled then Just (n, v) else Nothing,
           Just (n, v),
           Nothing
         )
-  OpFlushWrite n -> (s {sOp = OpPsRead n slotOut True}, Just (n, slotOut), Nothing, Nothing)
-  OpPsRead n v fl -> (s {sOp = OpPsCheck n v fl}, Nothing, Nothing, Nothing)
+  OpFlushWrite n -> (c {cOp = OpPsRead n slotOut True}, Nothing, False, Just (n, slotOut), Nothing, Nothing)
+  OpPsRead n v fl -> (c {cOp = OpPsCheck n v fl}, Nothing, False, Nothing, Nothing, Nothing)
   OpPsCheck n v fl ->
-    let next = if fl && n /= maxBound then OpFlushWrite (n + 1) else OpIdle
-        s' = s {sOp = next}
-     in (if psramOut /= v then failWith (MVerify n) s' else s', Nothing, Nothing, Nothing)
+    let c' = c {cOp = if fl && n /= maxBound then OpFlushWrite (n + 1) else OpIdle}
+        (c'', msg) = if psramOut /= v then failWith (MVerify n) c' else (c', Nothing)
+     in (c'', msg, False, Nothing, Nothing, Nothing)
   OpCopy n ->
     let done = n == maxBound
-     in ( s {sOp = if done then OpIdle else OpCopy (n + 1), sEmit = if done then ESnap (SnCrc 0 0) else sEmit s},
-          Nothing,
-          Nothing,
-          Just (n, slotOut)
-        )
-  OpIdle -> case sPending s of
-    Nothing -> (owedOverrun s, Nothing, Nothing, Nothing)
-    Just f -> (handleFrame f s {sPending = Nothing}, Nothing, Nothing, Nothing)
+     in (c {cOp = if done then OpIdle else OpCopy (n + 1)}, Nothing, done, Nothing, Nothing, Just (n, slotOut))
+  OpIdle -> case cPending c of
+    Nothing
+      -- report one dropped frame when nothing else is being reported
+      | cOverruns c /= 0 && quiet -> (c {cOverruns = cOverruns c - 1}, Just MOverrun, False, Nothing, Nothing, Nothing)
+      | otherwise -> (c, Nothing, False, Nothing, Nothing, Nothing)
+    Just f ->
+      let (c', msg) = handleFrame f c {cPending = Nothing}
+       in (c', msg, False, Nothing, Nothing, Nothing)
 
--- | Report one dropped frame when nothing else is being reported.
-owedOverrun :: State -> State
-owedOverrun s
-  | sOverruns s /= 0 && sQueueCount s == 0 = push MOverrun s {sOverruns = sOverruns s - 1}
-  | otherwise = s
-
-handleFrame :: Vec 8 Byte -> State -> State
-handleFrame f s
-  | crc8 (take (SNat :: SNat 6) (tail f)) /= f !! (7 :: Index 8) = failWith MBadCrc s
-  | cmd == 0x57 = writeReg (f !! (2 :: Index 8)) value s -- 'W'
-  | cmd == 0x52 = s {sDirty = True} -- 'R'
-  | otherwise = failWith (MBadCmd cmd) s
+handleFrame :: Vec 8 Byte -> Core -> (Core, Maybe Msg)
+handleFrame f c
+  | crc8 (take (SNat :: SNat 6) (tail f)) /= f !! (7 :: Index 8) = failWith MBadCrc c
+  | cmd == 0x57 = writeReg (f !! (2 :: Index 8)) value c -- 'W'
+  | cmd == 0x52 = (c {cDirty = True}, Nothing) -- 'R'
+  | otherwise = failWith (MBadCmd cmd) c
   where
     cmd = f !! (1 :: Index 8)
     value = bitCoerce (f !! (6 :: Index 8) :> f !! (5 :: Index 8) :> f !! (4 :: Index 8) :> f !! (3 :: Index 8) :> Nil)
 
 -- | The sketch's applyWrite.  A slot write reads the old value first (for
 -- change detection) in OpSlotWrite; CTRL and STATUS are flip-flops.
-writeReg :: Byte -> Word32 -> State -> State
-writeReg idx v s
-  | idx >= 100 = failWith (MBadIndex idx) s
-  | r == regDeviceId || r == regVersion = failWith (MReadOnly idx) s
+writeReg :: Byte -> Word32 -> Core -> (Core, Maybe Msg)
+writeReg idx v c
+  | idx >= 100 = failWith (MBadIndex idx) c
+  | r == regDeviceId || r == regVersion = failWith (MReadOnly idx) c
   | r == regCtrl =
       let ctrl' = v .&. ctrlEnable
-       in s
-            { sCtrl = ctrl',
-              sDirty = sDirty s || ctrl' /= sCtrl s,
-              sOp = if v .&. ctrlFlush /= 0 then OpFlushWrite 0 else OpIdle
-            }
+       in ( c
+              { cCtrl = ctrl',
+                cDirty = cDirty c || ctrl' /= cCtrl c,
+                cOp = if v .&. ctrlFlush /= 0 then OpFlushWrite 0 else OpIdle
+              },
+            Nothing
+          )
   | r == regStatus =
-      let status' = if v .&. stErr /= 0 then sStatus s .&. complement stErr else sStatus s
-       in s {sStatus = status', sDirty = sDirty s || status' /= sStatus s}
-  | otherwise = s {sOp = OpSlotWrite (resize (r - 4)) v}
+      let status' = if v .&. stErr /= 0 then cStatus c .&. complement stErr else cStatus c
+       in (c {cStatus = status', cDirty = cDirty c || status' /= cStatus c}, Nothing)
+  | otherwise = (c {cOp = OpSlotWrite (resize (r - 4)) v}, Nothing)
   where
     r = fromIntegral idx :: RegIdx -- only used once idx < 100
 
--- | Start a snapshot when nothing else is going on: the emitter is idle, the
--- queued messages are out (a batch's errors precede its snapshot, as in the
--- sketch), and the sequencer is idle (so BUSY is clear, as in the sketch).
-snapshotDue :: State -> Bool
-snapshotDue State {..} =
-  sEmit == EIdle && sQueueCount == 0 && sDropped == 0 && sOverruns == 0 && sDirty && sOp == OpIdle && sPending == Nothing
+-- | The sequencer is idle (so BUSY is clear, as in the sketch) and a change or
+-- request is waiting.  The caller also requires a quiet emitter.
+snapshotDue :: Core -> Bool
+snapshotDue Core {..} = cOverruns == 0 && cDirty && cOp == OpIdle && cPending == Nothing
 
--- | Latch CTRL/STATUS/seq and copy the slots to the shadow RAM; printing
--- starts when the copy finishes (see OpCopy).
-beginSnapshot :: State -> State
-beginSnapshot s@State {..} =
-  s
-    { sShadowCtrl = sCtrl,
-      sShadowStatus = sStatus,
-      sShadowSeq = sSeqDigits,
-      sSeq = sSeq + 1,
-      sSeqDigits = if sSeq == maxBound then repeat 0 else incDecimal sSeqDigits,
-      sDirty = False,
-      sSnapCrc = 0,
-      sOp = OpCopy 0
-    }
+-- | Latch CTRL/STATUS and copy the slots to the shadow RAM; the emitter starts
+-- printing when the copy finishes (see OpCopy).
+beginSnapshot :: Core -> Core
+beginSnapshot c = c {cShadowCtrl = cCtrl c, cShadowStatus = cStatus c, cDirty = False, cOp = OpCopy 0}
+
+-- Emitter ----------------------------------------------------------------------
+
+-- | Input: (UART transmitter ready, from the core, shadow RAM read data).
+-- Output: (byte to transmit, shadow RAM read address, quiet).  quiet depends
+-- on the state only, not the input (hence the lazy pattern).
+emitStep :: Emitter -> (Bool, CoreToEmitter, Word32) -> (Emitter, (Maybe Byte, SlotIdx, Bool))
+emitStep e0 ~(txReady, ~(msg, startPrinting, shadowCtrl, shadowStatus), shadowOut) = (e3, (txByte, shadowAddr, emitterQuiet e0))
+  where
+    e1 = maybe e0 (`push` e0) msg
+    e2 = if startPrinting then e1 {eEmit = ESnap (SnCrc 0 0), eSnapCrc = 0} else e1
+    -- the shadow RAM's read port was pointed at this register last cycle
+    word = shadowWord shadowCtrl shadowStatus shadowOut (emitReg (eEmit e2))
+    (e3, txByte) = emit txReady word e2
+    shadowAddr = slotOf (emitReg (eEmit e3))
+
+-- | Queue a message; count it as dropped when the queue is full.
+push :: Msg -> Emitter -> Emitter
+push m e@Emitter {..}
+  | eQueueCount == 8 = e {eDropped = if eDropped == maxBound then eDropped else eDropped + 1}
+  | otherwise =
+      e
+        { eQueue = replace (satAdd SatWrap eQueueHead (resize eQueueCount)) m eQueue,
+          eQueueCount = eQueueCount + 1
+        }
+
+-- | Register r of the snapshot being printed.  Slots come from the shadow RAM.
+shadowWord :: Word32 -> Word32 -> Word32 -> RegIdx -> Word32
+shadowWord shadowCtrl shadowStatus shadowOut r
+  | r == regDeviceId = deviceId
+  | r == regVersion = version
+  | r == regCtrl = shadowCtrl
+  | r == regStatus = shadowStatus
+  | otherwise = shadowOut
+
+slotOf :: RegIdx -> SlotIdx
+slotOf r = if r >= 4 then resize (r - 4) else 0
 
 incDecimal :: Vec 10 (Index 10) -> Vec 10 (Index 10)
 incDecimal ds = reverse (snd (mapAccumL step True (reverse ds)))
@@ -446,28 +492,28 @@ emitReg e = case e of
   ESnap (SnHex r _) -> r
   _ -> 0
 
--- | Drive the UART: queued messages first, then the lost count, then snapshots.
--- word is snapshot register 'emitReg' of the current state.
-emit :: Bool -> Word32 -> State -> (State, Maybe Byte)
-emit txReady word s@State {..} = case sEmit of
+-- | Drive the UART: queued messages first, then the dropped count, then
+-- snapshots.  word is snapshot register 'emitReg' of the current state.
+emit :: Bool -> Word32 -> Emitter -> (Emitter, Maybe Byte)
+emit txReady word e@Emitter {..} = case eEmit of
   EIdle
-    | sQueueCount /= 0 ->
-        ( s
-            { sEmit = EMsg (render (sQueue !! sQueueHead)) 0,
-              sQueueHead = satSucc SatWrap sQueueHead,
-              sQueueCount = sQueueCount - 1
+    | eQueueCount /= 0 ->
+        ( e
+            { eEmit = EMsg (eQueue !! eQueueHead) 0,
+              eQueueHead = satSucc SatWrap eQueueHead,
+              eQueueCount = eQueueCount - 1
             },
           Nothing
         )
-    | sDropped /= 0 -> (s {sEmit = EMsg (render (MLost sDropped)) 0, sDropped = 0}, Nothing)
-    | otherwise -> (s, Nothing)
-  EMsg text pos ->
-    let next = if pos == maxBound then EIdle else EMsg text (pos + 1)
-     in case text !! pos of
-          Nothing -> (s {sEmit = next}, Nothing)
+    | eDropped /= 0 -> (e {eEmit = EMsg (MLost eDropped) 0, eDropped = 0}, Nothing)
+    | otherwise -> (e, Nothing)
+  EMsg m pos ->
+    let next = if pos == maxBound then EIdle else EMsg m (pos + 1)
+     in case render m !! pos of -- one character of the message per cycle
+          Nothing -> (e {eEmit = next}, Nothing)
           Just b
-            | txReady -> (s {sEmit = next}, Just b)
-            | otherwise -> (s, Nothing)
+            | txReady -> (e {eEmit = next}, Just b)
+            | otherwise -> (e, Nothing)
   ESnap snap -> case snap of
     SnCrc r i ->
       let byte = (bitCoerce word :: Vec 4 Byte) !! (3 - i) -- little-endian byte i
@@ -475,19 +521,19 @@ emit txReady word s@State {..} = case sEmit of
             | i /= maxBound = SnCrc r (i + 1)
             | r /= maxBound = SnCrc (r + 1) 0
             | otherwise = SnLetter
-       in (s {sSnapCrc = crc8Step sSnapCrc byte, sEmit = ESnap next}, Nothing)
+       in (e {eSnapCrc = crc8Step eSnapCrc byte, eEmit = ESnap next}, Nothing)
     SnLetter -> send 83 (ESnap SnSpace0)
     SnSpace0 -> send 32 (ESnap (SnSeq 0 False))
     SnSeq i started ->
-      let d = sShadowSeq !! i
+      let d = eSeqDigits !! i
           printing = started || d /= 0 || i == maxBound
           next = ESnap (if i == maxBound then SnSpace1 else SnSeq (i + 1) printing)
        in if not printing
-            then (s {sEmit = next}, Nothing)
+            then (e {eEmit = next}, Nothing)
             else send (48 + fromIntegral d) next
     SnSpace1 -> send 32 (ESnap SnCrcHi)
-    SnCrcHi -> send (hexDigit (resize (sSnapCrc `shiftR` 4))) (ESnap SnCrcLo)
-    SnCrcLo -> send (hexDigit (resize sSnapCrc)) (ESnap SnSpace2)
+    SnCrcHi -> send (hexDigit (resize (eSnapCrc `shiftR` 4))) (ESnap SnCrcLo)
+    SnCrcLo -> send (hexDigit (resize eSnapCrc)) (ESnap SnSpace2)
     SnSpace2 -> send 32 (ESnap (SnHex 0 0))
     SnHex r k ->
       let nib = (bitCoerce word :: Vec 8 (Unsigned 4)) !! k -- most significant first
@@ -496,11 +542,20 @@ emit txReady word s@State {..} = case sEmit of
             | r /= maxBound = SnHex (r + 1) 0
             | otherwise = SnNewline
        in send (hexDigit nib) (ESnap next)
-    SnNewline -> send newline EIdle
+    SnNewline
+      | txReady ->
+          ( e
+              { eEmit = EIdle,
+                eSeq = eSeq + 1,
+                eSeqDigits = if eSeq == maxBound then repeat 0 else incDecimal eSeqDigits
+              },
+            Just newline
+          )
+      | otherwise -> (e, Nothing)
   where
     send b next
-      | txReady = (s {sEmit = next}, Just b)
-      | otherwise = (s, Nothing)
+      | txReady = (e {eEmit = next}, Just b)
+      | otherwise = (e, Nothing)
 
 -- UART -------------------------------------------------------------------------
 
@@ -573,12 +628,14 @@ psramRegs PsramConfig {..} serialRx = serialTx
   where
     received = register Nothing (uartRx clocksPerBit (register high (register high serialRx)))
     (serialTx, txReady) = uartTx clocksPerBit txByte
-    (txByte, psramPort, slotPort, shadowPort) =
-      unbundle (mealy (psramStep timeoutCycles) initialState (bundle (received, txReady, psramOut, slotOut, shadowOut)))
+    (toEmitter, psramPort, slotPort, shadowWr) =
+      unbundle (mealy (coreStep timeoutCycles) initialCore (bundle (received, quiet, psramOut, slotOut)))
+    -- quiet comes from the emitter's registers only, so this loop has a register in it
+    (txByte, shadowAddr, quiet) = unbundle (mealy emitStep initialEmitter (bundle (txReady, toEmitter, shadowOut)))
     ram port = let (addr, wr) = unbundle port in blockRam (repeat 0 :: Vec 96 Word32) addr wr
     psramOut = ram psramPort
     slotOut = ram slotPort
-    shadowOut = ram shadowPort
+    shadowOut = blockRam (repeat 0 :: Vec 96 Word32) shadowAddr shadowWr
 
 {-# ANN
   topEntity

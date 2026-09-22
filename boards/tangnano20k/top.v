@@ -9,8 +9,8 @@
 `default_nettype none
 
 module top #(
-    parameter integer FBDIV_SEL = 33,  // 102 MHz
-    parameter integer ODIV_SEL  = 8    // VCO = 816 MHz
+    parameter integer FBDIV_SEL = 31,  // 96 MHz
+    parameter integer ODIV_SEL  = 8    // VCO = 768 MHz
 ) (
     input  wire clk_27m,  // on-board 27 MHz oscillator
     input  wire btn_s1,   // S1, active high: resets the core

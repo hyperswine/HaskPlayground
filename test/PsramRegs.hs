@@ -270,8 +270,8 @@ decodeUart cpb = go
     go bs = case P.dropWhile (== high) bs of
       [] -> []
       bits ->
-        let at k = bits P.!! (cpb `P.div` 2 + cpb * k)
-            byte = P.foldr (\k acc -> if at (k + 1) == high then setBit acc k else acc) 0 [0 .. 7]
+        let bitAt k = bits P.!! (cpb `P.div` 2 + cpb * k)
+            byte = P.foldr (\k acc -> if bitAt (k + 1) == high then setBit acc k else acc) 0 [0 .. 7]
             rest = P.drop (cpb * 10 P.- cpb `P.div` 2) bits
          in if P.length bits < cpb * 10 then [] else byte : go rest
 
@@ -287,6 +287,24 @@ prop_uartEndToEnd = withTests 1 . property $ do
   annotate (P.unlines out)
   P.take 3 out === [bootText, snapshotLine 0 modelInit, snapshotLine 1 expected]
 
+-- 50 frames back to back at full line rate while snapshots stream out (the
+-- traffic an instant psramd burst produces): every snapshot stays complete.
+prop_uartBurst :: Property
+prop_uartBurst = withTests 1 . property $ do
+  let cpb = 4
+      cfg = PsramConfig {clocksPerBit = P.fromIntegral cpb, timeoutCycles = 100_000}
+      burst = P.concat [writeFrame (10 + P.fromIntegral i) (0x1000 + P.fromIntegral i) | i <- [0 .. 49 :: Int]]
+      -- start the burst while the boot snapshot is still being printed
+      rxBits = P.replicate 5_000 high P.++ P.concatMap (uartBits cpb) burst P.++ P.repeat high
+      txBits = sampleN @System 400_000 (psramRegs cfg (fromList rxBits))
+      out = P.lines (P.map (Char.chr . P.fromIntegral) (decodeUart cpb txBits))
+      snaps = [s' | Just s' <- P.map parseSnapshot out]
+      expected = P.foldr (\i -> Map.insert (10 + i) (0x1000 + P.fromIntegral i)) modelInit [0 .. 49]
+  annotate (P.unlines (P.map (P.take 60) out))
+  P.length out === 1 + P.length snaps -- nothing but the boot line and whole snapshots
+  [ok | (_, _, ok) <- snaps] === P.map (P.const True) snaps
+  (let (_, ws, _) = P.last snaps in ws) === Map.elems expected
+
 psramRegsGroup :: Group
 psramRegsGroup =
   Group
@@ -297,5 +315,6 @@ psramRegsGroup =
       ("verify failure sets ERR", prop_verifyFailure),
       ("stale partial frame dropped", prop_frameTimeout),
       ("lost messages reported", prop_lostMessages),
-      ("UART end to end", prop_uartEndToEnd)
+      ("UART end to end", prop_uartEndToEnd),
+      ("UART burst keeps snapshots whole", prop_uartBurst)
     ]
