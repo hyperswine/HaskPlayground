@@ -11,6 +11,7 @@ import System.Exit (exitFailure)
 import qualified SimpleRisc as SimpleRiscTests
 import qualified PsramRegs as PsramRegsTests
 import qualified NeoMusicTests
+import qualified NeoMusicScoreTests
 
 prop_example :: Property
 prop_example = property $ do
@@ -25,5 +26,6 @@ main = do
   exampleResult <- checkParallel $ Group "test" [("prop_example", prop_example)]
   simpleRiscResult <- checkParallel SimpleRiscTests.simpleRiscGroup
   neoMusicResult <- checkParallel NeoMusicTests.neoMusicGroup
+  scoreResult <- checkParallel NeoMusicScoreTests.scoreGroup
   psramRegsResult <- checkParallel PsramRegsTests.psramRegsGroup
-  unless (exampleResult && simpleRiscResult && neoMusicResult && psramRegsResult) exitFailure
+  unless (exampleResult && simpleRiscResult && neoMusicResult && psramRegsResult && scoreResult) exitFailure

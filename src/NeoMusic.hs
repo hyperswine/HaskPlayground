@@ -10,10 +10,10 @@ module NeoMusic
   , equalTemperament, freq, part, render
     -- * Synth patches
   , Wave(..), Osc(..), Envelope(..), Patch(..)
-  , basicPatch, pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
+  , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch, pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix
-  , samples, renderMix, writeWav, writeMix, writeAudio, demo
+  , samples, renderMix, renderTimelineMix, writeTimelineMix, writeWav, writeMix, writeAudio, demo
   ) where
 
 import Control.Monad (forM_, unless, when)
@@ -320,8 +320,7 @@ defaultMix :: Int -> Mix
 defaultMix rate = Mix rate noReverb 0 0.8 0 True
 
 tailOf :: Timbre -> Double
-tailOf (Synth p) = max 0.002 (release (ampEnvelope p))
-tailOf _ = 0
+tailOf = max 0.002 . release . ampEnvelope . patchOf
 
 -- | Mono samples (the stereo 'defaultMix' render averaged to one channel).
 samples :: Int -> Piece -> Either String [Double]
@@ -331,11 +330,20 @@ samples rate piece = do
 
 -- | Stereo render. Each note is synthesised only over its own span into
 -- left/right/send buffers; the send bus feeds the reverb, then the master stage.
--- Sine, Saw and Square keep their additive oscillators and 5/15 ms envelopes
--- (at most 64 harmonics below Nyquist); 'Synth' patches may ring past the note
--- by their release time. Base pitches at or above Nyquist are rejected.
+-- All timbres use the patch engine and may ring past the gate by their release
+-- time. Base pitches at or above Nyquist are rejected.
 renderMix :: Mix -> Piece -> Either String (VU.Vector Double, VU.Vector Double)
-renderMix mix piece = do
+renderMix mix piece = render piece >>= renderTimelineMix mix
+
+-- | Synthesize a validated physical timeline, shared by legacy pieces and scores.
+renderTimelineMix :: Mix -> Timeline -> Either String (VU.Vector Double, VU.Vector Double)
+renderTimelineMix mix (Timeline total ns) = do
+  unless (nonNegative total) (Left "timeline length must be finite and nonnegative")
+  forM_ ns $ \v -> do
+    unless (nonNegative (start v) && positive (duration v) && positive (hz v)
+            && unitRange (velocity v) && nonNegative (gain v) && nonNegative (send v)
+            && finite (pan v) && abs (pan v) <= 1) (Left "invalid timeline note")
+    validTimbre (sound v)
   let rate = mixRate mix
       fr = fromIntegral rate :: Double
       rv = mixReverb mix
@@ -345,10 +353,11 @@ renderMix mix piece = do
     (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
   unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
     (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
-  Timeline total ns <- render piece
   unless (all ((< fr / 2) . hz) ns) (Left "pitch reaches Nyquist frequency")
   let end = maximum (total : [start v + duration v + tailOf (sound v) | v <- ns]) + mixTail mix
-      len = ceiling (end * fr) :: Int
+  unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
+    (Left "rendered sample count exceeds platform range")
+  let len = ceiling (end * fr) :: Int
       (outL, outR) = runST $ do
         left <- MV.replicate len 0
         right <- MV.replicate len 0
@@ -360,7 +369,7 @@ renderMix mix piece = do
         let (wetL, wetR) = freeverb fr rv sendBus
             withWet dry w = if wet rv > 0 then VU.zipWith (+) dry w else dry
         pure (master mix (withWet dryL wetL) (withWet dryR wetR))
-  when (VU.any isNaN outL || VU.any isNaN outR) (Left "synthesis produced NaN")
+  when (VU.any (not . finite) outL || VU.any (not . finite) outR) (Left "synthesis produced a nonfinite sample")
   pure (outL, outR)
 
 type Buffer s = MV.MVector s Double
@@ -377,35 +386,23 @@ sampleRange :: Double -> Int -> Double -> Double -> (Int, Int)
 sampleRange fr len t0 t1 = (max 0 (ceiling (t0 * fr)), min len (ceiling (t1 * fr)))
 
 renderNote :: Double -> Word32 -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
-renderNote fr seed v left right sends = case sound v of
-  Synth p -> renderSynth fr seed v p left right sends
-  classic -> do
-    let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v)
-        amp = velocity v * gain v
-        (gl, gr) = panGains (pan v)
-    forM_ [i0 .. i1 - 1] $ \i -> do
-      let x = amp * classicWave fr classic (duration v) (hz v) (fromIntegral i / fr - start v)
-      addTo left i (x * gl)
-      addTo right i (x * gr)
-      addTo sends i (send v * x * (gl + gr) / 2)
+renderNote fr seed v = renderSynth fr seed v (patchOf (sound v))
 
-classicWave :: Double -> Timbre -> Double -> Double -> Double -> Double
-classicWave fr tone dur f t
-  | t < 0 || t >= dur = 0
-  | otherwise = envelope * shape
-  where
-    envelope = min 1 (t / 0.005) * min 1 ((dur - t) / 0.015)
-    phase = 2 * pi * f * t
-    harmonics = ceiling (min 65 (fr / (2 * f))) - 1 :: Int
-    partials step = go 1 0
-      where
-        go !k !acc
-          | k > harmonics = acc
-          | otherwise = go (k + step) (acc + sin (fromIntegral k * phase) / fromIntegral k)
-    shape = case tone of
-      Saw -> partials 1 / 2
-      Square -> partials 2 / 2
-      _ -> sin phase
+-- Legacy constructor names are presets, not a second synthesis implementation.
+patchOf :: Timbre -> Patch
+patchOf Sine = sinePatch
+patchOf Saw = sawPatch
+patchOf Square = squarePatch
+patchOf (Synth p) = p
+
+sinePatch, sawPatch, squarePatch, pianoPatch :: Patch
+sinePatch = basicPatch { oscillators = [Osc SineWave 0 1 1 0], ampEnvelope = Envelope 0.005 0 1 0.015 }
+sawPatch = sinePatch { oscillators = [Osc SawWave 0 1 1 0] }
+squarePatch = sinePatch { oscillators = [Osc SquareWave 0 1 1 0] }
+-- A synthesized piano-like preset, not a sampled acoustic piano.
+pianoPatch = basicPatch
+  { oscillators = [Osc SineWave 0 1 1 0, Osc SineWave 12 0.35 1 0, Osc SineWave 19 0.12 1 0]
+  , ampEnvelope = Envelope 0.002 1.2 0.15 0.15 }
 
 -- | Linear attack, exponential decay to sustain, quadratic release after the gate.
 adsr :: Envelope -> Double -> Double -> Double
@@ -628,6 +625,12 @@ writeWav path rate piece = do
 writeMix :: FilePath -> Mix -> Piece -> IO ()
 writeMix path mix piece = exportAs path $ \out -> do
   (l, r) <- either (ioError . userError) pure (renderMix mix piece)
+  pcmWav out (mixRate mix) [l, r]
+
+-- | Stereo timeline export for the unitless score API.
+writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMix path mix timeline = exportAs path $ \out -> do
+  (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
   pcmWav out (mixRate mix) [l, r]
 
 -- | Mono export: WAV is native; MP3 and FLAC use FFmpeg installed on PATH.

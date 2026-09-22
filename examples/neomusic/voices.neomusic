@@ -1,0 +1,5 @@
+tempo 100
+tuning 12 at C4
+instrument right = piano staff treble
+phrase x = x [x + 7]
+right: phrase [0 2 4 5] & [12:2 11:2 9:2 7:2]

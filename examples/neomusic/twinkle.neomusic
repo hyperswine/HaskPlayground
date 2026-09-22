@@ -1,0 +1,20 @@
+tempo 100
+tuning 12 at C4                 -- step 0 = middle C, one step = one semitone
+meter 4                         -- a VIEW parameter: bar length for engraving only
+key C                           -- a VIEW parameter: spelling hint (sharps/flats)
+
+instrument right = piano  staff treble
+instrument left  = piano  staff bass  gain 0.8
+
+a     = 0 0 7 7 9 9 7:2         -- n:d  -> d beats (default 1)
+b     = 5 5 4 4 2 2 0:2
+c     = 7 7 5 5 4 4 2:2
+I  = (-12 -5)                   -- C3 G3
+IV = (-7 -3)                    -- F3 A3
+V  = (-17 -10)                  -- G2 D3
+la = I:4 IV:2 I:2
+lb = IV:2 I:2 V:2 I:2
+lc = I:2 IV:2 I:2 V:2
+
+right: a b c c a b
+left:  la lb lc lc la lb        -- same shape as the right hand: structure is reuse

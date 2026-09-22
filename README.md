@@ -19,4 +19,4 @@ Building the Clash designs (including the SimpleRisc RV32I core) for the Tang Na
 
 ## NeoMusic
 
-An algebraic music prototype with WAV, MP3 and FLAC export. See [the runnable guide](examples/NeoMusic.md) and [design draft](neo-music-design.md).
+Algebraic scores with `.neomusic` authoring, WAV/MP3/FLAC audio, MIDI, numeric notation by default, and optional LilyPond/PDF piano sheets. Start with [the language and score guide](examples/NeoMusicLanguage.md), or see the [legacy audio guide](examples/NeoMusic.md) and [design draft](neo-music-design.md).

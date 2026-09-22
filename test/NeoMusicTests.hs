@@ -55,7 +55,7 @@ neoMusicGroup = Group "NeoMusic"
       let p = part (Tuning 440 2) (Tempo 60) Sine (n 0 <> rest)
       xs <- evalEither (samples 8000 p)
       length xs === 16000
-      assert (all (==0) (drop 8000 xs))
+      assert (all (==0) (drop 8120 xs))
       assert (maximum (map abs xs) <= 0.8)
       let crossings = length [() | (a,b) <- zip (take 8000 xs) (drop 1 (take 8000 xs)), a <= 0, b > 0]
       assert (abs (crossings - 440) <= 1)
@@ -78,7 +78,7 @@ neoMusicGroup = Group "NeoMusic"
       map send ns === [0.3, 0.3]
       xs <- evalEither (samples 8000 quietSecond)
       let peakIn a b = maximum (map abs (take (b - a) (drop a xs)))
-      assert (abs (peakIn 8000 16000 / peakIn 0 8000 - 0.5) < 1e-3)
+      assert (abs (peakIn 8400 16000 / peakIn 0 8000 - 0.5) < 1e-3)
       (l, r) <- evalEither (renderMix (defaultMix 8000) (Pan (-1) quietSecond))
       assert (VU.all (== 0) r && VU.any (/= 0) l))
   , ("reverb tails and synth releases", withTests 1 $ property $ do
@@ -87,8 +87,8 @@ neoMusicGroup = Group "NeoMusic"
           mix = (defaultMix 8000) {mixReverb = hall, mixTail = 1}
       (dryL, _) <- evalEither (renderMix mix blip)
       (wetL, wetR) <- evalEither (renderMix mix (Send 1 blip))
-      VU.length wetL === 16000
-      assert (VU.all (== 0) (VU.drop 8000 dryL))
+      VU.length wetL === 16120
+      assert (VU.all (== 0) (VU.drop 8120 dryL))
       assert (VU.any ((> 1e-3) . abs) (VU.drop 8400 wetL) && VU.any (/= 0) (VU.drop 8400 wetR))
       assert (VU.all (\x -> abs x <= 0.8) wetL)
       let synth = part t (Tempo 60) (Synth pluck {ampEnvelope = Envelope 0.01 0 1 0.5}) (n 0)

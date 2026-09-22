@@ -18,6 +18,16 @@ build-type:     Simple
 extra-source-files:
     README.md
     CHANGELOG.md
+    examples/NeoMusicLanguage.md
+    examples/neomusic/numeric-preview.neomusic
+    examples/neomusic/scale.neomusic
+    examples/neomusic/ties.neomusic
+    examples/neomusic/twinkle.neomusic
+    examples/neomusic/voices.neomusic
+    test/golden/neomusic/scale.ly
+    test/golden/neomusic/ties.ly
+    test/golden/neomusic/twinkle.ly
+    test/golden/neomusic/voices.ly
 
 source-repository head
   type: git
@@ -30,6 +40,11 @@ library
       MyData
       MyStuff
       NeoMusic
+      NeoMusic.Language
+      NeoMusic.Midi
+      NeoMusic.Numeric
+      NeoMusic.Score
+      NeoMusic.Sheet
       PsramRegs
       QuantUI
       SimpleRisc
@@ -284,6 +299,7 @@ test-suite haskplayground-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      NeoMusicScoreTests
       NeoMusicTests
       PsramRegs
       SimpleRisc

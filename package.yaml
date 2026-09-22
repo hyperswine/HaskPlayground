@@ -9,6 +9,9 @@ copyright:           "2025 Jasen Qin"
 extra-source-files:
 - README.md
 - CHANGELOG.md
+- examples/NeoMusicLanguage.md
+- examples/neomusic/*.neomusic
+- test/golden/neomusic/*.ly
 
 description:         Please see the README on GitHub at <https://github.com/githubuser/haskplayground#readme>
 

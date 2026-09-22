@@ -1,0 +1,5 @@
+-- Default reading view: literal integer steps, including zero and negatives.
+tempo 100
+tuning 12 at C4
+instrument melody = piano
+melody: 1 2 3 -1 0 (4 5 6) _ 2:2

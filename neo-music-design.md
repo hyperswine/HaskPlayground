@@ -184,3 +184,33 @@ Scrolls the current part's `voice` left to right (`1 2 -4 5 -2 0 0 0 …`) with 
 - Reproducing standard notation features (ties, slurs, dynamics markings) as primitives — express them via composition or views.
 - Tactile ergonomics of the key bed for expert performance; this is primarily a compositional/exploratory instrument.
 - Any music-theory knowledge in firmware.
+
+## 10. Default notation view (2026-09-22 clarification)
+
+The default output is the simple numeric notation itself:
+
+```text
+1 2 3 -1 0 (4 5 6) _ 2
+```
+
+Integers remain absolute steps from reference 0, including negative values.
+Parentheses group simultaneous pitches; `_` is a rest. No staff, drawn noteheads,
+clefs, key signatures, or barlines are part of the default view. Line wrapping is
+page layout only and must not imply a musical bar. Where rhythm must be shown,
+use the existing `:duration` suffix only when duration differs from one beat.
+Keep interpretation parameters beside the score, rather than replacing the
+numbers with traditional pitch names. Parallel voices use separate labeled lanes;
+ordinary text spacing does not imply aligned onsets across lanes. Dynamics remain
+in the source/performance and are omitted from the first reading view.
+
+A second, optional view combines the same numeric labels with flat horizontal
+bar-like marks above each event, visually closer to `==` than drawn noteheads.
+Chords still show their numeric grouping. This is a custom hybrid inspired by the
+bar-like appearance described for Dodeka, not a claim of Dodeka compatibility.
+The first preview uses equal-length double strokes at a common height, above
+pitched events only. It introduces no additional semantics. Whether width, height,
+stacking, or stroke count should carry rhythm or pitch information remains open.
+
+Traditional piano staff engraving is an optional interoperability view, not the
+default notation or the main design direction. The existing LilyPond/MIDI work
+remains useful without defining how NeoMusic normally looks.

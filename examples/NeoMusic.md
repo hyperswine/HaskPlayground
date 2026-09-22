@@ -1,5 +1,7 @@
 # NeoMusic: first playable implementation
 
+For the current score API, `.neomusic` files, MIDI and sheet music, see [NeoMusicLanguage.md](NeoMusicLanguage.md). This page documents the older API; legacy simple timbres now use patch presets with a 15 ms release.
+
 `src/NeoMusic.hs` implements the sequence, interpretation and piece layers of
 `neo-music-design.md`. `app/neo-music/Main.hs` exports a 6.5-second demonstration:
 a motif and its transposed reversal over a bass part, then a quarter-tone phrase.
