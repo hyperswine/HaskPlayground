@@ -5,19 +5,21 @@
 #   boards/tangnano20k/build.sh load       also load it into FPGA SRAM (not flash)
 #
 # Environment:
-#   FREQ_MHZ  core clock, a multiple of 3 (PLL: 3 MHz x integer).  Default 102.
+#   FREQ_MHZ  core clock, a multiple of 3 (PLL: 3 MHz x integer).  Default 96,
+#             which passes every board test; 102 works with some placements
+#             but not others, and 108 fails.
 #             The UART then runs at FREQ_MHZ * 1e6 / 868 baud.
-#   MARGIN    place and route for FREQ_MHZ * MARGIN (default 1.25).  nextpnr's
-#             Gowin timing model is optimistic: a design it passed at 52 MHz
-#             failed on the chip at 51 MHz.
+#   MARGIN    place and route for FREQ_MHZ * MARGIN (default 1.2).  nextpnr's
+#             Gowin timing model is optimistic: designs it passed at 52 and
+#             126 MHz failed on the chip at 51 and 108 MHz.
 #   SEEDS     placement seeds to try, first passing one wins.  Default 1..8.
 #   ALLOW_FAIL=1  write a bitstream even if timing fails (for overclocking
 #             experiments on the board).
 #   OSS_CAD_SUITE if the suite is not at ~/Documents/Libs/oss-cad-suite.
 set -euo pipefail
 
-freq="${FREQ_MHZ:-102}"
-margin="${MARGIN:-1.25}"
+freq="${FREQ_MHZ:-96}"
+margin="${MARGIN:-1.2}"
 seeds="${SEEDS:-1 2 3 4 5 6 7 8}"
 allow_fail=()
 if [[ "${ALLOW_FAIL:-}" == "1" ]]; then allow_fail=(--timing-allow-fail); fi
