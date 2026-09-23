@@ -199,9 +199,12 @@ clefs, key signatures, or barlines are part of the default view. Line wrapping i
 page layout only and must not imply a musical bar. Where rhythm must be shown,
 use the existing `:duration` suffix only when duration differs from one beat.
 Keep interpretation parameters beside the score, rather than replacing the
-numbers with traditional pitch names. Parallel voices use separate labeled lanes;
-ordinary text spacing does not imply aligned onsets across lanes. Dynamics remain
-in the source/performance and are omitted from the first reading view.
+numbers with traditional pitch names: the view prints a legend (tempo, what step
+0 is, and for 12-TET the key each used step falls on) above the lanes. Parallel
+voices use separate labeled lanes, aligned in columns: every onset in any lane
+starts a column, so simultaneous events stack vertically. A column is a moment,
+not a bar, and column width is typographic, not proportional to time. Dynamics
+remain in the source/performance and are omitted from the first reading view.
 
 A second, optional view combines the same numeric labels with flat horizontal
 bar-like marks above each event, visually closer to `==` than drawn noteheads.

@@ -1,0 +1,488 @@
+{-# LANGUAGE BangPatterns #-}
+-- | The synthesis engine. It knows only Hz, seconds and patches: no steps,
+-- beats, scores or pieces. Every front end lowers to a 'Timeline' first.
+module NeoMusic.Audio
+  ( -- * Patches
+    Wave(..), Osc(..), Envelope(..), Patch(..), validPatch
+  , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch
+  , pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
+    -- * Physical timeline
+  , Note(..), Timeline(..)
+    -- * Mixing and export
+  , Reverb(..), Mix(..), noReverb, hall, defaultMix
+  , renderTimelineMix, writeTimelineMix, pcmWav, exportAs
+  ) where
+
+import Control.Monad (forM_, unless, when)
+import Control.Monad.ST (ST, runST)
+import Data.Bits (shiftL, shiftR, xor)
+import qualified Data.ByteString.Lazy as BL
+import Data.ByteString.Builder
+import Data.Int (Int16)
+import qualified Data.Vector.Unboxed as VU
+import qualified Data.Vector.Unboxed.Mutable as MV
+import Data.Word (Word32)
+import System.Directory (findExecutable)
+import System.FilePath (takeExtension)
+import System.IO (hClose)
+import System.IO.Temp (withSystemTempFile)
+import System.Process (callProcess)
+
+data Wave = SineWave | SawWave | SquareWave | TriangleWave | NoiseWave deriving (Eq, Show)
+
+-- | One oscillator of a patch: waveform, pitch offset in semitones, gain, and a
+-- unison voice count whose detune spreads across 'detuneCents' in total.
+data Osc = Osc
+  { wave :: Wave, semitones :: Double, oscGain :: Double, unison :: Int, detuneCents :: Double }
+  deriving (Eq, Show)
+
+-- | Attack, decay and release in seconds; sustain level in 0..1.
+data Envelope = Envelope { attack :: Double, decay :: Double, sustain :: Double, release :: Double }
+  deriving (Eq, Show)
+
+-- | Subtractive voice: oscillators, resonant low-pass, optional high-pass, amp envelope.
+-- The low-pass cutoff in Hz at time t is
+--
+-- > cutoff * 2 ** (filterAmount * filterEnvelope t + velocityToCutoff * velocity)
+-- >        * (pitch / 261.63) ** keyTrack
+--
+-- 'pitchDrop' semitones are added at onset and decay with time constant 'pitchTime'.
+-- Unison voices are spread across the stereo field by 'stereoWidth' (0..1).
+data Patch = Patch
+  { oscillators :: [Osc]
+  , ampEnvelope :: Envelope
+  , cutoff :: Double, resonance :: Double, keyTrack :: Double
+  , filterEnvelope :: Envelope, filterAmount :: Double, velocityToCutoff :: Double
+  , highpass :: Double
+  , pitchDrop :: Double, pitchTime :: Double
+  , stereoWidth :: Double
+  } deriving (Eq, Show)
+
+data Note = Note
+  { start :: Double, hz :: Double, duration :: Double, sound :: Patch
+  , velocity :: Double, gain :: Double, pan :: Double, send :: Double }
+  deriving (Eq, Show)
+data Timeline = Timeline { seconds :: Double, notes :: [Note] } deriving (Eq, Show)
+
+finite, positive, nonNegative, unitRange :: Double -> Bool
+finite x = not (isNaN x || isInfinite x)
+positive x = finite x && x > 0
+nonNegative x = finite x && x >= 0
+unitRange x = nonNegative x && x <= 1
+
+validPatch :: Patch -> Either String ()
+validPatch p = do
+  let env (Envelope a d s r) = all nonNegative [a, d, r] && unitRange s
+      oscOk (Osc _ st g u c) = finite st && nonNegative g && u >= 1 && nonNegative c
+  unless (not (null (oscillators p)) && all oscOk (oscillators p))
+    (Left "patch needs oscillators with nonnegative gain and spread, and unison >= 1")
+  unless (env (ampEnvelope p) && env (filterEnvelope p))
+    (Left "envelope times must be nonnegative and sustain within 0..1")
+  unless (positive (cutoff p) && nonNegative (resonance p) && resonance p < 1
+          && all finite [keyTrack p, filterAmount p, velocityToCutoff p, pitchDrop p]
+          && nonNegative (highpass p) && unitRange (stereoWidth p))
+    (Left "invalid patch filter, pitch or stereo settings")
+  unless (pitchDrop p == 0 || positive (pitchTime p))
+    (Left "pitchTime must be positive when pitchDrop is set")
+
+-- Patches ---------------------------------------------------------------------
+
+-- | Single saw, open filter, organ-like envelope: a starting point for record updates.
+basicPatch :: Patch
+basicPatch = Patch
+  { oscillators = [Osc SawWave 0 1 1 0]
+  , ampEnvelope = Envelope 0.005 0 1 0.05
+  , cutoff = 20000, resonance = 0, keyTrack = 0
+  , filterEnvelope = Envelope 0.001 0 0 0.05, filterAmount = 0, velocityToCutoff = 0
+  , highpass = 0, pitchDrop = 0, pitchTime = 0.05, stereoWidth = 0 }
+
+-- | Bright plucked saw; velocity opens the filter.
+pluck :: Patch
+pluck = basicPatch
+  { oscillators = [Osc SawWave 0 1 3 14, Osc SquareWave 12 0.25 1 0]
+  , ampEnvelope = Envelope 0.002 0.4 0 0.3
+  , cutoff = 450, resonance = 0.3, keyTrack = 0.5
+  , filterEnvelope = Envelope 0.001 0.2 0 0.2, filterAmount = 3.5, velocityToCutoff = 1.2
+  , stereoWidth = 0.6 }
+
+-- | Seven detuned saws plus a sub-octave, slow attack, wide stereo.
+supersaw :: Patch
+supersaw = basicPatch
+  { oscillators = [Osc SawWave 0 1 7 38, Osc SawWave (-12) 0.35 1 0]
+  , ampEnvelope = Envelope 0.4 0.6 0.8 1.2
+  , cutoff = 900, resonance = 0.15, keyTrack = 0.3
+  , filterEnvelope = Envelope 0.5 1.5 0.4 1, filterAmount = 1.5, velocityToCutoff = 2
+  , stereoWidth = 1 }
+
+-- | Two slowly beating saws over a sine sub, low-passed.
+reeseBass :: Patch
+reeseBass = basicPatch
+  { oscillators = [Osc SawWave 0 1 2 22, Osc SineWave (-12) 0.8 1 0]
+  , ampEnvelope = Envelope 0.005 0.3 0.8 0.08
+  , cutoff = 160, resonance = 0.25
+  , filterEnvelope = Envelope 0.002 0.25 0 0.1, filterAmount = 2.5, velocityToCutoff = 1
+  , stereoWidth = 0.3 }
+
+subBass :: Patch
+subBass = basicPatch
+  { oscillators = [Osc SineWave 0 1 1 0, Osc TriangleWave 0 0.12 1 0]
+  , ampEnvelope = Envelope 0.01 0 1 0.1 }
+
+-- | Sine with a fast pitch drop: tune the note to the body frequency (~40-60 Hz).
+kick :: Patch
+kick = basicPatch
+  { oscillators = [Osc SineWave 0 1 1 0]
+  , ampEnvelope = Envelope 0.001 0.35 0 0.05
+  , pitchDrop = 36, pitchTime = 0.035 }
+
+-- | Noise burst over a pitched triangle body.
+snare :: Patch
+snare = basicPatch
+  { oscillators = [Osc NoiseWave 0 1 2 0, Osc TriangleWave 0 0.6 1 0]
+  , ampEnvelope = Envelope 0.001 0.22 0 0.08
+  , cutoff = 8000, highpass = 180, pitchDrop = 7, pitchTime = 0.03, stereoWidth = 0.3 }
+
+-- | Closed hi-hat: short high-passed noise (pitch is ignored).
+hat :: Patch
+hat = basicPatch
+  { oscillators = [Osc NoiseWave 0 1 2 0]
+  , ampEnvelope = Envelope 0.001 0.05 0 0.03
+  , highpass = 7000, stereoWidth = 0.4 }
+
+-- | Noise swell whose resonant filter sweeps up over about four seconds.
+noiseSweep :: Patch
+noiseSweep = basicPatch
+  { oscillators = [Osc NoiseWave 0 1 2 0]
+  , ampEnvelope = Envelope 3 0 1 0.3
+  , cutoff = 250, resonance = 0.55
+  , filterEnvelope = Envelope 4 0 1 0.3, filterAmount = 5.5
+  , highpass = 120, stereoWidth = 1 }
+
+sinePatch, sawPatch, squarePatch, pianoPatch :: Patch
+sinePatch = basicPatch { oscillators = [Osc SineWave 0 1 1 0], ampEnvelope = Envelope 0.005 0 1 0.015 }
+sawPatch = sinePatch { oscillators = [Osc SawWave 0 1 1 0] }
+squarePatch = sinePatch { oscillators = [Osc SquareWave 0 1 1 0] }
+-- A synthesized piano-like preset, not a sampled acoustic piano.
+pianoPatch = basicPatch
+  { oscillators = [Osc SineWave 0 1 1 0, Osc SineWave 12 0.35 1 0, Osc SineWave 19 0.12 1 0]
+  , ampEnvelope = Envelope 0.002 1.2 0.15 0.15 }
+
+-- Mixing ----------------------------------------------------------------------
+
+-- | Stereo Freeverb on the send bus. 'wet' 1/3 is Freeverb's default level.
+data Reverb = Reverb
+  { roomSize :: Double, damping :: Double, width :: Double, wet :: Double, preDelay :: Double }
+  deriving (Eq, Show)
+
+-- | Render settings. With 'mixNormalize' the master is scaled so its peak is
+-- 'mixPeak'; 'mixDrive' > 0 adds tanh saturation before that final scaling.
+-- 'mixTail' seconds are appended after the last release, for reverb decay.
+data Mix = Mix
+  { mixRate :: Int, mixReverb :: Reverb, mixDrive :: Double
+  , mixPeak :: Double, mixTail :: Double, mixNormalize :: Bool }
+  deriving (Eq, Show)
+
+noReverb :: Reverb
+noReverb = Reverb 0.5 0.5 1 0 0
+
+hall :: Reverb
+hall = Reverb { roomSize = 0.85, damping = 0.4, width = 1, wet = 0.4, preDelay = 0.02 }
+
+-- | Dry, normalised to a 0.8 peak, no tail.
+defaultMix :: Int -> Mix
+defaultMix rate = Mix rate noReverb 0 0.8 0 True
+
+tailOf :: Patch -> Double
+tailOf = max 0.002 . release . ampEnvelope
+
+-- | Stereo render. Each note is synthesised only over its own span into
+-- left/right/send buffers; the send bus feeds the reverb, then the master stage.
+-- Notes may ring past the gate by their release time. Base pitches at or above
+-- Nyquist are rejected.
+-- | Synthesize a validated physical timeline, shared by legacy pieces and scores.
+renderTimelineMix :: Mix -> Timeline -> Either String (VU.Vector Double, VU.Vector Double)
+renderTimelineMix mix (Timeline total ns) = do
+  unless (nonNegative total) (Left "timeline length must be finite and nonnegative")
+  forM_ ns $ \v -> do
+    unless (nonNegative (start v) && positive (duration v) && positive (hz v)
+            && unitRange (velocity v) && nonNegative (gain v) && nonNegative (send v)
+            && finite (pan v) && abs (pan v) <= 1) (Left "invalid timeline note")
+    validPatch (sound v)
+  let rate = mixRate mix
+      fr = fromIntegral rate :: Double
+      rv = mixReverb mix
+  unless (rate >= 8000 && rate <= 192000) (Left "sample rate must be 8000..192000")
+  unless (all unitRange [roomSize rv, damping rv, width rv]
+          && nonNegative (wet rv) && nonNegative (preDelay rv))
+    (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
+  unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
+    (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
+  unless (all ((< fr / 2) . hz) ns) (Left "pitch reaches Nyquist frequency")
+  let end = maximum (total : [start v + duration v + tailOf (sound v) | v <- ns]) + mixTail mix
+  unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
+    (Left "rendered sample count exceeds platform range")
+  let len = ceiling (end * fr) :: Int
+      (outL, outR) = runST $ do
+        left <- MV.replicate len 0
+        right <- MV.replicate len 0
+        sends <- MV.replicate len 0
+        forM_ (zip [1 ..] ns) $ \(seed, v) -> renderNote fr seed v left right sends
+        dryL <- VU.unsafeFreeze left
+        dryR <- VU.unsafeFreeze right
+        sendBus <- VU.unsafeFreeze sends
+        let (wetL, wetR) = freeverb fr rv sendBus
+            withWet dry w = if wet rv > 0 then VU.zipWith (+) dry w else dry
+        pure (master mix (withWet dryL wetL) (withWet dryR wetR))
+  when (VU.any (not . finite) outL || VU.any (not . finite) outR) (Left "synthesis produced a nonfinite sample")
+  pure (outL, outR)
+
+type Buffer s = MV.MVector s Double
+
+addTo :: Buffer s -> Int -> Double -> ST s ()
+addTo buf i x = MV.unsafeModify buf (+ x) i
+{-# INLINE addTo #-}
+
+-- | Equal-power pan gains, normalised so the centre is unity on both sides.
+panGains :: Double -> (Double, Double)
+panGains x = (sqrt 2 * cos a, sqrt 2 * sin a) where a = (x + 1) * pi / 4
+
+sampleRange :: Double -> Int -> Double -> Double -> (Int, Int)
+sampleRange fr len t0 t1 = (max 0 (ceiling (t0 * fr)), min len (ceiling (t1 * fr)))
+
+renderNote :: Double -> Word32 -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderNote fr seed v = renderSynth fr seed v (sound v)
+
+-- | Linear attack, exponential decay to sustain, quadratic release after the gate.
+adsr :: Envelope -> Double -> Double -> Double
+adsr (Envelope a d s r) gate t
+  | t < 0 = 0
+  | t < gate = held t
+  | t < gate + r' = let u = (t - gate) / r' in held gate * (1 - u) * (1 - u)
+  | otherwise = 0
+  where
+    a' = max 0.001 a
+    r' = max 0.002 r
+    held x
+      | x < a' = x / a'
+      | d <= 0 = s
+      | otherwise = s + (1 - s) * exp (-4.6 * (x - a') / d)
+
+renderSynth :: Double -> Word32 -> Note -> Patch -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderSynth fr seed v p left right sends = do
+  let voices =
+        [ ((waveCode (wave o), 2 ** ((semitones o + detuneCents o * (x - 0.5) / 100) / 12)
+          , oscGain o / sqrt (fromIntegral (unison o)), vl, vr), phase0)
+        | o <- oscillators p
+        , j <- [0 .. unison o - 1]
+        , let x = if unison o == 1 then 0.5 else fromIntegral j / fromIntegral (unison o - 1) :: Double
+              (vl, vr) = panGains (stereoWidth p * (2 * x - 1))
+              phase0 = if unison o == 1 then 0 else wrap (fromIntegral j * 0.618034 + 0.1)
+        ]
+      table = VU.fromList (map fst voices)
+      nv = VU.length table
+  phases <- VU.thaw (VU.fromList (map snd voices))
+  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + tailOf p)
+      amp = velocity v * gain v
+      (gl, gr) = panGains (pan v)
+      lowpassOn = cutoff p < 0.45 * fr || filterAmount p > 0 || velocityToCutoff p > 0
+      kq = max 0.05 (sqrt 2 * (1 - resonance p))
+      hpG = tan (pi * min (0.45 * fr) (highpass p) / fr)
+      oscillate !j !pitch !accL !accR !rng
+        | j >= nv = pure (accL, accR, rng)
+        | otherwise = do
+            let (code, mult, g, vl, vr) = VU.unsafeIndex table j
+                dt = min 0.49 (pitch * mult / fr)
+                rng' = if code == 4 then xorshift rng else rng
+            ph <- MV.unsafeRead phases j
+            let s = oscSample code ph dt rng'
+            MV.unsafeWrite phases j (wrap (ph + dt))
+            oscillate (j + 1) pitch (accL + g * vl * s) (accR + g * vr * s) rng'
+      go !i !l1 !l2 !r1 !r2 !h1 !h2 !h3 !h4 !rng
+        | i >= i1 = pure ()
+        | otherwise = do
+            let t = fromIntegral i / fr - start v
+                pitch
+                  | pitchDrop p == 0 = hz v
+                  | otherwise = hz v * 2 ** (pitchDrop p * exp (-t / pitchTime p) / 12)
+            (oscL, oscR, rng') <- oscillate 0 pitch 0 0 rng
+            let fc = cutoff p * (pitch / 261.63) ** keyTrack p
+                     * 2 ** (filterAmount p * adsr (filterEnvelope p) (duration v) t
+                             + velocityToCutoff p * velocity v)
+                lpG = tan (pi * min (0.45 * fr) fc / fr)
+                (lowL, l1', l2') = if lowpassOn then lowpass lpG kq oscL l1 l2 else (oscL, l1, l2)
+                (lowR, r1', r2') = if lowpassOn then lowpass lpG kq oscR r1 r2 else (oscR, r1, r2)
+                (outL, h1', h2') = if highpass p > 0 then highpassed hpG lowL h1 h2 else (lowL, h1, h2)
+                (outR, h3', h4') = if highpass p > 0 then highpassed hpG lowR h3 h4 else (lowR, h3, h4)
+                e = amp * adsr (ampEnvelope p) (duration v) t
+                yl = e * gl * outL
+                yr = e * gr * outR
+            addTo left i yl
+            addTo right i yr
+            addTo sends i (send v * (yl + yr) / 2)
+            go (i + 1) l1' l2' r1' r2' h1' h2' h3' h4' rng'
+      seed0 = (seed * 2654435761) `xor` 0x9E3779B9
+  go i0 0 0 0 0 0 0 0 0 (if seed0 == 0 then 1 else seed0)
+
+wrap :: Double -> Double
+wrap x = x - fromIntegral (floor x :: Int)
+{-# INLINE wrap #-}
+
+waveCode :: Wave -> Int
+waveCode w = case w of
+  SineWave -> 0
+  SawWave -> 1
+  SquareWave -> 2
+  TriangleWave -> 3
+  NoiseWave -> 4
+
+xorshift :: Word32 -> Word32
+xorshift x0 = x3
+  where
+    x1 = x0 `xor` (x0 `shiftL` 13)
+    x2 = x1 `xor` (x1 `shiftR` 17)
+    x3 = x2 `xor` (x2 `shiftL` 5)
+
+-- | Band-limited step correction for saw/square discontinuities.
+polyBlep :: Double -> Double -> Double
+polyBlep t dt
+  | t < dt = let x = t / dt in x + x - x * x - 1
+  | t > 1 - dt = let x = (t - 1) / dt in x * x + x + x + 1
+  | otherwise = 0
+{-# INLINE polyBlep #-}
+
+oscSample :: Int -> Double -> Double -> Word32 -> Double
+oscSample code ph dt rng = case code of
+  0 -> sin (2 * pi * ph)
+  1 -> 2 * ph - 1 - polyBlep ph dt
+  2 -> (if ph < 0.5 then 1 else -1) + polyBlep ph dt - polyBlep (wrap (ph + 0.5)) dt
+  3 -> 4 * abs (ph - 0.5) - 1
+  _ -> fromIntegral rng / 2147483647.5 - 1
+{-# INLINE oscSample #-}
+
+-- | Topology-preserving state-variable filter (Simper): returns band, low and new state.
+svf :: Double -> Double -> Double -> Double -> Double -> (Double, Double, Double, Double)
+svf g k x ic1 ic2 = (v1, v2, 2 * v1 - ic1, 2 * v2 - ic2)
+  where
+    a1 = 1 / (1 + g * (g + k))
+    a2 = g * a1
+    a3 = g * a2
+    v3 = x - ic2
+    v1 = a1 * ic1 + a2 * v3
+    v2 = ic2 + a2 * ic1 + a3 * v3
+{-# INLINE svf #-}
+
+lowpass :: Double -> Double -> Double -> Double -> Double -> (Double, Double, Double)
+lowpass g k x ic1 ic2 = let (_, low, s1, s2) = svf g k x ic1 ic2 in (low, s1, s2)
+{-# INLINE lowpass #-}
+
+highpassed :: Double -> Double -> Double -> Double -> (Double, Double, Double)
+highpassed g x ic1 ic2 =
+  let k = sqrt 2
+      (band, low, s1, s2) = svf g k x ic1 ic2
+  in (x - k * band - low, s1, s2)
+{-# INLINE highpassed #-}
+
+-- | Freeverb: eight parallel damped combs into four series allpasses per
+-- channel, the right channel's delays offset by 23 samples for width.
+freeverb :: Double -> Reverb -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
+freeverb fr rv input =
+  ( VU.zipWith (\a b -> a * wet1 + b * wet2) outL outR
+  , VU.zipWith (\a b -> b * wet1 + a * wet2) outL outR )
+  where
+    delaySamples = round (preDelay rv * fr) :: Int
+    fed = VU.generate (VU.length input) $ \i ->
+      if i >= delaySamples then 0.015 * VU.unsafeIndex input (i - delaySamples) else 0
+    tuned :: Int -> Int
+    tuned x = max 1 (round (fromIntegral x * fr / 44100))
+    feedback = roomSize rv * 0.28 + 0.7
+    damp = damping rv * 0.4
+    channel offset =
+      let combs = [comb feedback damp (tuned (c + offset)) fed
+                  | c <- [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617]]
+      in foldl (\acc a -> allpass (tuned (a + offset)) acc)
+               (foldr1 (VU.zipWith (+)) combs) [556, 441, 341, 225]
+    outL = channel 0
+    outR = channel 23
+    wet1 = 3 * wet rv * (width rv / 2 + 0.5)
+    wet2 = 3 * wet rv * ((1 - width rv) / 2)
+
+comb :: Double -> Double -> Int -> VU.Vector Double -> VU.Vector Double
+comb fb damp size xs = VU.create $ do
+  buf <- MV.replicate size 0
+  out <- MV.new (VU.length xs)
+  let go !i !idx !store
+        | i >= VU.length xs = pure out
+        | otherwise = do
+            y <- MV.unsafeRead buf idx
+            let store' = y * (1 - damp) + store * damp
+            MV.unsafeWrite buf idx (VU.unsafeIndex xs i + store' * fb)
+            MV.unsafeWrite out i y
+            go (i + 1) (if idx + 1 == size then 0 else idx + 1) store'
+  go 0 0 0
+
+allpass :: Int -> VU.Vector Double -> VU.Vector Double
+allpass size xs = VU.create $ do
+  buf <- MV.replicate size 0
+  out <- MV.new (VU.length xs)
+  let go !i !idx
+        | i >= VU.length xs = pure out
+        | otherwise = do
+            y <- MV.unsafeRead buf idx
+            let x = VU.unsafeIndex xs i
+            MV.unsafeWrite buf idx (x + y * 0.5)
+            MV.unsafeWrite out i (y - x)
+            go (i + 1) (if idx + 1 == size then 0 else idx + 1)
+  go 0 0
+
+master :: Mix -> VU.Vector Double -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
+master mix l r
+  | not (mixNormalize mix) = (VU.map saturate l, VU.map saturate r)
+  | peakIn == 0 = (l, r)
+  | otherwise = (VU.map scaled l, VU.map scaled r)
+  where
+    peakOf = VU.foldl' (\m x -> max m (abs x)) 0
+    d = mixDrive mix
+    saturate x = if d > 0 then tanh (d * x) / tanh d else x
+    peakIn = max (peakOf l) (peakOf r)
+    scaled x = mixPeak mix * saturate (x / peakIn)
+
+-- Export ----------------------------------------------------------------------
+
+-- | Interleaved little-endian PCM16 WAV, one vector per channel.
+pcmWav :: FilePath -> Int -> [VU.Vector Double] -> IO ()
+pcmWav path rate channels = do
+  let chans = length channels
+      frames = if null channels then 0 else minimum (map VU.length channels)
+      size = toInteger frames * toInteger chans * 2
+  when (size > 4294967259) (ioError (userError "audio exceeds RIFF WAV size limit"))
+  let header = string8 "RIFF" <> word32LE (fromInteger (36 + size)) <> string8 "WAVEfmt "
+        <> word32LE 16 <> word16LE 1 <> word16LE (fromIntegral chans) <> word32LE (fromIntegral rate)
+        <> word32LE (fromIntegral (rate * chans * 2)) <> word16LE (fromIntegral (chans * 2))
+        <> word16LE 16 <> string8 "data" <> word32LE (fromInteger size)
+      pcm x = int16LE (round (max (-1) (min 1 x) * 32767) :: Int16)
+      frame i = foldMap (\ch -> pcm (VU.unsafeIndex ch i)) channels
+  BL.writeFile path (toLazyByteString (header <> foldMap frame [0 .. frames - 1]))
+
+
+-- | Stereo timeline export for the unitless score API.
+writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
+writeTimelineMix path mix timeline = exportAs path $ \out -> do
+  (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
+  pcmWav out (mixRate mix) [l, r]
+
+
+
+-- | Process arguments are passed directly (no shell interpolation); existing
+-- outputs are replaced.
+exportAs :: FilePath -> (FilePath -> IO ()) -> IO ()
+exportAs path writeTo = case takeExtension path of
+  ".wav" -> writeTo path
+  extension | extension `elem` [".mp3", ".flac"] -> do
+    executable <- findExecutable "ffmpeg"
+    ffmpeg <- maybe (ioError (userError "MP3/FLAC export requires ffmpeg on PATH")) pure executable
+    withSystemTempFile "neo-music.wav" $ \tmp handle -> do
+      hClose handle
+      writeTo tmp
+      callProcess ffmpeg (["-v", "error", "-y", "-i", tmp] ++
+        (if extension == ".mp3" then ["-codec:a", "libmp3lame", "-q:a", "2"] else []) ++ [path])
+  _ -> ioError (userError "supported extensions: .wav, .mp3, .flac")

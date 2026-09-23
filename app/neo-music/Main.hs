@@ -4,7 +4,7 @@ import qualified Data.ByteString.Lazy as BL
 import qualified NeoMusic as A
 import NeoMusic.Language
 import NeoMusic.Midi (midi)
-import NeoMusic.Numeric (numeric, numericHtml)
+import NeoMusic.Numeric (numericHtml, numericPage)
 import NeoMusic.Sheet (engrave)
 import qualified NeoMusic.Score as S
 import System.Environment (getArgs)
@@ -21,7 +21,7 @@ main = do
     [path] | takeExtension path `elem` [".wav",".mp3",".flac"] -> A.writeAudio path 44100 A.demo
     [command,input,"-o",output] -> run command input output False
     ["staff",input,"-o",output,"--pdf"] -> run "staff" input output True
-    ["sheet",input] -> readDocument input >>= orDie . numeric . score >>= putStr
+    ["sheet",input] -> readDocument input >>= \doc -> orDie (numericPage (performance doc) (score doc)) >>= putStr
     ["check",input] -> do
       doc <- readDocument input
       timeline <- orDie (S.render (performance doc) (score doc))
@@ -41,11 +41,11 @@ run command input output pdf = do
     "play" -> S.writeAudio output perf music
     "midi" -> orDie (midi perf music) >>= BL.writeFile output
     "sheet" -> case takeExtension output of
-      ".txt" -> orDie (numeric music) >>= writeFile output
-      ".html" -> orDie (numericHtml False music) >>= writeFile output
+      ".txt" -> orDie (numericPage perf music) >>= writeFile output
+      ".html" -> orDie (numericHtml False perf music) >>= writeFile output
       _ -> die "numeric sheet output must be .txt or .html; use staff for LilyPond/PDF"
     "hybrid" -> if takeExtension output == ".html"
-      then orDie (numericHtml True music) >>= writeFile output
+      then orDie (numericHtml True perf music) >>= writeFile output
       else die "hybrid preview output must be .html"
     "staff" -> do
       if takeExtension output /= ".ly" then die "staff output must have .ly extension" else pure ()

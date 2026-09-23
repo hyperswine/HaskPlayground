@@ -8,7 +8,8 @@ import Data.ByteString.Builder
 import Data.List (nub, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Ratio (denominator, numerator)
-import qualified NeoMusic as A
+import qualified NeoMusic.Audio as A
+import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
 
 midiPitch :: A.Tuning -> A.Step -> Either String Int
@@ -24,7 +25,7 @@ midiPitch t (A.Step x) = do
 
 midi :: Performance -> Score -> Either String BL.ByteString
 midi perf score = do
-  _ <- toPiece perf score
+  validate perf score
   (total,es) <- flatten score
   let names = nub [instrument e | e <- es]
       division = foldl lcm 1 (map denominator (total : concat [[onset e,dur (event e)] | e <- es]))

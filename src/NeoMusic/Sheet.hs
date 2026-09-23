@@ -5,7 +5,8 @@ import Control.Monad (unless)
 import Data.List (intercalate, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Ratio (denominator)
-import qualified NeoMusic as A
+import qualified NeoMusic.Audio as A
+import qualified NeoMusic.Pitch as A
 import NeoMusic.Score hiding (chord)
 import NeoMusic.Language (SheetView(..), Staff(..))
 import NeoMusic.Midi (midiPitch)
@@ -13,7 +14,7 @@ import NeoMusic.Midi (midiPitch)
 -- | Shared pre-engraving representation: staff, onset, duration and MIDI chord.
 sheetEvents :: Performance -> SheetView -> Score -> Either String [(Staff,Rational,Rational,[Int])]
 sheetEvents perf view score = do
-  _ <- toPiece perf score
+  validate perf score
   (total,es) <- flatten score
   unless (meter view > 0) (Left "meter must be positive")
   unless (dyadic total) (Left "sheet supports durations on a 32nd-note grid; tuplets are not supported")

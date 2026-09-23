@@ -7,7 +7,8 @@ import Data.Char (isSpace)
 import Data.List (intercalate, nub)
 import qualified Data.Map.Strict as M
 import Data.Ratio ((%), numerator, denominator)
-import qualified NeoMusic as A
+import qualified NeoMusic.Audio as A
+import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
 import Text.Parsec hiding (Line, label, token)
 import Text.Parsec.String (Parser)
@@ -128,7 +129,7 @@ parseDocument input = do
   (perf,view,_,voices,_) <- foldM (readStatement arities) initial nonbindings
   scores <- mapM (\(name,expr) -> evaluate defs M.empty [] name expr) voices
   let result = foldr (:||:) (Silence 0) scores
-  _ <- toPiece perf result
+  validate perf result
   pure (Document perf view result)
   where
     stripComment [] = []
@@ -206,7 +207,7 @@ evaluate defs locals active name expr = case expr of
   Repeat k e -> do x <- recur e; pure (mconcat (replicate k x))
   Rev e -> reverseScore <$> recur e
   Inv e -> mapPhrases invert <$> recur e
-  Vel v e -> mapPhrases (withVelocity v) <$> recur e
+  Vel v e -> mapPhrases (scaleVelocity v) <$> recur e
   Ref ref args -> case M.lookup ref locals of
     Just x -> if null args then Right x else Left "parameters cannot be called"
     Nothing -> do

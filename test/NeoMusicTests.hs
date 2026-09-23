@@ -37,7 +37,7 @@ neoMusicGroup = Group "NeoMusic"
       d === 2.5
       map start ns === [0,0,2]
       map hz ns === [220,330,330]
-      map sound ns === [Sine,Square,Square]
+      map sound ns === [sinePatch,squarePatch,squarePatch]
       silent <- evalEither (render (part (Tuning 220 2) (Tempo 60) Sine (rest <> rest)))
       seconds silent === 2
       notes silent === [])

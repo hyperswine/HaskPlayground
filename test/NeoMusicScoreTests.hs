@@ -5,11 +5,12 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Data.Either (isLeft)
-import Data.List (sort, isInfixOf)
+import Data.List (sort, isInfixOf, isPrefixOf)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
-import qualified NeoMusic as A
+import qualified NeoMusic.Audio as A
+import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
 import NeoMusic.Language
 import NeoMusic.Midi
@@ -108,8 +109,50 @@ scoreGroup = Group "NeoMusic score and views"
       lanes <- evalEither (numericLanes (Line "a" (n 0) :||: Line "a" (hit [4] 2 1)))
       map (sum . map dur . snd) lanes === [2,2]
       length lanes === 2
-      html <- evalEither (numericHtml False (Line "<unsafe>" (n 0)))
+      let unsafe = defaultPerformance {instruments=M.singleton "<unsafe>" defaultInstrument}
+      html <- evalEither (numericHtml False unsafe (Line "<unsafe>" (n 0)))
       assert ("&lt;unsafe&gt;" `isInfixOf` html && not ("<unsafe>" `isInfixOf` html)))
+  , ("numeric lanes align on shared onsets", withTests 1 $ property $ do
+      let hands = Line "a" (hit [0] 2 1 <> n 1) :||: Line "b" (n 5 <> n 6 <> n 7)
+      numeric hands === Right "a: 0:2   1\nb: 5   6 7\n"
+      -- A gap inside one lane still gets its own column in the others.
+      numeric (Line "a" (n 0 <> hush 1 <> n 2) :||: Line "b" (hit [4] 3 1)) === Right "a: 0   _ 2\nb: 4:3\n"
+      -- Wrapping only splits between columns, so every system stays aligned.
+      let long = Line "right" (concatMap n [0..40]) :||: Line "right" (hit [-12] 41 1)
+      page <- evalEither (numericPage perf long)
+      let systemsOf = filter (\l -> "right / " `isPrefixOf` l) (lines page)
+      assert (length systemsOf > 2 && all ((<= 80) . length) systemsOf))
+  , ("legend states tempo, tuning and keys beside the numbers", withTests 1 $ property $ do
+      doc <- evalEither (parseDocument (header++"instrument left = piano staff bass\nright: 0 7\nleft: -12\n"))
+      page <- evalEither (numericPage (performance doc) (score doc))
+      let legendLines = takeWhile (not . null) (lines page)
+      legendLines === ["tempo 120, durations in beats (default 1)"
+                      ,"right, left: 12-EDO, 0 = C4"
+                      ,"  keys: -12=C3 0=C4 7=G4"]
+      micro <- evalEither (parseDocument "tuning 24 at A4\ninstrument m = sine\nm: 0 1\n")
+      microPage <- evalEither (numericPage (performance micro) (score micro))
+      assert ("m: 24-EDO, 0 = 440.0 Hz" `isInfixOf` microPage && not ("keys:" `isInfixOf` microPage))
+      assert (isLeft (numericPage perf (Line "nobody" (n 0)))))
+  , ("vel scales, so nested levels compose", property $ do
+      a <- forAll (Gen.double (Range.linearFrac 0 1))
+      b <- forAll (Gen.double (Range.linearFrac 0 1))
+      let phrase = hit [0] 1 0.8 <> hit [4] 1 0.4
+          close x y = abs (x - y) < 1e-12
+      assert (and (zipWith close (map vel (scaleVelocity a (scaleVelocity b phrase)))
+                                 (map vel (scaleVelocity (a*b) phrase))))
+      doc <- evalEither (parseDocument (header++"right: vel 0.5 [0 vel 0.6 [4] 7]\n"))
+      (_,es) <- evalEither (flatten (score doc))
+      map (vel . event) es === [0.5, 0.3, 0.5])
+  , ("score validation is independent of the legacy tree", withTests 1 $ property $ do
+      let note = Line "right" (n 0)
+      validate perf note === Right ()
+      assert (isLeft (validate perf (Line "missing" (n 0))))
+      assert (isLeft (validate perf {bpm=0} note))
+      mapM_ (\i -> assert (isLeft (validate perf {instruments=M.singleton "right" i} note)))
+        [ defaultInstrument {pan=1.5}, defaultInstrument {gain= -1}, defaultInstrument {send=2}
+        , defaultInstrument {tuning=A.Tuning 0 2}, defaultInstrument {timbre=A.pianoPatch {A.resonance=1}} ]
+      -- Declared-but-unused instruments are still checked.
+      assert (isLeft (validate perf {instruments=M.insert "spare" defaultInstrument {pan=9} (instruments perf)} note)))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))

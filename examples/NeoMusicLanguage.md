@@ -52,7 +52,11 @@ A `key` or `meter` header affects only the sheet view.
   Thus `7:2` lasts two beats and `[0 2 4]:1/2` contains three half-beat notes.
 - `+ k` and `- k` transpose; `* k` repeats a nonnegative integer number of times.
 - `stretch d`, `rev`, `inv`, `vel v` transform the following term. Group a
-  multi-event argument in brackets. Velocity is finite and in 0..1.
+  multi-event argument in brackets. `vel v` takes a finite level in 0..1 and
+  *multiplies* the velocities inside it, so nested levels compose:
+  `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5. Notes start at 1, so a
+  single `vel` still sets the level. Accents are written as relative levels
+  inside an outer level; nothing can exceed the level around it.
 - `rev` reverses durations and velocities with pitches. When reversing a parallel
   expression, shorter branches are delayed so the whole passage is mirrored.
 - Bindings may refer forward to other bindings. Functions have fixed positional
@@ -79,10 +83,20 @@ in Haskell; this first text format does not serialize arbitrary patches or mixes
 
 ## Haskell model
 
-Use qualified imports to distinguish the new score API from the old API:
+Modules, each depending only on the ones above it:
+
+| Module | Contents |
+|---|---|
+| `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
+| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Patch` and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export |
+| `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
+| `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
+| `NeoMusic.Legacy` | the v1/v2 API (`Seq`, `Part`, `Piece` with `Gain`/`Pan`/`Send`), lowered onto `Audio` |
+| `NeoMusic` | compatibility umbrella: `Legacy` + `Pitch` + `Audio`, the old export list |
+
+No new module imports `NeoMusic.Legacy` or `NeoMusic`.
 
 ```haskell
-import qualified NeoMusic as A
 import qualified NeoMusic.Score as S
 import qualified Data.Map.Strict as M
 
@@ -99,7 +113,8 @@ S.render perf music
 A `Phrase` is a list, so concatenation and reversal preserve the association.
 `transpose`/`invert` affect only pitch; `stretch` affects only duration.
 `withRhythm` cycles a positive, nonempty pattern and returns `Either` for invalid
-patterns; `withVelocity` sets the dimensionless event velocity.
+patterns. `scaleVelocity` multiplies event velocities (what `vel` does);
+`withVelocity` overwrites them.
 
 `Score` has `Line name phrase`, `Silence beats`, sequential `:>>:` and parallel
 `:||:`. Sequential composition has `Semigroup`/`Monoid` instances with `Silence 0`
@@ -107,7 +122,10 @@ as identity. There are no audio/mixer nodes in this tree. A separate `Performanc
 contains one tempo, named `Instrument` records (tuning/patch/gain/pan/send), and a
 `Mix`. Per-instrument tuning is still possible without assigning local tempos.
 
-`flatten` produces exact rational beat onsets, including rests. Audio converts
+`validate` checks a performance against a score without rendering: tempo, every
+declared instrument's tuning, patch, gain, pan and send, and that every line
+names a declared instrument. `render`, `midi`, the numeric legend and the staff
+view all call it. `flatten` produces exact rational beat onsets, including rests. Audio converts
 these to seconds once, via `render`; MIDI and engraving use the beat onsets
 without reconstructing them from rounded seconds. `prettyScore` emits canonical,
 expanded voice statements, to combine with the caller's instrument/header text.
@@ -122,7 +140,30 @@ repeats can allocate large scores; there is no implicit truncation or length cap
 `.html`. Steps stay numeric, chords use parentheses, rests use `_`, and durations
 other than one beat get `:d`. There are no barlines, staffs or noteheads. Named
 voices and overlapping material occupy separate lanes with explicit rests for
-gaps. Wrapping and horizontal spacing are typographic, not a timing grid.
+gaps.
+
+Lanes are aligned: every onset in any lane starts a column, so events that
+sound together are printed one above the other, and a blank cell means that
+lane's previous event is still sounding. A column is a moment, not a bar; column
+width is set by the widest cell, so horizontal distance is not proportional to
+time. Pages wrap into systems of about 72 characters, only between columns.
+
+```text
+tempo 100, durations in beats (default 1)
+right, left: 12-EDO, 0 = C4
+  keys: -17=G2 -12=C3 -10=D3 -7=F3 -5=G3 -3=A3 0=C4 2=D4 4=E4 5=F4 7=G4 9=A4
+
+right: 0          0 7 7 9         9 7:2        5         5 4          4
+left:  (-12 -5):4       (-7 -3):2   (-12 -5):2 (-7 -3):2   (-12 -5):2
+```
+
+The legend, printed beside the numbers rather than replacing them, gives the
+tempo and, per tuning, what step 0 is. For 12-TET tunings it lists every step
+the piece uses with its key name; the HTML page draws the same as a keyboard
+strip, with used keys marked by their step number. Other tunings give the step
+size and 0 in Hz, and no key list. The Haskell `numeric` function returns the
+aligned lanes alone, unwrapped and without a legend; `numericPage` and
+`numericHtml` take the `Performance` for the legend.
 This view accepts microtones and arbitrary rational rhythms because it displays
 the score without imposing a tuning or traditional notation. Velocities are not
 shown, so this is a reading view rather than a lossless source serialization.
@@ -163,10 +204,12 @@ rather than silently approximating them.
 
 ## Migration and validation
 
-`NeoMusic` remains the v1/v2 compatibility API and audio engine. Its old parallel
-lists and mixer constructors are retained for existing host programs; new scores
-should use `NeoMusic.Score`. `toPiece` is an optional legacy adapter. The score
-renderer uses the exact flattened timeline through the shared synthesis engine.
+`NeoMusic` remains the v1/v2 compatibility umbrella, with its old export list.
+Its parallel lists and mixer constructors live in `NeoMusic.Legacy` for existing
+host programs; new scores should use `NeoMusic.Score`. The legacy `toPiece`
+adapter is gone: scores lower straight to an `Audio` timeline. Legacy `Note`'s
+`sound` field is now the `Patch` it plays (`patchOf` maps `Sine`/`Saw`/`Square`
+to their presets). Renders are byte-identical to before the split.
 
 The separate `classicWave` engine is removed. Legacy `Sine`, `Saw`, and `Square`
 now select patch presets. Their sound changes and they have a 15 ms release after
