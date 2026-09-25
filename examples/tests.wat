@@ -1,0 +1,116 @@
+(module
+  (memory (export "memory") 1)
+  (table 3 funcref)
+  (type $binop (func (param i32 i32) (result i32)))
+  (type $unop (func (param i32) (result i32)))
+  (elem (i32.const 0) $add $sub $mul)
+  (global $counter (mut i32) (i32.const 0))
+  (global $ten i32 (i32.const 10))
+
+  (func $add (type $binop) (i32.add (local.get 0) (local.get 1)))
+  (func $sub (type $binop) (i32.sub (local.get 0) (local.get 1)))
+  (func $mul (type $binop) (i32.mul (local.get 0) (local.get 1)))
+
+  ;; --- function frames: recursion with real locals per activation ---
+  (func $fib (export "fib") (param $n i32) (result i32)
+    (if (result i32) (i32.lt_s (local.get $n) (i32.const 2))
+      (then (local.get $n))
+      (else (i32.add
+              (call $fib (i32.sub (local.get $n) (i32.const 1)))
+              (call $fib (i32.sub (local.get $n) (i32.const 2)))))))
+
+  ;; --- call_indirect through the table, with runtime type check ---
+  (func (export "dispatch") (param $which i32) (param $a i32) (param $b i32) (result i32)
+    (call_indirect (type $binop) (local.get $a) (local.get $b) (local.get $which)))
+  (func (export "dispatch_badtype") (param $a i32) (result i32)
+    (call_indirect (type $unop) (local.get $a) (i32.const 0)))   ;; traps: type mismatch
+  (func (export "dispatch_oob") (result i32)
+    (call_indirect (type $binop) (i32.const 1) (i32.const 2) (i32.const 99))) ;; traps
+
+  ;; --- integer semantics ---
+  (func (export "wrap") (result i32) (i32.add (i32.const 2147483647) (i32.const 1)))
+  (func (export "divtrap") (result i32) (i32.div_s (i32.const -2147483648) (i32.const -1)))
+  (func (export "divzero") (result i32) (i32.div_u (i32.const 1) (i32.const 0)))
+  (func (export "rem_s") (result i32) (i32.rem_s (i32.const -7) (i32.const 2)))
+  (func (export "i64mul") (result i64) (i64.mul (i64.const 4294967296) (i64.const 4294967296)))
+  (func (export "i64big") (result i64) (i64.mul (i64.const 4294967296) (i64.const 3)))
+  (func (export "shr_s") (result i32) (i32.shr_s (i32.const -16) (i32.const 34)))
+  (func (export "shr_u") (result i32) (i32.shr_u (i32.const -16) (i32.const 2)))
+  (func (export "rotl") (result i32) (i32.rotl (i32.const 0x80000001) (i32.const 1)))
+  (func (export "clz") (result i32) (i32.clz (i32.const 1)))
+  (func (export "ctz64") (result i64) (i64.ctz (i64.const 0x100000000)))
+  (func (export "popcnt") (result i32) (i32.popcnt (i32.const 0xF0F0)))
+  (func (export "ext8") (result i32) (i32.extend8_s (i32.const 0x80)))
+  (func (export "lt_u") (result i32) (i32.lt_u (i32.const -1) (i32.const 1)))
+  (func (export "lt_s") (result i32) (i32.lt_s (i32.const -1) (i32.const 1)))
+  (func (export "extend_u") (result i64) (i64.extend_i32_u (i32.const -1)))
+  (func (export "extend_s") (result i64) (i64.extend_i32_s (i32.const -1)))
+
+  ;; --- floats ---
+  (func (export "f64div") (result f64) (f64.div (f64.const 1) (f64.const 4)))
+  (func (export "nearest_even") (result f64) (f64.nearest (f64.const 2.5)))
+  (func (export "nearest_odd") (result f64) (f64.nearest (f64.const 3.5)))
+  (func (export "fmin_zero") (result i64) (i64.reinterpret_f64 (f64.min (f64.const 0) (f64.const -0))))
+  (func (export "copysign") (result f32) (f32.copysign (f32.const 3) (f32.const -0)))
+  (func (export "truncsat") (result i32) (i32.trunc_sat_f64_u (f64.const 1e20)))
+  (func (export "truncsat_neg") (result i32) (i32.trunc_sat_f64_s (f64.const -1e20)))
+  (func (export "truncsat_nan") (result i32) (i32.trunc_sat_f32_s (f32.const nan)))
+  (func (export "trunctrap") (result i32) (i32.trunc_f64_s (f64.const 1e20)))
+  (func (export "trunc_ok") (result i32) (i32.trunc_f64_s (f64.const -7.9)))
+  (func (export "reinterp") (result i32) (i32.reinterpret_f32 (f32.const 1)))
+  (func (export "convert") (result f64) (f64.convert_i32_u (i32.const -1)))
+  (func (export "demote") (result f32) (f32.demote_f64 (f64.const 0.1)))
+
+  ;; --- control flow ---
+  (func (export "brtable") (param i32) (result i32)
+    (block $b0 (block $b1 (block $b2
+      (br_table $b0 $b1 $b2 (local.get 0)))
+      (return (i32.const 20)))
+      (return (i32.const 10)))
+    (i32.const 0))
+  (func (export "brval") (result i32)
+    (i32.add (block (result i32) (i32.const 99) (br 0 (i32.const 42))) (i32.const 1)))
+  (func (export "select") (param i32) (result i32)
+    (select (i32.const 111) (i32.const 222) (local.get 0)))
+  (func (export "loop_sum") (param $n i32) (result i32) (local $s i32)
+    (block $exit (loop $l
+      (br_if $exit (i32.eqz (local.get $n)))
+      (local.set $s (i32.add (local.get $s) (local.get $n)))
+      (local.set $n (i32.sub (local.get $n) (i32.const 1)))
+      (br $l)))
+    (local.get $s))
+  (func (export "early_return") (result i32)
+    (block (block (return (i32.const 7))))
+    (i32.const 0))
+  (func (export "unreachable") (result i32) (unreachable))
+  (func $deep (param i32) (result i32) (call $deep (local.get 0)))
+  (func (export "stack_overflow") (result i32) (call $deep (i32.const 0)))
+
+  ;; --- globals ---
+  (func (export "global_inc") (result i32)
+    (global.set $counter (i32.add (global.get $counter) (global.get $ten)))
+    (global.get $counter))
+
+  ;; --- memory ---
+  (func (export "mem_le") (result i32)
+    (i32.store (i32.const 8) (i32.const 0x11223344))
+    (i32.load8_u (i32.const 8)))
+  (func (export "mem16s") (result i32)
+    (i32.store16 offset=4 (i32.const 100) (i32.const 0xFFFE))
+    (i32.load16_s offset=4 (i32.const 100)))
+  (func (export "mem_i64") (result i64)
+    (i64.store (i32.const 16) (i64.const -2))
+    (i64.load32_u (i32.const 16)))
+  (func (export "mem_f64") (result f64)
+    (f64.store (i32.const 32) (f64.const 2.5))
+    (f64.load (i32.const 32)))
+  (func (export "memgrow") (result i32)
+    (drop (memory.grow (i32.const 2)))
+    (memory.size))
+  (func (export "memfill") (result i32)
+    (memory.fill (i32.const 1000) (i32.const 7) (i32.const 4))
+    (memory.copy (i32.const 2000) (i32.const 1000) (i32.const 4))
+    (i32.load (i32.const 2000)))
+  (func (export "oob") (result i32) (i32.load (i32.const 0x7fffffff)))
+  (func (export "oob_grown") (result i32) (i32.load (i32.const 196600)))  ;; after grow to 3 pages: valid
+)

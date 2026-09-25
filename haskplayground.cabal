@@ -51,6 +51,11 @@ library
       PsramRegs
       QuantUI
       SimpleRisc
+      WASM.Actors
+      WASM.Main
+      WASM.TestMain
+      WASM.WasmVM
+      WASM.WatParser
   other-modules:
       Paths_haskplayground
   hs-source-dirs:
@@ -154,6 +159,56 @@ executable neo-music
       Paths_haskplayground
   hs-source-dirs:
       app/neo-music
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
+  build-depends:
+      aeson
+    , array
+    , async
+    , base >=4.7 && <5
+    , binary
+    , brick
+    , bytestring
+    , clash-prelude
+    , containers
+    , cryptohash-sha1
+    , directory
+    , filepath
+    , free
+    , hashable
+    , haskeline
+    , haskplayground
+    , hedgehog
+    , http-conduit
+    , linear
+    , linear-base
+    , megaparsec
+    , mtl
+    , parsec
+    , parser-combinators
+    , prettyprinter
+    , prettyprinter-ansi-terminal
+    , process
+    , random
+    , recursion-schemes
+    , regex-tdfa
+    , row-types
+    , stm
+    , temporary
+    , text
+    , time
+    , unix
+    , unordered-containers
+    , vector
+    , vty
+    , vty-crossplatform
+  default-language: Haskell2010
+
+executable screw-anime
+  main-is: Main.hs
+  other-modules:
+      Paths_haskplayground
+  hs-source-dirs:
+      app/screw-anime
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
   build-depends:
       aeson

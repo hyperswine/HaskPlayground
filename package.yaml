@@ -86,6 +86,11 @@ executables:
     source-dirs: app/screw-bgm
     ghc-options: [-O2]
     dependencies: [haskplayground]
+  screw-anime:
+    main: Main.hs
+    source-dirs: app/screw-anime
+    ghc-options: [-O2]
+    dependencies: [haskplayground]
   haskplayground-exe:
     main:                Main.hs
     source-dirs:         app
