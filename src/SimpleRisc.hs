@@ -6,6 +6,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
@@ -41,12 +42,13 @@
 -- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
 --
 -- The M extension (MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU) runs on an
--- iterative unit: about 36 cycles per instruction, one 33-bit add or subtract
--- per cycle.  Division by zero and overflow give the results the RISC-V spec
+-- iterative unit: 68 unit cycles per nonzero-divisor instruction, with each
+-- 33-bit add/subtract followed by a separate registered commit.  Division by zero and overflow give the results the RISC-V spec
 -- requires.
 module SimpleRisc where
 
 import Clash.Prelude
+import Clash.Annotations.BitRepresentation (DataReprAnn(..), ConstrRepr(..), liftQ)
 
 type Word32 = Unsigned 32
 
@@ -57,7 +59,8 @@ type MemAddr = Unsigned 14
 
 -- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
 -- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
--- a simple instruction takes Fetch, FetchWait, Decode, Execute and Commit.
+-- a simple instruction takes eight cycles: Fetch, FetchDelay, FetchCapture,
+-- FetchWait, Decode, OperandSelect, Execute and Commit.
 -- The BRAM and the UART transmitter are only ever driven from registers, in
 -- stages of their own (Fetch, LoadIssue, StoreWrite, TxWrite...): on the GW2A
 -- their input timing is worse than nextpnr models.  The
@@ -67,11 +70,17 @@ type MemAddr = Unsigned 14
 data CpuPhase
   = -- | Put the PC on the BRAM address bus.
     Fetch
+  | -- | Wait for the registered BRAM command to reach the RAM.
+    FetchDelay
+  | -- | Wait for the registered BRAM output.
+    FetchCapture
   | -- | Latch the instruction word from the BRAM into 'cpuInstruction' and
     -- compare the PC against the end of the program.
     FetchWait
-  | -- | Read the operands into 'cpuA' and 'cpuB', or halt if past the end.
+  | -- | Read four eight-register banks, or halt if past the end.
     Decode
+  | -- | Select one of four registered register-file banks.
+    OperandSelect
   | -- | Do the arithmetic into 'cpuComputed'.
     Execute
   | -- | Run the multiply/divide unit ('cpuMulDiv') until it has a result.
@@ -81,19 +90,53 @@ data CpuPhase
     Commit
   | -- | Put the load address on the BRAM bus.
     LoadIssue
+  | LoadDelay
+  | LoadCapture
   | LoadWait
   | -- | Align the loaded word latched in 'cpuMemoryWord'.
     LoadAlign
+  | LoadCommit
   | -- | Write a whole word to the BRAM.
     StoreWrite
   | -- | Put a byte/halfword store's address on the BRAM bus to read the old word.
     StoreIssue
+  | StoreDelay
+  | StoreCapture
   | StoreWait
   | -- | Merge a byte or halfword into the old word latched in 'cpuMemoryWord'.
     StoreMerge
+  | StoreCommit
   | -- | Wait for the UART transmitter, then hand it the byte.
     TxWrite
   deriving (Generic, NFDataX, Show, Eq)
+
+
+-- A dedicated state bit drives each stage instead of decoding a binary tag.
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 23
+  [ ConstrRepr 'Fetch 1 1 [],
+    ConstrRepr 'FetchDelay 2 2 [],
+    ConstrRepr 'FetchCapture 4 4 [],
+    ConstrRepr 'FetchWait 8 8 [],
+    ConstrRepr 'Decode 16 16 [],
+    ConstrRepr 'OperandSelect 32 32 [],
+    ConstrRepr 'Execute 64 64 [],
+    ConstrRepr 'MulDiv 128 128 [],
+    ConstrRepr 'Commit 256 256 [],
+    ConstrRepr 'LoadIssue 512 512 [],
+    ConstrRepr 'LoadDelay 1024 1024 [],
+    ConstrRepr 'LoadCapture 2048 2048 [],
+    ConstrRepr 'LoadWait 4096 4096 [],
+    ConstrRepr 'LoadAlign 8192 8192 [],
+    ConstrRepr 'LoadCommit 16384 16384 [],
+    ConstrRepr 'StoreWrite 32768 32768 [],
+    ConstrRepr 'StoreIssue 65536 65536 [],
+    ConstrRepr 'StoreDelay 131072 131072 [],
+    ConstrRepr 'StoreCapture 262144 262144 [],
+    ConstrRepr 'StoreWait 524288 524288 [],
+    ConstrRepr 'StoreMerge 1048576 1048576 [],
+    ConstrRepr 'StoreCommit 2097152 2097152 [],
+    ConstrRepr 'TxWrite 4194304 4194304 []
+  ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
 -- the Execute stage so the Commit stage only selects between registers.
@@ -117,6 +160,8 @@ data MdStep
     MdPrepare
   | -- | One of 32 shift-and-add (multiply) or restoring-division steps.
     MdLoop (Index 32)
+  | -- | Commit the registered adder/subtractor result, separately from arithmetic.
+    MdCommit (Index 32)
   | -- | Negate the low word if needed, recording the carry out of it.
     MdFixLo
   | -- | Negate the high word if needed, taking that carry.
@@ -135,6 +180,7 @@ data MulDivUnit = MulDivUnit
     mdLo :: Word32,
     -- | The magnitude of the multiplicand or the divisor.
     mdOperand :: Word32,
+    mdTotal :: Unsigned 33,
     -- | Negate the low word (product low half or quotient) at the end.
     mdNegLo :: Bool,
     -- | Negate the high word (product high half or remainder) at the end.
@@ -157,22 +203,27 @@ data ReplyState = NoReply | DoneReply (Unsigned 3)
 
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
+    -- | Registered writeback request; consumed during the next fetch.
+    cpuPendingWrite :: RegisterWrite,
     cpuPc :: Word32,
     cpuPhase :: CpuPhase,
     cpuInstruction :: Word32,
     cpuPastEnd :: Bool,
+    cpuABanks :: Vec 4 Word32,
+    cpuBBanks :: Vec 4 Word32,
     cpuA :: Word32,
     cpuB :: Word32,
     -- | The instruction's immediate, whichever format it uses.
     cpuImm :: Word32,
     -- | OP (register-register) rather than OP-IMM: the ALU takes rs2, not the
     -- immediate.  Selected in Execute so Decode's register read feeds
-    -- flip-flops directly: on the GW2A the 32-way register mux is much slower
-    -- than nextpnr models.
+    -- bank flip-flops directly; OperandSelect completes the read next cycle.
     cpuIsRegOp :: Bool,
     cpuComputed :: Computed,
     cpuMulDiv :: MulDivUnit,
     cpuMemoryWord :: Word32,
+    cpuAlignedLoad :: Word32,
+    cpuMergedStore :: Word32,
     cpuRunning :: Bool,
     programEnd :: Word32,
     hostState :: HostState,
@@ -195,17 +246,22 @@ initialMachine :: Machine
 initialMachine =
   Machine
     { cpuRegs = repeat 0,
+      cpuPendingWrite = Nothing,
       cpuPc = 0,
       cpuPhase = Fetch,
       cpuInstruction = 0,
       cpuPastEnd = False,
+      cpuABanks = repeat 0,
+      cpuBBanks = repeat 0,
       cpuA = 0,
       cpuB = 0,
       cpuImm = 0,
       cpuIsRegOp = False,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
-      cpuMulDiv = MulDivUnit MdPrepare 0 0 0 False False False,
+      cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
       cpuMemoryWord = 0,
+      cpuAlignedLoad = 0,
+      cpuMergedStore = 0,
       cpuRunning = False,
       programEnd = 0,
       hostState = HostIdle,
@@ -311,16 +367,27 @@ simpleRisc serialRx = serialTx
     -- Two flip-flops resynchronise the asynchronous RX pin before sampling, and
     -- the received byte is registered before it reaches the CPU: a Ctrl-C
     -- resets the whole CPU, so that compare fans out to every state bit.
-    received = register Nothing (uartRx (register high (register high serialRx)))
-    (serialTx, txReady) = uartTx txRequest
+    receivedNow = uartRx (register high (register high serialRx))
+    received = register Nothing receivedNow
+    emergencyReset = register False ((== Just 0x03) <$> receivedNow)
+    (serialTx, uartReady) = uartTx txRequest
+    -- Break the controller -> UART path. A queued byte reserves the idle
+    -- transmitter so the DONE emitter cannot enqueue a second byte too soon.
+    txRequest = register Nothing txRequestNow
+    txReady = (\ready pending -> ready && case pending of Nothing -> True; Just _ -> False) <$> uartReady <*> txRequest
 
-    machineInput = bundle (memoryOut, received, txReady)
-    machineOutput = mealy machineStep initialMachine machineInput
-    (memoryAddress, memoryWrite, txRequest) = unbundle machineOutput
+    machineInput = bundle (memoryOut, received, txReady, emergencyReset)
+    machineOutput = mealy machineStepDecoded initialMachine machineInput
+    (memoryAddressNow, memoryWriteNow, txRequestNow) = unbundle machineOutput
+    -- Real BRAM setup time is worse than the Gowin timing model. Register all
+    -- commands at its boundary; issue/delay/wait stages account for latency.
+    memoryAddress = register 0 memoryAddressNow
+    memoryWrite = register Nothing memoryWriteNow
 
-    -- A synchronous 16384 x 32-bit RAM.  Reads take one cycle; writes are visible
-    -- on the following read.  This shape maps naturally to FPGA block RAM.
-    memoryOut = blockRamPow2 (repeat 0) memoryAddress memoryWrite
+    -- A synchronous 16384 x 32-bit RAM with an output register. Reads take
+    -- two cycles after the registered command; writes are visible on a later
+    -- read. This shape maps naturally to FPGA block RAM.
+    memoryOut = register 0 (blockRam1 NoClearOnReset (SNat @16384) 0 memoryAddress memoryWrite)
 
 -- | Result wires from the machine controller: BRAM read address, optional BRAM
 -- write, and an optional byte offered to the UART transmitter.
@@ -328,19 +395,25 @@ machineStep ::
   Machine ->
   (Word32, Maybe Byte, Bool) ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-machineStep machine input =
+machineStep machine (memoryWord, received, txReady) =
+  machineStepDecoded machine (memoryWord, received, txReady, received == Just 0x03)
+
+-- The physical circuit supplies a registered Ctrl-C decode, preventing the
+-- 8-bit byte comparison from preceding the controller's high-fanout reset mux.
+machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
+machineStepDecoded machine input =
   let (machine', output) = machineStepCore machine {clearRegisters = False} input
    in (if clearRegisters machine then machine' {cpuRegs = repeat 0} else machine', output)
 
 machineStepCore ::
   Machine ->
-  (Word32, Maybe Byte, Bool) ->
+  (Word32, Maybe Byte, Bool, Bool) ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-machineStepCore machine (memoryWord, received, txReady) =
+machineStepCore machine (memoryWord, received, txReady, emergencyReset) =
   case hostState machine of
     ClearMemory address -> clearStep address
     _
-      | cpuRunning machine -> runningStep machine memoryWord received txReady
+      | cpuRunning machine -> runningStepDecoded machine memoryWord received txReady emergencyReset
       | otherwise -> stoppedStep machine received txReady
   where
     clearStep address =
@@ -412,16 +485,21 @@ resetCpu :: Machine -> Machine
 resetCpu machine =
   machine
     { clearRegisters = True,
+      cpuPendingWrite = Nothing,
       cpuPc = 0,
       cpuPhase = Fetch,
       cpuInstruction = 0,
       cpuPastEnd = False,
+      cpuABanks = repeat 0,
+      cpuBBanks = repeat 0,
       cpuA = 0,
       cpuB = 0,
       cpuImm = 0,
       cpuIsRegOp = False,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
       cpuMemoryWord = 0,
+      cpuAlignedLoad = 0,
+      cpuMergedStore = 0,
       cpuRunning = False,
       rxHolding = Nothing
     }
@@ -435,15 +513,25 @@ runningStep ::
   Bool ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 runningStep machine memoryWord received txReady =
-  let (machine', registerWrite, output) = cpuStep machine memoryWord received txReady
-   in (maybe machine' (\(index, value) -> writeRegister index value machine') registerWrite, output)
+  runningStepDecoded machine memoryWord received txReady (received == Just 0x03)
+
+runningStepDecoded :: Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, StepOutput)
+runningStepDecoded machine memoryWord received txReady emergencyReset =
+  let (machine', registerWrite, output) = cpuStepDecoded machine memoryWord received txReady emergencyReset
+      pending = if emergencyReset then Nothing else cpuPendingWrite machine
+      written = maybe machine' (\(index, value) -> writeRegister index value machine') pending
+   in (written {cpuPendingWrite = registerWrite}, output)
 
 -- | One CPU cycle.  Register writes are returned rather than applied in each
 -- branch, so the generated hardware has a single register-file write port
 -- instead of a full copy of all 32 registers per instruction kind.
 cpuStep :: Machine -> Word32 -> Maybe Byte -> Bool -> (Machine, RegisterWrite, StepOutput)
 cpuStep machine memoryWord received txReady
-  | received == Just 0x03 = (resetCpu machine, Nothing, (0, Nothing, Nothing))
+  = cpuStepDecoded machine memoryWord received txReady (received == Just 0x03)
+
+cpuStepDecoded :: Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
+cpuStepDecoded machine memoryWord received txReady emergencyReset
+  | emergencyReset = (resetCpu machine, Nothing, (0, Nothing, Nothing))
   | otherwise =
       let machineRx = case (received, rxHolding machine) of
             (Just byte, Nothing) -> machine {rxHolding = Just byte}
@@ -455,9 +543,11 @@ cpuStep machine memoryWord received txReady
            in case cpuPhase of
                Fetch ->
                  withoutRegister
-                   ( machineRx {cpuPhase = FetchWait},
+                   ( machineRx {cpuPhase = FetchDelay},
                      (memoryIndex cpuPc, Nothing, Nothing)
                    )
+               FetchDelay -> next machineRx {cpuPhase = FetchCapture}
+               FetchCapture -> next machineRx {cpuPhase = FetchWait}
                -- The program stops once control leaves it.  The compare is
                -- registered here and acted on in Decode.
                FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord, cpuPastEnd = cpuPc >= programEnd}
@@ -466,12 +556,18 @@ cpuStep machine memoryWord received txReady
                  | otherwise ->
                      next
                        machineRx
-                         { cpuPhase = Execute,
-                           cpuA = readRegister (instructionRs1 instruction) machineRx,
-                           cpuB = readRegister (instructionRs2 instruction) machineRx,
+                         { cpuPhase = OperandSelect,
+                           cpuABanks = readRegisterBanks (instructionRs1 instruction) cpuRegs,
+                           cpuBBanks = readRegisterBanks (instructionRs2 instruction) cpuRegs,
                            cpuImm = decodeImmediate instruction,
                            cpuIsRegOp = instruction .&. 0x7f == 0x33
                          }
+               OperandSelect ->
+                 next machineRx
+                   { cpuPhase = Execute,
+                     cpuA = selectRegisterBank (instructionRs1 instruction) cpuABanks,
+                     cpuB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
+                   }
                Execute ->
                  let op2 = if cpuIsRegOp then cpuB else cpuImm
                      -- OP with funct7 = 1 is the M extension.
@@ -487,20 +583,28 @@ cpuStep machine memoryWord received txReady
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
                Commit -> commitInstruction machineRx txReady
-               LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadWait}, (memoryIndex address, Nothing, Nothing))
+               LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadDelay}, (memoryIndex address, Nothing, Nothing))
+               LoadDelay -> next machineRx {cpuPhase = LoadCapture}
+               LoadCapture -> next machineRx {cpuPhase = LoadWait}
                LoadWait -> next machineRx {cpuPhase = LoadAlign, cpuMemoryWord = memoryWord}
                StoreWrite -> withoutRegister (finishInstruction machineRx (Just (memoryIndex address, cpuB)))
-               StoreIssue -> withoutRegister (machineRx {cpuPhase = StoreWait}, (memoryIndex address, Nothing, Nothing))
+               StoreIssue -> withoutRegister (machineRx {cpuPhase = StoreDelay}, (memoryIndex address, Nothing, Nothing))
+               StoreDelay -> next machineRx {cpuPhase = StoreCapture}
+               StoreCapture -> next machineRx {cpuPhase = StoreWait}
                TxWrite
                  | txReady -> withoutRegister (finishInstructionWithTx machineRx (Just (resize cpuB)))
                  | otherwise -> next machineRx
-               LoadAlign ->
-                 let value = loadValue (instructionFunct3 instruction) (resize address) cpuMemoryWord
-                  in withRegister (instructionRd instruction) value (finishInstruction machineRx Nothing)
+               LoadAlign -> next machineRx
+                 { cpuPhase = LoadCommit,
+                   cpuAlignedLoad = loadValue (instructionFunct3 instruction) (resize address) cpuMemoryWord
+                 }
+               LoadCommit -> withRegister (instructionRd instruction) cpuAlignedLoad (finishInstruction machineRx Nothing)
                StoreWait -> next machineRx {cpuPhase = StoreMerge, cpuMemoryWord = memoryWord}
-               StoreMerge ->
-                 let merged = storeValue (instructionFunct3 instruction) (resize address) cpuB cpuMemoryWord
-                  in withoutRegister (finishInstruction machineRx (Just (memoryIndex address, merged)))
+               StoreMerge -> next machineRx
+                 { cpuPhase = StoreCommit,
+                   cpuMergedStore = storeValue (instructionFunct3 instruction) (resize address) cpuB cpuMemoryWord
+                 }
+               StoreCommit -> withoutRegister (finishInstruction machineRx (Just (memoryIndex address, cpuMergedStore)))
 
 withRegister :: Index 32 -> Word32 -> (Machine, StepOutput) -> (Machine, RegisterWrite, StepOutput)
 withRegister index value (machine, output) = (machine, Just (index, value), output)
@@ -626,6 +730,17 @@ haltMachine machine = (halt machine, (0, Nothing, Nothing))
 halt :: Machine -> Machine
 halt machine = machine {cpuRunning = False, cpuPhase = Fetch, replyState = DoneReply 0}
 
+-- Split the physical 32-way mux across two clock edges. Each first-stage
+-- register sees eight candidates; the operand register then sees four banks.
+readRegisterBanks :: Index 32 -> Vec 32 Word32 -> Vec 4 Word32
+readRegisterBanks index regs = map (!! bankOffset) (unconcat (SNat @8) regs)
+  where
+    bankOffset = fromIntegral (fromIntegral index .&. 7 :: Unsigned 5) :: Index 8
+
+selectRegisterBank :: Index 32 -> Vec 4 Word32 -> Word32
+selectRegisterBank 0 _ = 0
+selectRegisterBank index banks = banks !! (fromIntegral (fromIntegral index `shiftR` 3 :: Unsigned 5) :: Index 4)
+
 readRegister :: Index 32 -> Machine -> Word32
 readRegister 0 _ = 0
 readRegister index Machine {..} = cpuRegs !! index
@@ -730,11 +845,14 @@ mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
                   mdHi = 0,
                   mdLo = if isDiv then magnitude aNegative a else magnitude bNegative b,
                   mdOperand = if isDiv then magnitude bNegative b else magnitude aNegative a,
+                  mdTotal = 0,
                   mdNegLo = aNegative /= bNegative,
                   mdNegHi = if isDiv then aNegative else aNegative /= bNegative,
                   mdCarry = False
                 }
   MdLoop i ->
+    Left unit {mdStep = MdCommit i, mdTotal = if isDiv then divideDifference else multiplyTotal}
+  MdCommit i ->
     let (hi, lo) = if isDiv then divideStep else multiplyStep
      in Left unit {mdStep = if i == maxBound then MdFixLo else MdLoop (succ i), mdHi = hi, mdLo = lo}
   MdFixLo -> Left unit {mdStep = MdFixHi, mdLo = if mdNegLo then negate mdLo else mdLo, mdCarry = mdLo == 0}
@@ -753,14 +871,18 @@ mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
     -- Add the multiplicand into the high half if the multiplier's low bit is
     -- set, then shift the 65-bit {carry, hi, lo} right by one.
     multiplyStep =
-      let total = if testBit mdLo 0 then resize mdHi + resize mdOperand else resize mdHi :: Unsigned 33
+      let total = mdTotal
        in (resize (total `shiftR` 1), (mdLo `shiftR` 1) .|. (if testBit total 0 then 0x8000_0000 else 0))
     -- Shift the next dividend bit into the remainder; subtract the divisor if
     -- it fits, recording a quotient bit.
     divideStep =
-      let remainder = (resize mdHi `shiftL` 1) .|. (if testBit mdLo 31 then 1 else 0) :: Unsigned 33
-          fits = remainder >= resize mdOperand
-       in (resize (if fits then remainder - resize mdOperand else remainder), (mdLo `shiftL` 1) .|. boolWord fits)
+      let fits = not (testBit mdTotal 32)
+       in (resize (if fits then mdTotal else remainder), (mdLo `shiftL` 1) .|. boolWord fits)
+    multiplyTotal = if testBit mdLo 0 then resize mdHi + resize mdOperand else resize mdHi
+    remainder = (resize mdHi `shiftL` 1) .|. (if testBit mdLo 31 then 1 else 0) :: Unsigned 33
+    -- During restoring division remainder < 2*divisor. A successful subtract
+    -- is < divisor (fits in 32 bits); bit 32 therefore encodes the borrow.
+    divideDifference = remainder - resize mdOperand
 
 branchTaken :: BitVector 3 -> Word32 -> Word32 -> Maybe Bool
 branchTaken funct3 a b = case funct3 of

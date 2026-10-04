@@ -6,8 +6,8 @@
 #
 # Environment:
 #   FREQ_MHZ  core clock, a multiple of 3 (PLL: 3 MHz x integer).  Default 96,
-#             which passes every board test; 102 works with some placements
-#             but not others, and 108 fails.
+#             Actual reliability must be checked with check_processor.py and
+#             check_rv32m.py on the connected board.
 #             The UART then runs at FREQ_MHZ * 1e6 / 868 baud.
 #   MARGIN    place and route for FREQ_MHZ * MARGIN (default 1.2).  nextpnr's
 #             Gowin timing model is optimistic: designs it passed at 52 and

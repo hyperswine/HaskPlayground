@@ -94,7 +94,8 @@ judge:
 |---|---|---|---|
 | 1 cycle per instruction (early version) | 52 MHz | 27 MHz | 51 MHz |
 | 2 cycles per instruction | 63 MHz | 51 MHz | not tested higher |
-| 5 cycles per instruction (current) | ~126 MHz | 96 MHz; 102 MHz with some placements | 108 MHz |
+| 5 cycles per instruction (previous; retested 2026-10-05) | ~126 MHz | 51 MHz | 96 MHz |
+| 8 cycles per instruction (2026-10-05) | 149.08 MHz, seed 2 | 96 MHz | higher clocks not tested |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
 (`MARGIN=1.2` by default). To test above what timing allows, build with
@@ -103,8 +104,34 @@ judge:
 The paths that turned out to be slow on the real chip, well beyond what
 nextpnr reported, were long carry chains, the 32-way register-file mux
 (Gowin's `MUX2_LUT5`–`MUX2_LUT8` cells), and logic driving the block RAM
-directly. `src/SimpleRisc.hs` keeps each of these in a pipeline stage of its
-own.
+directly. `src/SimpleRisc.hs` now uses one-hot CPU stages, two-stage register
+reads (four banks of eight), registered writeback, registered RAM commands and
+readback, separate load/store alignment registers, and a queued UART request.
+The iterative multiply/divide unit registers its 33-bit arithmetic before
+committing each step. Ordinary instructions take eight clocks; nonzero-divisor
+M operations add 68 unit clocks. These changes trade cycles for shorter paths.
+
+Run the hardware regressions after loading a bitstream:
+
+```bash
+python3 boards/tangnano20k/check_processor.py --freq-mhz 96
+python3 boards/tangnano20k/check_rv32m.py --freq-mhz 96 --repeat 20
+```
+
+The first checks five exact C arithmetic runs, UART echo, Ctrl-C recovery,
+memory clear/reload, and 64 passes of byte/halfword/word memory checks. The
+second compares all eight RV32M operations with host-generated results for
+192 operand pairs per load, including division by zero and signed overflow.
+Both keep the UART session open and stop the CPU before closing it.
+
+Verified on 2026-10-05: both hardware commands passed at 96 MHz, including
+30,720 RV32M checks across 20 loads. The FP-RISC Tang Nano builtin suite also
+passed three smoke runs, seven refusal cases, and recovery on this bitstream.
+`stack test --fast` and the generated-Verilog `HiDONE` UART test passed. An
+earlier full-suite run exposed an intermittent failure in the unchanged
+`test/PsramRegs.hs` snapshot-model property; the processor properties passed
+on that run too. The verified SRAM image SHA-256 is
+`2563be842bfbabcaf77c6a0e784feff27fc3077d2a28d2b01a4f423ecf51211e`.
 
 ## Known issue: the USB-UART bridge stops working
 

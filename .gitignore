@@ -13,3 +13,5 @@ file.txt
 *.o
 *.hi
 top
+
+__pycache__/

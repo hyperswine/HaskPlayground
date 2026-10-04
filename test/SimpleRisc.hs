@@ -37,12 +37,14 @@ ramRead (Ram fill words) address = IntMap.findWithDefault fill (fromIntegral add
 ramWrite :: MemAddr -> Word32 -> Ram -> Ram
 ramWrite address value (Ram fill words) = Ram fill (IntMap.insert (fromIntegral address) value words)
 
--- This mirrors blockRamPow2: the read address selected in one cycle produces
--- the input word for the following machineStep, and writes happen on the edge.
+-- Mirror the command registers followed by synchronous block RAM.
 data Sim = Sim
   { simMachine :: Machine,
     simRam :: Ram,
     simRamOutput :: Word32,
+    simMemoryWord :: Word32,
+    simReadCommand :: MemAddr,
+    simWriteCommand :: Maybe (MemAddr, Word32),
     simTransmitted :: [Byte]
   }
 
@@ -52,21 +54,21 @@ stepSim = stepSimReady True
 stepSimReady :: Bool -> Sim -> Maybe Byte -> Sim
 stepSimReady txReady Sim {..} received =
   let (machine', (readAddress, writeCommand, txByte)) =
-        machineStep simMachine (simRamOutput, received, txReady)
-      nextRamOutput = ramRead simRam readAddress
-      ram' = case writeCommand of
+        machineStep simMachine (simMemoryWord, received, txReady)
+      nextRamOutput = ramRead simRam simReadCommand
+      ram' = case simWriteCommand of
         Nothing -> simRam
         Just (writeAddress, value) -> ramWrite writeAddress value simRam
       transmitted' = case txByte of
         Nothing -> simTransmitted
         Just byte -> simTransmitted P.++ [byte]
-   in Sim machine' ram' nextRamOutput transmitted'
+   in Sim machine' ram' nextRamOutput simRamOutput readAddress writeCommand transmitted'
 
 runInputs :: Sim -> [Maybe Byte] -> Sim
 runInputs = P.foldl stepSim
 
 startSim :: Machine -> Ram -> Sim
-startSim machine ram = Sim machine ram 0 []
+startSim machine ram = Sim machine ram 0 0 0 Nothing []
 
 ramFromList :: [Word32] -> Ram
 ramFromList program = Ram 0 (IntMap.fromList (P.zip [0 ..] program))
@@ -224,7 +226,7 @@ prop_program_loads_up_to_fifty_words = property $ do
       countLo = fromIntegral count :: Byte
       countHi = fromIntegral (count `shiftR` 8) :: Byte
       frame = Just 0x50 : Just countLo : Just countHi : P.map Just (P.concatMap wordBytes wordsToProgram)
-      programmed = runInputs (startSim initialMachine (blankRam 0)) frame
+      programmed = runInputs (startSim initialMachine (blankRam 0)) (frame P.++ [Nothing])
       actual = P.map (ramRead (simRam programmed) . fromIntegral) [0 .. count - 1]
 
   actual === wordsToProgram
@@ -252,15 +254,25 @@ prop_backward_branch_in_final_word_loops = property $ do
   cpuPc (simMachine finished) === 12
   simTransmitted finished === doneBytes
 
-prop_simple_instructions_take_five_cycles_each :: Property
-prop_simple_instructions_take_five_cycles_each = property $ do
+-- Exercise every bank boundary and x0 through real decode/writeback stages.
+prop_register_banks_and_writeback :: Property
+prop_register_banks_and_writeback = property $ do
+  salt <- forAll (Gen.integral Range.constantBounded)
+  let value i = salt + fromIntegral i * 0x1020304
+      registers = [(fromIntegral i, value i) | i <- [0..31 :: Int]]
+      program = P.concat [[addi r r 1, sw r 0 (256 + 4*r)] | r <- [0..31]]
+      (_, halted) = runUntilHalt 2000 (startSim (runningMachine registers 256) (ramFromList program))
+  assert (not (cpuRunning (simMachine halted)))
+  P.mapM_ (\i -> ramRead (simRam halted) (fromIntegral (64+i)) === if i == 0 then 0 else value i + 1) [0..31 :: Int]
+
+prop_simple_instructions_take_eight_cycles_each :: Property
+prop_simple_instructions_take_eight_cycles_each = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
 
-  -- Fetch, FetchWait, Decode, Execute and Commit per instruction; then Fetch,
-  -- FetchWait and Decode notice the PC has left the program.
-  cycles === 5 * n + 3
+  -- Registered RAM commands add FetchDelay, including the final end check.
+  cycles === 8 * n + 5
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
@@ -319,12 +331,14 @@ prop_reset_memory_takes_exactly_16384_clear_cycles = withTests 1 . property $ do
       commandAccepted = stepSim (startSim initialMachine dirtyRam) (Just 0x4d)
       beforeLastWrite = runInputs commandAccepted (P.replicate 16383 Nothing)
       finished = stepSim beforeLastWrite Nothing
+      drained = stepSim finished Nothing
 
   hostState (simMachine commandAccepted) === ClearMemory 0
   hostState (simMachine beforeLastWrite) === ClearMemory 16383
   ramRead (simRam beforeLastWrite) 16383 === 0xdead_beef
   hostState (simMachine finished) === HostIdle
-  assert (P.all (\address -> ramRead (simRam finished) address == 0) [minBound .. maxBound])
+  ramRead (simRam finished) 16383 === 0xdead_beef
+  assert (P.all (\address -> ramRead (simRam drained) address == 0) [minBound .. maxBound])
 
 -- RV32M ----------------------------------------------------------------------
 
@@ -466,13 +480,14 @@ simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
+    [ ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),
+      ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
       ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
       ("RESET-MEM is exactly 16384 clear cycles", prop_reset_memory_takes_exactly_16384_clear_cycles),
       ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
-      ("Simple instructions take five cycles each", prop_simple_instructions_take_five_cycles_each),
+      ("Simple instructions take eight cycles each", prop_simple_instructions_take_eight_cycles_each),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
       ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),
