@@ -6,7 +6,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 
 | Design | Source | Build script | Clock |
 |---|---|---|---|
-| SimpleRisc (RV32I) | `src/SimpleRisc.hs` | `build.sh` | PLL, default 96 MHz |
+| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh` | PLL, default 96 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
 ```bash
@@ -42,6 +42,47 @@ set an arbitrary rate by configuring the port with `tcsetattr` at a standard
 rate and then calling the `IOSSIOSPEED` ioctl (`0x80085402`) with the exact
 rate. Setting a non-standard speed through `tcsetattr` alone fails with
 `EINVAL`.
+
+## Running C programs
+
+`c/` holds a minimal C runtime for SimpleRisc: `crt0.S` (sets `sp` and `gp`,
+zeroes `.bss`, calls `main`, then `ecall`, which halts the CPU and sends
+"DONE"), `link.ld` (64 KiB at address 0, stack at the top) and a UART driver
+(`uart.h`, `uart.c`). Programs build with the `rv32im/ilp32` support in
+`riscv64-unknown-elf-gcc`, with no libc or libgcc. The startup code must not use
+CSR instructions: any CSR instruction halts this CPU.
+
+```bash
+boards/tangnano20k/c/build.sh hello
+```
+
+```bash
+boards/tangnano20k/run_program.py output/tangnano20k/c/hello.bin
+```
+
+`run_program.py` loads the image with the `P`/`R` host protocol, sends
+`--input` text, and prints the output until "DONE". It keeps one port session
+open throughout (see the bridge issue below); `--freq-mhz` sets the baud rate
+for a non-default clock.
+
+To run the same program in simulation instead, write the host byte stream to
+a file and replay it through the core's real UART loader with `tb_program.v`:
+
+```bash
+boards/tangnano20k/run_program.py output/tangnano20k/c/hello.bin --frame /tmp/hello.hex
+```
+
+```bash
+iverilog -o /tmp/tb.vvp boards/tangnano20k/tb_program.v output/tangnano20k/clash/SimpleRisc.topEntity/simple_risc.v
+```
+
+```bash
+vvp -n /tmp/tb.vvp +frame=/tmp/hello.hex
+```
+
+Loading runs at UART speed, so a 750-byte image takes about 3 minutes to
+simulate. `build.sh` writes the Verilog; to generate only the Verilog, run
+`stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir output/tangnano20k/clash`.
 
 ## Clock speed: nextpnr is optimistic
 

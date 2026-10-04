@@ -12,11 +12,11 @@
 
 {-# HLINT ignore "Replace case with maybe" #-}
 
--- | A deliberately small, unpipelined RV32I computer.
+-- | A deliberately small, unpipelined RV32IM computer.
 --
 -- Memory map:
 --
---   * 0x0000_0000 - 0x0000_0fff: 4 KiB unified instruction/data BRAM
+--   * 0x0000_0000 - 0x0000_ffff: 64 KiB unified instruction/data BRAM
 --   * 0x1000_0000: UART TXDATA (write the low byte)
 --   * 0x1000_0004: UART STATUS (bit 0 = TX ready, bit 1 = RX byte ready)
 --   * 0x1000_0008: UART RXDATA (read low byte, consuming it)
@@ -29,7 +29,7 @@
 --   * 'R'                              RUN from address zero.
 --   * 'X'                              RESET PC and all registers.
 --   * 'M'                              RESET-MEM (also resets the CPU), taking
---                                      1024 clocks to zero the BRAM.
+--                                      16384 clocks to zero the BRAM.
 --
 -- PROGRAM replaces words starting at address zero and records the end of the
 -- program.  When an instruction retires with its next PC at or beyond the end
@@ -39,6 +39,11 @@
 -- illegal instruction also stop the CPU and produce DONE.  While running,
 -- received UART bytes are placed in the one-byte RXDATA register; byte 0x03
 -- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
+--
+-- The M extension (MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU) runs on an
+-- iterative unit: about 36 cycles per instruction, one 33-bit add or subtract
+-- per cycle.  Division by zero and overflow give the results the RISC-V spec
+-- requires.
 module SimpleRisc where
 
 import Clash.Prelude
@@ -47,7 +52,8 @@ type Word32 = Unsigned 32
 
 type Byte = Unsigned 8
 
-type MemAddr = Unsigned 10
+-- | A word address in the 64 KiB memory.
+type MemAddr = Unsigned 14
 
 -- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
 -- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
@@ -68,6 +74,8 @@ data CpuPhase
     Decode
   | -- | Do the arithmetic into 'cpuComputed'.
     Execute
+  | -- | Run the multiply/divide unit ('cpuMulDiv') until it has a result.
+    MulDiv
   | -- | Write back, update the PC and start the next fetch or the memory/UART
     -- access.
     Commit
@@ -103,11 +111,44 @@ data Computed = Computed
   }
   deriving (Generic, NFDataX, Show, Eq)
 
+-- | Where the multiply/divide unit is in an instruction.
+data MdStep
+  = -- | Take the operands' magnitudes, or answer a division by zero.
+    MdPrepare
+  | -- | One of 32 shift-and-add (multiply) or restoring-division steps.
+    MdLoop (Index 32)
+  | -- | Negate the low word if needed, recording the carry out of it.
+    MdFixLo
+  | -- | Negate the high word if needed, taking that carry.
+    MdFixHi
+  | -- | Pick the requested half.
+    MdFinish
+  deriving (Generic, NFDataX, Show, Eq)
+
+-- | The multiply/divide unit's working registers.  A multiply keeps the
+-- 64-bit product in 'mdHi' and 'mdLo' (the multiplier shifts out of 'mdLo' as
+-- the product shifts in); a division keeps the remainder in 'mdHi' and the
+-- quotient in 'mdLo' (the dividend shifts out as quotient bits shift in).
+data MulDivUnit = MulDivUnit
+  { mdStep :: MdStep,
+    mdHi :: Word32,
+    mdLo :: Word32,
+    -- | The magnitude of the multiplicand or the divisor.
+    mdOperand :: Word32,
+    -- | Negate the low word (product low half or quotient) at the end.
+    mdNegLo :: Bool,
+    -- | Negate the high word (product high half or remainder) at the end.
+    mdNegHi :: Bool,
+    -- | The low word was zero before negation: the carry into the high word.
+    mdCarry :: Bool
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
 data HostState
   = HostIdle
   | ProgramCountLo
   | ProgramCountHi Byte
-  | ProgramBytes (Unsigned 11) MemAddr (Index 4) Word32
+  | ProgramBytes (Unsigned 15) MemAddr (Index 4) Word32
   | ClearMemory MemAddr
   deriving (Generic, NFDataX, Show, Eq)
 
@@ -130,6 +171,7 @@ data Machine = Machine
     -- than nextpnr models.
     cpuIsRegOp :: Bool,
     cpuComputed :: Computed,
+    cpuMulDiv :: MulDivUnit,
     cpuMemoryWord :: Word32,
     cpuRunning :: Bool,
     programEnd :: Word32,
@@ -162,6 +204,7 @@ initialMachine =
       cpuImm = 0,
       cpuIsRegOp = False,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
+      cpuMulDiv = MulDivUnit MdPrepare 0 0 0 False False False,
       cpuMemoryWord = 0,
       cpuRunning = False,
       programEnd = 0,
@@ -275,7 +318,7 @@ simpleRisc serialRx = serialTx
     machineOutput = mealy machineStep initialMachine machineInput
     (memoryAddress, memoryWrite, txRequest) = unbundle machineOutput
 
-    -- A synchronous 1024 x 32-bit RAM.  Reads take one cycle; writes are visible
+    -- A synchronous 16384 x 32-bit RAM.  Reads take one cycle; writes are visible
     -- on the following read.  This shape maps naturally to FPGA block RAM.
     memoryOut = blockRamPow2 (repeat 0) memoryAddress memoryWrite
 
@@ -332,11 +375,11 @@ stoppedStep machine received txReady =
         (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
         (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
         (ProgramCountHi lowByte, Just highByte) ->
-          -- Clamp to the 1024-word memory with bit tests rather than
+          -- Clamp to the 16384-word memory with bit tests rather than
           -- comparators, which synthesise to carry chains.
           let requested = (resize highByte `shiftL` 8) .|. resize lowByte :: Unsigned 16
-              tooMany = requested .&. 0xfc00 /= 0
-              count = if tooMany then 1024 else resize requested :: Unsigned 11
+              tooMany = requested .&. 0xc000 /= 0
+              count = if tooMany then 16384 else resize requested :: Unsigned 15
               nextHost = if requested == 0 then HostIdle else ProgramBytes count 0 0 0
            in idleOut machineWithReply {hostState = nextHost, programEnd = 0, clearRegisters = True, cpuPc = 0, cpuPhase = Fetch} replyByte
         (ProgramBytes wordsLeft address byteNo partial, Just byte) ->
@@ -431,7 +474,18 @@ cpuStep machine memoryWord received txReady
                          }
                Execute ->
                  let op2 = if cpuIsRegOp then cpuB else cpuImm
-                  in next machineRx {cpuPhase = Commit, cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2}
+                     -- OP with funct7 = 1 is the M extension.
+                     isMulDiv = cpuIsRegOp && instruction `shiftR` 25 == 1
+                  in next
+                       machineRx
+                         { cpuPhase = if isMulDiv then MulDiv else Commit,
+                           cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2,
+                           cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
+                         }
+               MulDiv ->
+                 case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
+                   Left unit -> next machineRx {cpuMulDiv = unit}
+                   Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
                Commit -> commitInstruction machineRx txReady
                LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadWait}, (memoryIndex address, Nothing, Nothing))
                LoadWait -> next machineRx {cpuPhase = LoadAlign, cpuMemoryWord = memoryWord}
@@ -587,7 +641,7 @@ memoryIndex :: Word32 -> MemAddr
 memoryIndex address = resize (address `shiftR` 2)
 
 validMemoryAddress :: Word32 -> Bool
-validMemoryAddress address = address .&. 0xffff_f000 == 0 -- < 4096, as a bit test
+validMemoryAddress address = address .&. 0xffff_0000 == 0 -- < 64 KiB, as a bit test
 
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
@@ -660,6 +714,53 @@ alu funct3 funct7 isRegister a op2 = if legal then Just value else Nothing
       0b101 -> if alternate then unsigned32 (signed32 a `shiftR` shamt) else a `shiftR` shamt -- SRL(I), SRA(I)
       0b110 -> a .|. op2 -- OR(I)
       _ -> a .&. op2 -- AND(I)
+
+-- | One cycle of the multiply/divide unit for the M instruction @funct3@ on
+-- operands @a@ (rs1) and @b@ (rs2): the next unit state, or the result.
+mulDivStep :: BitVector 3 -> Word32 -> Word32 -> MulDivUnit -> Either MulDivUnit Word32
+mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
+  MdPrepare
+    -- Division by zero: quotient all ones, remainder the dividend.
+    | isDiv && b == 0 -> Left unit {mdStep = MdFinish, mdLo = maxBound, mdHi = a}
+    | otherwise ->
+        let magnitude negative x = if negative then negate x else x
+         in Left
+              MulDivUnit
+                { mdStep = MdLoop 0,
+                  mdHi = 0,
+                  mdLo = if isDiv then magnitude aNegative a else magnitude bNegative b,
+                  mdOperand = if isDiv then magnitude bNegative b else magnitude aNegative a,
+                  mdNegLo = aNegative /= bNegative,
+                  mdNegHi = if isDiv then aNegative else aNegative /= bNegative,
+                  mdCarry = False
+                }
+  MdLoop i ->
+    let (hi, lo) = if isDiv then divideStep else multiplyStep
+     in Left unit {mdStep = if i == maxBound then MdFixLo else MdLoop (succ i), mdHi = hi, mdLo = lo}
+  MdFixLo -> Left unit {mdStep = MdFixHi, mdLo = if mdNegLo then negate mdLo else mdLo, mdCarry = mdLo == 0}
+  -- Negating the remainder is complement + 1; negating the product's high
+  -- half is complement + the carry out of the low half.
+  MdFixHi -> Left unit {mdStep = MdFinish, mdHi = if mdNegHi then complement mdHi + boolWord (isDiv || mdCarry) else mdHi}
+  -- MUL, DIV and DIVU take the low word; MULH*, REM and REMU the high word.
+  MdFinish -> Right (if funct3 == 0b000 || funct3 == 0b100 || funct3 == 0b101 then mdLo else mdHi)
+  where
+    isDiv = testBit funct3 2
+    -- MULH, MULHSU, DIV and REM treat rs1 as signed; MULH, DIV and REM rs2.
+    aSigned = funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b100 || funct3 == 0b110
+    bSigned = funct3 == 0b001 || funct3 == 0b100 || funct3 == 0b110
+    aNegative = aSigned && testBit a 31
+    bNegative = bSigned && testBit b 31
+    -- Add the multiplicand into the high half if the multiplier's low bit is
+    -- set, then shift the 65-bit {carry, hi, lo} right by one.
+    multiplyStep =
+      let total = if testBit mdLo 0 then resize mdHi + resize mdOperand else resize mdHi :: Unsigned 33
+       in (resize (total `shiftR` 1), (mdLo `shiftR` 1) .|. (if testBit total 0 then 0x8000_0000 else 0))
+    -- Shift the next dividend bit into the remainder; subtract the divisor if
+    -- it fits, recording a quotient bit.
+    divideStep =
+      let remainder = (resize mdHi `shiftL` 1) .|. (if testBit mdLo 31 then 1 else 0) :: Unsigned 33
+          fits = remainder >= resize mdOperand
+       in (resize (if fits then remainder - resize mdOperand else remainder), (mdLo `shiftL` 1) .|. boolWord fits)
 
 branchTaken :: BitVector 3 -> Word32 -> Word32 -> Maybe Bool
 branchTaken funct3 a b = case funct3 of

@@ -15,6 +15,7 @@
 module SimpleRisc where
 
 import Clash.Prelude hiding (And, Xor)
+import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as List
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
@@ -22,7 +23,19 @@ import qualified Hedgehog.Range as Range
 import "haskplayground" SimpleRisc
 import qualified Prelude as P
 
-type Ram = Vec 1024 Word32
+-- | The 64 KiB memory as a sparse map: copying a 16384-entry vector on every
+-- write would make the simulations far too slow.  Unwritten words read as
+-- 'ramDefault'.
+data Ram = Ram {ramDefault :: Word32, ramWords :: IntMap.IntMap Word32}
+
+blankRam :: Word32 -> Ram
+blankRam fill = Ram fill IntMap.empty
+
+ramRead :: Ram -> MemAddr -> Word32
+ramRead (Ram fill words) address = IntMap.findWithDefault fill (fromIntegral address) words
+
+ramWrite :: MemAddr -> Word32 -> Ram -> Ram
+ramWrite address value (Ram fill words) = Ram fill (IntMap.insert (fromIntegral address) value words)
 
 -- This mirrors blockRamPow2: the read address selected in one cycle produces
 -- the input word for the following machineStep, and writes happen on the edge.
@@ -40,10 +53,10 @@ stepSimReady :: Bool -> Sim -> Maybe Byte -> Sim
 stepSimReady txReady Sim {..} received =
   let (machine', (readAddress, writeCommand, txByte)) =
         machineStep simMachine (simRamOutput, received, txReady)
-      nextRamOutput = simRam !! readAddress
+      nextRamOutput = ramRead simRam readAddress
       ram' = case writeCommand of
         Nothing -> simRam
-        Just (writeAddress, value) -> replace writeAddress value simRam
+        Just (writeAddress, value) -> ramWrite writeAddress value simRam
       transmitted' = case txByte of
         Nothing -> simTransmitted
         Just byte -> simTransmitted P.++ [byte]
@@ -56,11 +69,7 @@ startSim :: Machine -> Ram -> Sim
 startSim machine ram = Sim machine ram 0 []
 
 ramFromList :: [Word32] -> Ram
-ramFromList = go 0 (repeat 0)
-  where
-    go :: Index 1024 -> Ram -> [Word32] -> Ram
-    go _ ram [] = ram
-    go address ram (word : rest) = go (address + 1) (replace address word ram) rest
+ramFromList program = Ram 0 (IntMap.fromList (P.zip [0 ..] program))
 
 -- | Step with no UART input until the CPU stops, returning the cycles taken.
 runUntilHalt :: Int -> Sim -> (Int, Sim)
@@ -204,7 +213,7 @@ prop_arithmetic_instruction_stores_expected_result = property $ do
       expected = arithmeticResult operation a b
 
   cpuRegs (simMachine finished) !! (3 :: Index 32) === expected
-  simRam finished !! (64 :: Index 1024) === expected
+  ramRead (simRam finished) 64 === expected
   assert (not (cpuRunning (simMachine finished)))
   simTransmitted finished === [0x44, 0x4f, 0x4e, 0x45]
 
@@ -215,8 +224,8 @@ prop_program_loads_up_to_fifty_words = property $ do
       countLo = fromIntegral count :: Byte
       countHi = fromIntegral (count `shiftR` 8) :: Byte
       frame = Just 0x50 : Just countLo : Just countHi : P.map Just (P.concatMap wordBytes wordsToProgram)
-      programmed = runInputs (startSim initialMachine (repeat 0)) frame
-      actual = P.map (\i -> simRam programmed !! (fromIntegral i :: Index 1024)) [0 .. count - 1]
+      programmed = runInputs (startSim initialMachine (blankRam 0)) frame
+      actual = P.map (ramRead (simRam programmed) . fromIntegral) [0 .. count - 1]
 
   actual === wordsToProgram
   programEnd (simMachine programmed) === fromIntegral (count * 4)
@@ -304,18 +313,84 @@ prop_circuit_programs_and_runs_over_uart = withTests 1 . property $ do
 
   received === [0x48, 0x69] P.++ doneBytes
 
-prop_reset_memory_takes_exactly_1024_clear_cycles :: Property
-prop_reset_memory_takes_exactly_1024_clear_cycles = withTests 1 . property $ do
-  let dirtyRam = repeat 0xdead_beef
+prop_reset_memory_takes_exactly_16384_clear_cycles :: Property
+prop_reset_memory_takes_exactly_16384_clear_cycles = withTests 1 . property $ do
+  let dirtyRam = blankRam 0xdead_beef
       commandAccepted = stepSim (startSim initialMachine dirtyRam) (Just 0x4d)
-      beforeLastWrite = runInputs commandAccepted (P.replicate 1023 Nothing)
+      beforeLastWrite = runInputs commandAccepted (P.replicate 16383 Nothing)
       finished = stepSim beforeLastWrite Nothing
 
   hostState (simMachine commandAccepted) === ClearMemory 0
-  hostState (simMachine beforeLastWrite) === ClearMemory 1023
-  simRam beforeLastWrite !! (1023 :: Index 1024) === 0xdead_beef
+  hostState (simMachine beforeLastWrite) === ClearMemory 16383
+  ramRead (simRam beforeLastWrite) 16383 === 0xdead_beef
   hostState (simMachine finished) === HostIdle
-  simRam finished === repeat 0
+  assert (P.all (\address -> ramRead (simRam finished) address == 0) [minBound .. maxBound])
+
+-- RV32M ----------------------------------------------------------------------
+
+data MulDivOp = Mul | Mulh | Mulhsu | Mulhu | Div | Divu | Rem | Remu
+  deriving (Bounded, Enum, Eq, Show)
+
+-- | @op x3, x1, x2@: funct7 = 1, funct3 = the operation's position.
+encodeMulDiv :: MulDivOp -> Word32
+encodeMulDiv operation =
+  (1 `shiftL` 25)
+    .|. (2 `shiftL` 20)
+    .|. (1 `shiftL` 15)
+    .|. (fromIntegral (fromEnum operation) `shiftL` 12)
+    .|. (3 `shiftL` 7)
+    .|. 0x33
+
+-- | The RISC-V M semantics, computed on unbounded integers.
+mulDivResult :: MulDivOp -> Word32 -> Word32 -> Word32
+mulDivResult operation a b = case operation of
+  Mul -> fromInteger (ua * ub)
+  Mulh -> fromInteger ((sa * sb) `shiftR` 32)
+  Mulhsu -> fromInteger ((sa * ub) `shiftR` 32)
+  Mulhu -> fromInteger ((ua * ub) `shiftR` 32)
+  Div
+    | b == 0 -> maxBound
+    | overflow -> a
+    | otherwise -> fromInteger (sa `quot` sb)
+  Divu
+    | b == 0 -> maxBound
+    | otherwise -> fromInteger (ua `quot` ub)
+  Rem
+    | b == 0 -> a
+    | overflow -> 0
+    | otherwise -> fromInteger (sa `rem` sb)
+  Remu
+    | b == 0 -> a
+    | otherwise -> fromInteger (ua `rem` ub)
+  where
+    ua = toInteger a
+    ub = toInteger b
+    sa = toInteger (asSigned a)
+    sb = toInteger (asSigned b)
+    overflow = a == 0x8000_0000 && b == maxBound
+
+-- | Random words, often the ones division and sign handling get wrong.
+operandGen :: Gen Word32
+operandGen =
+  Gen.frequency
+    [ (3, Gen.integral Range.constantBounded),
+      (1, Gen.integral (Range.linear 0 20)),
+      (2, Gen.element [0, 1, 2, maxBound, maxBound - 1, 0x8000_0000, 0x7fff_ffff])
+    ]
+
+prop_muldiv_matches_reference :: Property
+prop_muldiv_matches_reference = withTests 400 . property $ do
+  operation <- forAll Gen.enumBounded
+  a <- forAll operandGen
+  b <- forAll operandGen
+  -- op x3,x1,x2; sw x3,256(x0)
+  let ram = ramFromList [encodeMulDiv operation, sw 3 0 256]
+      (_, halted) = runUntilHalt 200 (startSim (runningMachine [(1, a), (2, b)] 8) ram)
+      expected = mulDivResult operation a b
+
+  assert (not (cpuRunning (simMachine halted)))
+  cpuRegs (simMachine halted) !! (3 :: Index 32) === expected
+  ramRead (simRam halted) 64 === expected
 
 -- UART timing ----------------------------------------------------------------
 
@@ -393,7 +468,8 @@ simpleRiscGroup =
     "SimpleRisc"
     [ ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
       ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
-      ("RESET-MEM is exactly 1024 clear cycles", prop_reset_memory_takes_exactly_1024_clear_cycles),
+      ("RESET-MEM is exactly 16384 clear cycles", prop_reset_memory_takes_exactly_16384_clear_cycles),
+      ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
       ("Simple instructions take five cycles each", prop_simple_instructions_take_five_cycles_each),
