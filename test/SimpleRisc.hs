@@ -766,11 +766,75 @@ prop_counter_write_overrides_retirement = withTests 1 $ property $ do
     cpuExceptionCause fault === 2
     ) [0xc00, 0xc80, 0xc02, 0xc82]
 
+prop_registered_memory_decode :: Property
+prop_registered_memory_decode = property $ do
+  ramAddress <- forAll (Gen.integral (Range.linear 0 65535))
+  P.mapM_ (\(address, target) -> do
+    let before = initialMachine {cpuRunning = True, cpuPhase = MemoryDecode,
+          cpuComputed = Computed Nothing 4 0 Nothing address,
+          cpuMemoryTarget = UnmappedTarget}
+        (decoded, (_, write, byte)) = machineStep before (0, Nothing, True)
+    cpuPhase decoded === Commit
+    cpuMemoryTarget decoded === target
+    cpuPc decoded === 0
+    counterValue (cpuInstret decoded) === 0
+    write === Nothing
+    byte === Nothing
+    ) [(ramAddress, RamTarget), (uartTxData, UartTxTarget),
+       (uartStatus, UartStatusTarget), (uartRxData, UartRxTarget),
+       (exitDevice, ExitTarget), (exitDevice + 4, UnmappedTarget),
+       (0x10000, UnmappedTarget), (0x80000000, UnmappedTarget)]
+
+prop_finisher_commands :: Property
+prop_finisher_commands = property $ do
+  code <- forAll (Gen.integral Range.constantBounded :: Gen (Unsigned 16))
+  P.mapM_ (\(width, value, stops) -> do
+    let base = initialMachine {cpuRunning = True, cpuPhase = Commit,
+          cpuPc = 4, cpuInstruction = if width == 2 then 0x0020a023 else 0x00209023,
+          cpuB = value, cpuComputed = Computed Nothing 8 0 Nothing exitDevice,
+          cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapValue = 42}}
+        (queued, _, command) = commitInstruction base True
+        (completed, response) = machineStep queued (0, Nothing, True)
+        (counted, _) = machineStep completed (0, Nothing, True)
+    cpuPhase queued === ExitWrite
+    command === (0, Nothing, Nothing)
+    response === (0, Nothing, Nothing)
+    cpuRunning completed === not stops
+    cpuPc completed === 8
+    cpuTrapRegisters completed === cpuTrapRegisters base
+    counterValue (cpuInstret counted) === 1
+    replyState completed === if stops then DoneReply 0 else NoReply
+    ) [(2 :: Int, (resize code `shiftL` 16) .|. 0x3333, True),
+       (2, 0x5555, True), (1, 0x5555, True), (1, 0x3333, True),
+       (2, 0x7777, False), (2, 0, False)]
+  -- Supported reads return zero; byte and neighboring-address accesses fault.
+  P.mapM_ (\(instruction, address, expectedCause) -> do
+    let m = initialMachine {cpuPhase = Commit, cpuInstruction = instruction,
+          cpuComputed = Computed Nothing 4 0 Nothing address}
+        (result, write, output) = commitInstruction m True
+    output === (0, Nothing, Nothing)
+    case expectedCause of
+      Nothing -> do
+        write === Just (1, 0)
+        cpuPhase result === Fetch
+      Just cause -> do
+        write === Nothing
+        cpuPhase result === Trap
+        cpuExceptionCause result === cause
+        cpuExceptionValue result === address
+    ) [(0x00002083, exitDevice, Nothing), (0x00001083, exitDevice, Nothing),
+       (0x00005083, exitDevice, Nothing), (0x00000083, exitDevice, Just 5),
+       (0x00004083, exitDevice, Just 5), (0x00200023, exitDevice, Just 7),
+       (0x00202023, exitDevice + 2, Just 6),
+       (0x00202023, exitDevice + 4, Just 7)]
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Split counters match a 64-bit reference", prop_split_counter_matches_64_bit_reference),
+    [ ("Registered memory target selection", prop_registered_memory_decode),
+      ("Registered finisher commands and access rules", prop_finisher_commands),
+      ("Split counters match a 64-bit reference", prop_split_counter_matches_64_bit_reference),
       ("Counter CSR reads wait for carry", prop_counter_csr_reads_wait_for_carry),
       ("Precise retirement and UART stalls", prop_counters_retire_precisely),
       ("Counter writes override implicit increments", prop_counter_write_overrides_retirement),

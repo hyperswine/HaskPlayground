@@ -12,7 +12,7 @@
 #   MARGIN    place and route for FREQ_MHZ * MARGIN (default 1.5).  nextpnr's
 #             Gowin timing model is optimistic: designs it passed at 52 and
 #             126 MHz failed on the chip at 51 and 108 MHz.
-#   SEEDS     placement seeds to try, first passing one wins.  Default 2, then 1 and 3..8.
+#   SEEDS     placement seeds to try, first passing one wins.  Default 3, 2, 1, then 4..8.
 #   ALLOW_FAIL=1  write a bitstream even if timing fails (for overclocking
 #             experiments on the board).
 #   OSS_CAD_SUITE if the suite is not at ~/Documents/Libs/oss-cad-suite.
@@ -20,7 +20,7 @@ set -euo pipefail
 
 freq="${FREQ_MHZ:-96}"
 margin="${MARGIN:-1.5}"
-seeds="${SEEDS:-2 1 3 4 5 6 7 8}"
+seeds="${SEEDS:-3 2 1 4 5 6 7 8}"
 allow_fail=()
 if [[ "${ALLOW_FAIL:-}" == "1" ]]; then allow_fail=(--timing-allow-fail); fi
 if (( freq % 3 != 0 )); then

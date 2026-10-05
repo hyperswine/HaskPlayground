@@ -48,10 +48,16 @@ and 3,840 RV32I comparisons. All 26 SimpleRisc properties and the generated
 RTL smoke test pass. FP-RISC uses the matching CSR adapter and counter fixture.
 See [the implementation and measured results](boards/tangnano20k/MACHINE-MODE-2026-10-05.md).
 
-The memory map and host protocol remain in place; C and FP-RISC clear `mtvec`
-on exit for the temporary `DONE` compatibility rule. No timer/interrupt
-sources or official architecture-test claim yet. Next is step 3: bus, exit
-device and boot ROM, followed by step 4's conformance baseline.
+The RAM map and host protocol remain in place. Step 3 now starts with an
+explicit finisher at `0x00100000` and registered device selection; C and
+FP-RISC terminate through the finisher while
+preserving `mtvec`. The temporary ECALL/end-of-image halt rules remain for
+older binaries until the boot ROM replaces the hardware host controller.
+The finisher/device-selection slice passes its 15 exit cases and all existing
+CPU, counter, trap, RV32IM and FP-RISC checks at 96 MHz. No timer/interrupt
+sources or official architecture-test claim yet. The rest of step 3 is the
+registered bus, RAM relocation and boot ROM, followed by step 4's conformance
+baseline. See [the system separation slice](boards/tangnano20k/SYSTEM-BUS-2026-10-05.md).
 
 ## Step 1: machine mode (Zicsr and traps)
 
@@ -101,8 +107,9 @@ step 2 exists; a no-op before that).
   kind of carry chain that fails on this chip.
 
 **Compatibility rule until step 3:** while `mtvec` is 0, a trap halts the CPU
-and sends `DONE`, as today, so the existing `crt0.S` files (which end with
-`ecall`) keep working. This is non-standard and is removed in step 3.
+and sends `DONE`, so older binaries that terminate with `ecall` keep
+working. Current C and FP-RISC startup use the step 3 finisher. The legacy
+trap convention is non-standard and is removed with the boot ROM in step 3.
 
 **Software:** build with `-march=rv32im_zicsr`. fprisc's Tang Nano
 `machine.c` can implement `csr_read`/`csr_write` for real instead of

@@ -46,11 +46,11 @@ rate. Setting a non-standard speed through `tcsetattr` alone fails with
 ## Running C programs
 
 `c/` holds a minimal C runtime for SimpleRisc: `crt0.S` (sets `sp` and `gp`,
-zeroes `.bss`, calls `main`, then `ecall`, which halts the CPU and sends
-"DONE"), `link.ld` (64 KiB at address 0, stack at the top) and a UART driver
+zeroes `.bss`, calls `main`, then writes the finisher at `0x00100000`,
+which stops execution and sends "DONE"), `link.ld` (64 KiB at address 0, stack at the top) and a UART driver
 (`uart.h`, `uart.c`). Programs build with `rv32im_zicsr/ilp32` support in
-`riscv64-unknown-elf-gcc`, with no libc or libgcc. Startup clears `mtvec` before
-its final ECALL so guest trap handlers do not intercept host termination.
+`riscv64-unknown-elf-gcc`, with no libc or libgcc. Exit preserves `mtvec`; installed guest trap handlers cannot intercept the
+finisher. Older ECALL-based binaries retain temporary compatibility.
 
 SimpleRisc supports the six Zicsr instructions, direct-mode machine traps,
 `mret`, and `wfi` as a no-op until interrupts are implemented. The trap/status,
@@ -62,6 +62,9 @@ boundaries and measured board results. `check_traps.py` runs a guest C handler
 that checks CSR operations, trap cause/PC/value and return status.
 `check_counters.py` checks counter rollover, half writes, aliases, exact
 retirement and faulting instructions that must not retire.
+`check_finisher.py` verifies explicit success/failure exits with a nonzero
+trap vector and an infinite loop after the store; see
+[SYSTEM-BUS-2026-10-05.md](SYSTEM-BUS-2026-10-05.md).
 
 ```bash
 boards/tangnano20k/c/build.sh hello
@@ -101,7 +104,7 @@ nextpnr's timing model for Gowin parts is only an estimate, and it has been
 consistently optimistic for this design. The board is the only reliable
 judge:
 
-| Design | nextpnr fmax | Works on the board | Fails on the board |
+| Design | nextpnr fmax | Works on the board | Failures / limits |
 |---|---|---|---|
 | 1 cycle per instruction (early version) | 52 MHz | 27 MHz | 51 MHz |
 | 2 cycles per instruction | 63 MHz | 51 MHz | not tested higher |
@@ -109,9 +112,10 @@ judge:
 | 8 cycles per instruction (earlier 2026-10-05) | 149.08 MHz, seed 2 | 96 MHz with the earlier suite; expanded ALU test passes at 51 MHz | expanded ALU test fails at 96, 102 and 108 MHz |
 | 8 cycles ordinary / 9 cycles shifts (clock sweep, 2026-10-05) | 150.58 MHz, seed 2 | 108 and 114 MHz | 117 MHz: incorrect sieve; 120 MHz: subtraction failure |
 | machine traps, Zicsr and split counters (2026-10-05) | 147.19 MHz, seed 2, route target 144 MHz | 96 MHz: counter, trap, CPU, RV32IM and FP-RISC suites | seed 1 at target 115.2 MHz loses string characters at 96 MHz despite a reported 142.90 MHz maximum |
+| finisher and registered device target (2026-10-05) | 144.61 MHz, seed 3, route target 144 MHz | 96 MHz: finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seed 2 misses the route margin target at 137.84 MHz; not loaded |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
-(`MARGIN=1.5` by default, seed 2 tried first). To test above what timing allows, build with
+(`MARGIN=1.5` by default, seed 3 tried first). To test above what timing allows, build with
 `ALLOW_FAIL=1 MARGIN=1` and check on the board.
 
 The paths that turned out to be slow on the real chip, well beyond what

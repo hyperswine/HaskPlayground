@@ -119,11 +119,14 @@ data CpuPhase
   | StoreCommit
   | -- | Wait for the UART transmitter, then hand it the byte.
     TxWrite
+  | -- | Interpret a registered finisher write, independently of trap handling.
+    ExitWrite
+  | MemoryDecode
   deriving (Generic, NFDataX, Show, Eq)
 
 
 -- A dedicated state bit drives each stage instead of decoding a binary tag.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 28
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 30
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -151,7 +154,9 @@ data CpuPhase
     ConstrRepr 'Trap 16777216 16777216 [],
     ConstrRepr 'CsrRead 33554432 33554432 [],
     ConstrRepr 'CsrWrite 67108864 67108864 [],
-    ConstrRepr 'TrapReturn 134217728 134217728 []
+    ConstrRepr 'TrapReturn 134217728 134217728 [],
+    ConstrRepr 'ExitWrite 268435456 268435456 [],
+    ConstrRepr 'MemoryDecode 536870912 536870912 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -260,6 +265,10 @@ tickCounter increment write counter =
           carriedHi
           (increment && lo == maxBound)
 
+-- Registered memory target; wide address comparisons stay out of Commit.
+data MemoryTarget = RamTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | UnmappedTarget
+  deriving (Generic, NFDataX, Show, Eq)
+
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     -- | Registered writeback request; consumed during the next fetch.
@@ -292,6 +301,7 @@ data Machine = Machine
     cpuCountRetirement :: Bool,
     cpuCounterWrite :: Maybe (Unsigned 12, Word32),
     cpuMulDiv :: MulDivUnit,
+    cpuMemoryTarget :: MemoryTarget,
     cpuMemoryWord :: Word32,
     cpuAlignedLoad :: Word32,
     cpuMergedStore :: Word32,
@@ -341,6 +351,7 @@ initialMachine =
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
       cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
+      cpuMemoryTarget = UnmappedTarget,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
       cpuMergedStore = 0,
@@ -599,6 +610,7 @@ resetCpu machine =
       cpuCsrSource = 0,
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
+      cpuMemoryTarget = UnmappedTarget,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
       cpuMergedStore = 0,
@@ -674,11 +686,12 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                  let op2 = if cpuIsRegOp then cpuB else cpuImm
                      -- OP with funct7 = 1 is the M extension.
                      isMulDiv = cpuIsRegOp && instruction `shiftR` 25 == 1
+                     isMemory = instruction .&. 0x7f == 0x03 || instruction .&. 0x7f == 0x23
                      isShift = (instruction .&. 0x7f == 0x13 || cpuIsRegOp)
                        && (instructionFunct3 instruction == 0b001 || instructionFunct3 instruction == 0b101)
                   in next
                        machineRx
-                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else Commit,
+                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else if isMemory then MemoryDecode else Commit,
                            cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2,
                            cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
                          }
@@ -692,7 +705,9 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                  case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
-               Commit -> commitInstruction machineRx txReady
+               MemoryDecode -> next machineRx
+                 {cpuPhase = Commit, cpuMemoryTarget = decodeMemoryTarget address}
+               Commit -> commitInstructionDecoded machineRx txReady
                Trap -> withoutRegister (enterTrap machineRx)
                CsrRead -> csrReadStep machineRx
                CsrWrite -> csrWriteStep machineRx
@@ -705,6 +720,12 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                StoreIssue -> withoutRegister (machineRx {cpuPhase = StoreDelay}, (memoryIndex address, Nothing, Nothing))
                StoreDelay -> next machineRx {cpuPhase = StoreCapture}
                StoreCapture -> next machineRx {cpuPhase = StoreWait}
+               ExitWrite ->
+                 let status = cpuB .&. 0xffff
+                     completed = machineRx {cpuCountRetirement = True}
+                  in if status == 0x5555 || status == 0x3333
+                       then withoutRegister (haltMachine completed)
+                       else withoutRegister (finishInstruction machineRx Nothing)
                TxWrite
                  | txReady -> withoutRegister (finishInstructionWithTx machineRx (Just (resize cpuB)))
                  | otherwise -> next machineRx
@@ -772,7 +793,12 @@ instructionFunct3 instruction = pack (resize ((instruction `shiftR` 12) .&. 7) :
 
 -- | Commit stage: act on the values the Execute stage computed.
 commitInstruction :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
-commitInstruction machine txReady =
+-- Direct semantic helper; the circuit uses the registered MemoryDecode stage.
+commitInstruction machine txReady = commitInstructionDecoded
+  machine {cpuMemoryTarget = decodeMemoryTarget (cAddress (cpuComputed machine))} txReady
+
+commitInstructionDecoded :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
+commitInstructionDecoded machine txReady =
   let instruction = cpuInstruction machine
       Computed {..} = cpuComputed machine
       opcode = instruction .&. 0x7f
@@ -809,18 +835,26 @@ commitInstruction machine txReady =
         0x03
           | not (validLoad funct3) -> invalid
           | misalignedMemory funct3 address -> fault 4 address
-          | isUartAddress address ->
-              let (value, machine') = readUart address txReady machine
+          | cpuMemoryTarget machine == ExitTarget ->
+              if funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b101
+                then withRegister rd 0 (finishInstruction machine {cpuPc = nextPc} Nothing)
+                else fault 5 address
+          | isUartTarget (cpuMemoryTarget machine) ->
+              let (value, machine') = readUartTarget (cpuMemoryTarget machine) txReady machine
                in withRegister rd value (finishInstruction machine' {cpuPc = nextPc} Nothing)
-          | validMemoryAddress address ->
+          | cpuMemoryTarget machine == RamTarget ->
               withoutRegister (machine {cpuPc = nextPc, cpuPhase = LoadIssue}, (0, Nothing, Nothing))
           | otherwise -> fault 5 address
         0x23
           | not (validStore funct3) -> invalid
           | misalignedMemory funct3 address -> fault 6 address
-          | address == uartTxData ->
+          | cpuMemoryTarget machine == ExitTarget ->
+              if funct3 == 0b001 || funct3 == 0b010
+                then withoutRegister (machine {cpuPc = nextPc, cpuPhase = ExitWrite}, (0, Nothing, Nothing))
+                else fault 7 address
+          | cpuMemoryTarget machine == UartTxTarget ->
               withoutRegister (machine {cpuPc = nextPc, cpuPhase = TxWrite}, (0, Nothing, Nothing))
-          | validMemoryAddress address ->
+          | cpuMemoryTarget machine == RamTarget ->
               let phase = if funct3 == 0b010 then StoreWrite else StoreIssue
                in withoutRegister (machine {cpuPc = nextPc, cpuPhase = phase}, (0, Nothing, Nothing))
           | otherwise -> fault 7 address
@@ -1021,22 +1055,35 @@ memoryIndex address = resize (address `shiftR` 2)
 validMemoryAddress :: Word32 -> Bool
 validMemoryAddress address = address .&. 0xffff_0000 == 0 -- < 64 KiB, as a bit test
 
+-- SiFive/QEMU-style finisher command register. DONE carries no status payload.
+exitDevice :: Word32
+exitDevice = 0x0010_0000
+
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
 uartStatus = 0x1000_0004
 uartRxData = 0x1000_0008
 
-isUartAddress :: Word32 -> Bool
-isUartAddress address = address == uartTxData || address == uartStatus || address == uartRxData
+decodeMemoryTarget :: Word32 -> MemoryTarget
+decodeMemoryTarget address
+  | validMemoryAddress address = RamTarget
+  | address == uartTxData = UartTxTarget
+  | address == uartStatus = UartStatusTarget
+  | address == uartRxData = UartRxTarget
+  | address == exitDevice = ExitTarget
+  | otherwise = UnmappedTarget
 
--- read an UART register
+isUartTarget :: MemoryTarget -> Bool
+isUartTarget target = target == UartTxTarget || target == UartStatusTarget || target == UartRxTarget
+
 readUart :: Word32 -> Bool -> Machine -> (Word32, Machine)
-readUart address txReady machine
-  | address == uartStatus =
-      ( (if txReady then 1 else 0) .|. (if hasByte (rxHolding machine) then 2 else 0),
-        machine
-      )
-  | address == uartRxData =
+readUart address = readUartTarget (decodeMemoryTarget address)
+
+readUartTarget :: MemoryTarget -> Bool -> Machine -> (Word32, Machine)
+readUartTarget target txReady machine
+  | target == UartStatusTarget =
+      ( (if txReady then 1 else 0) .|. (if hasByte (rxHolding machine) then 2 else 0), machine )
+  | target == UartRxTarget =
       (maybe 0 resize (rxHolding machine), machine {rxHolding = Nothing})
   | otherwise = (0, machine)
   where
