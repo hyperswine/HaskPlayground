@@ -5,8 +5,8 @@ the Tang Nano 20K at 96 MHz: unmodified `gcc -march=rv32im` output and
 FP-RISC's builtin runtime both work. It is still far from a real core in
 five ways, and this plan addresses them in turn:
 
-1. Machine mode is in progress: CSRs, synchronous traps and `mret` work;
-   cycle/retirement counters remain. Traps with `mtvec` zero retain the host
+1. The planned machine-mode slice is implemented: CSRs, synchronous traps,
+   `mret`, and cycle/retirement counters work. Traps with `mtvec` zero retain the host
    halt convention until step 3.
 2. No timer or interrupts.
 3. Non-RISC-V behaviour inside the CPU: halting when the PC reaches the end of
@@ -39,18 +39,19 @@ makes it competitive.
 
 ## Implementation status (2026-10-05)
 
-Step 1 now has precise exceptions, registered CSR read/modify/write stages,
-software-visible trap/status/scratch/identification registers, `mret`, and a
-no-op `wfi` until interrupts exist. The C guest handler passes 89 assertions
-on each of three runs at 96 MHz; the processor regression checks and 30,720
-RV32M comparisons pass. FP-RISC CSR reads/writes and host termination with an
-installed handler also pass on the board. See
-[the implementation and measured results](boards/tangnano20k/MACHINE-MODE-2026-10-05.md).
+Step 1 is complete within this roadmap's M-mode scope: precise exceptions,
+registered CSR stages, trap/status/scratch/identification registers, `mret`,
+a temporary no-op `wfi`, and split 64-bit cycle/retirement counters with
+read-only aliases. The final counter image passes at 96 MHz: 270 counter
+assertions, 267 guest trap assertions, the processor regression, 30,720 RV32M
+and 3,840 RV32I comparisons. All 26 SimpleRisc properties and the generated
+RTL smoke test pass. FP-RISC uses the matching CSR adapter and counter fixture.
+See [the implementation and measured results](boards/tangnano20k/MACHINE-MODE-2026-10-05.md).
 
-Step 1 remains partial: split cycle/retirement counters and their aliases are
-next. The memory map and host protocol remain in place; C and FP-RISC build
-with Zicsr and clear `mtvec` on exit for the temporary `DONE` compatibility
-rule. No timer/interrupt sources or official architecture-test claim yet.
+The memory map and host protocol remain in place; C and FP-RISC clear `mtvec`
+on exit for the temporary `DONE` compatibility rule. No timer/interrupt
+sources or official architecture-test claim yet. Next is step 3: bus, exit
+device and boot ROM, followed by step 4's conformance baseline.
 
 ## Step 1: machine mode (Zicsr and traps)
 
@@ -83,7 +84,7 @@ step 2 exists; a no-op before that).
 | 0 instruction address misaligned | a jump or taken branch to an address with bit 1 set (checked in Commit, with `mtval` = target) |
 | 2 illegal instruction | unknown opcode/funct, bad CSR access; `mtval` = the instruction |
 | 3 breakpoint | `ebreak` |
-| 4 / 6 load / store address misaligned | `lw`/`sw` not 4-aligned, `lh`/`lhu`/`sh` not 2-aligned; `mtval` = address. Today these silently use the aligned word |
+| 4 / 6 load / store address misaligned | `lw`/`sw` not 4-aligned, `lh`/`lhu`/`sh` not 2-aligned; `mtval` = address. These accesses trap |
 | 5 / 7 load / store access fault | address outside RAM and the device map |
 | 11 environment call from M-mode | `ecall` |
 

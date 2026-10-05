@@ -54,11 +54,14 @@ its final ECALL so guest trap handlers do not intercept host termination.
 
 SimpleRisc supports the six Zicsr instructions, direct-mode machine traps,
 `mret`, and `wfi` as a no-op until interrupts are implemented. The trap/status,
-scratch and identification CSRs are available; counters remain pending.
+scratch and identification CSRs are available, together with writable 64-bit
+`mcycle`/`minstret` counters and their read-only `cycle`/`instret` aliases.
 Unknown CSRs and writes to read-only CSRs trap. See
 [MACHINE-MODE-2026-10-05.md](MACHINE-MODE-2026-10-05.md) for implementation
 boundaries and measured board results. `check_traps.py` runs a guest C handler
 that checks CSR operations, trap cause/PC/value and return status.
+`check_counters.py` checks counter rollover, half writes, aliases, exact
+retirement and faulting instructions that must not retire.
 
 ```bash
 boards/tangnano20k/c/build.sh hello
@@ -105,9 +108,10 @@ judge:
 | 5 cycles per instruction (previous; retested 2026-10-05) | ~126 MHz | 51 MHz | 96 MHz |
 | 8 cycles per instruction (earlier 2026-10-05) | 149.08 MHz, seed 2 | 96 MHz with the earlier suite; expanded ALU test passes at 51 MHz | expanded ALU test fails at 96, 102 and 108 MHz |
 | 8 cycles ordinary / 9 cycles shifts (clock sweep, 2026-10-05) | 150.58 MHz, seed 2 | 108 and 114 MHz | 117 MHz: incorrect sieve; 120 MHz: subtraction failure |
+| machine traps, Zicsr and split counters (2026-10-05) | 147.19 MHz, seed 2, route target 144 MHz | 96 MHz: counter, trap, CPU, RV32IM and FP-RISC suites | seed 1 at target 115.2 MHz loses string characters at 96 MHz despite a reported 142.90 MHz maximum |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
-(`MARGIN=1.2` by default). To test above what timing allows, build with
+(`MARGIN=1.5` by default, seed 2 tried first). To test above what timing allows, build with
 `ALLOW_FAIL=1 MARGIN=1` and check on the board.
 
 The paths that turned out to be slow on the real chip, well beyond what

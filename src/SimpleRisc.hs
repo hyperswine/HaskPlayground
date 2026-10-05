@@ -39,7 +39,8 @@
 -- therefore loops as expected.  ECALL, EBREAK and an
 -- illegal instruction enter the machine trap handler; with mtvec zero they
 -- stop the CPU and produce DONE for host compatibility. CSR instructions and
--- MRET support direct-mode handlers; counters/interrupts are still pending. While running,
+-- MRET support direct-mode handlers and split 64-bit cycle/retirement counters.
+-- Interrupt sources are still pending. While running,
 -- received UART bytes are placed in the one-byte RXDATA register; byte 0x03
 -- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
 --
@@ -230,6 +231,35 @@ data TrapRegisters = TrapRegisters
 initialTrapRegisters :: TrapRegisters
 initialTrapRegisters = TrapRegisters 0 0 0 0 False False
 
+-- | The low word increments independently; its overflow is registered and
+-- applied to the high word on the following clock. CSR reads wait out that
+-- single carry cycle rather than adding another carry chain to the read mux.
+data Counter64 = Counter64
+  { counterLo :: Word32,
+    counterHi :: Word32,
+    counterCarry :: Bool
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
+initialCounter :: Counter64
+initialCounter = Counter64 0 0 False
+
+-- Explicit writes suppress the increment and change only the selected half.
+-- A low-half write still drains an overflow from the preceding clock; a
+-- high-half write replaces that high half, including any preceding carry.
+tickCounter :: Bool -> Maybe (Bool, Word32) -> Counter64 -> Counter64
+tickCounter increment write counter =
+  let lo = counterLo counter
+      hi = counterHi counter
+      carriedHi = if counterCarry counter then hi + 1 else hi
+   in case write of
+        Just (False, value) -> Counter64 value carriedHi False
+        Just (True, value) -> Counter64 lo value False
+        Nothing -> Counter64
+          (if increment then lo + 1 else lo)
+          carriedHi
+          (increment && lo == maxBound)
+
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     -- | Registered writeback request; consumed during the next fetch.
@@ -256,6 +286,11 @@ data Machine = Machine
     cpuInterruptEnable :: Word32,
     cpuCsrValue :: Word32,
     cpuCsrSource :: Word32,
+    cpuCycle :: Counter64,
+    cpuInstret :: Counter64,
+    -- | Registered pulse and CSR write request, applied on the next clock.
+    cpuCountRetirement :: Bool,
+    cpuCounterWrite :: Maybe (Unsigned 12, Word32),
     cpuMulDiv :: MulDivUnit,
     cpuMemoryWord :: Word32,
     cpuAlignedLoad :: Word32,
@@ -301,6 +336,10 @@ initialMachine =
       cpuInterruptEnable = 0,
       cpuCsrValue = 0,
       cpuCsrSource = 0,
+      cpuCycle = initialCounter,
+      cpuInstret = initialCounter,
+      cpuCountRetirement = False,
+      cpuCounterWrite = Nothing,
       cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
@@ -445,8 +484,19 @@ machineStep machine (memoryWord, received, txReady) =
 -- 8-bit byte comparison from preceding the controller's high-fanout reset mux.
 machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
 machineStepDecoded machine input =
-  let (machine', output) = machineStepCore machine {clearRegisters = False} input
-   in (if clearRegisters machine then machine' {cpuRegs = repeat 0} else machine', output)
+  let (machine', output) = machineStepCore
+        machine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing} input
+      counterWrite lowAddress highAddress = case cpuCounterWrite machine of
+        Just (address, value)
+          | address == lowAddress -> Just (False, value)
+          | address == highAddress -> Just (True, value)
+        _ -> Nothing
+      counted = machine'
+        { cpuCycle = tickCounter True (counterWrite 0xb00 0xb80) (cpuCycle machine),
+          cpuInstret = tickCounter (cpuCountRetirement machine)
+            (counterWrite 0xb02 0xb82) (cpuInstret machine)
+        }
+   in (if clearRegisters machine then counted {cpuRegs = repeat 0} else counted, output)
 
 machineStepCore ::
   Machine ->
@@ -547,6 +597,8 @@ resetCpu machine =
       cpuInterruptEnable = 0,
       cpuCsrValue = 0,
       cpuCsrSource = 0,
+      cpuCountRetirement = False,
+      cpuCounterWrite = Nothing,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
       cpuMergedStore = 0,
@@ -841,6 +893,14 @@ readCsr address machine = case address of
   0x342 -> Just (trapCause regs, False)
   0x343 -> Just (trapValue regs, False)
   0x344 -> Just (0, False) -- mip, no interrupt sources until step 2
+  0xb00 -> Just (counterLo (cpuCycle machine), False)
+  0xb80 -> Just (counterHi (cpuCycle machine), False)
+  0xb02 -> Just (counterLo (cpuInstret machine), False)
+  0xb82 -> Just (counterHi (cpuInstret machine), False)
+  0xc00 -> Just (counterLo (cpuCycle machine), True)
+  0xc80 -> Just (counterHi (cpuCycle machine), True)
+  0xc02 -> Just (counterLo (cpuInstret machine), True)
+  0xc82 -> Just (counterHi (cpuInstret machine), True)
   0xf11 -> Just (0, True)
   0xf12 -> Just (0, True)
   0xf13 -> Just (0, True)
@@ -858,9 +918,29 @@ writeCsr address value machine = case address of
   0x341 -> machine {cpuTrapRegisters = regs {trapEpc = value .&. complement 3}}
   0x342 -> machine {cpuTrapRegisters = regs {trapCause = value}}
   0x343 -> machine {cpuTrapRegisters = regs {trapValue = value}}
+  0xb00 -> counterWrite
+  0xb80 -> counterWrite
+  0xb02 -> counterWrite
+  0xb82 -> counterWrite
   _ -> machine -- mstatush/mip writes are ignored; invalid access checked in CsrRead
   where
     regs = cpuTrapRegisters machine
+    counterWrite = machine {cpuCounterWrite = Just (address, value)}
+
+counterReadBusy :: Unsigned 12 -> Machine -> Bool
+counterReadBusy address machine = case address of
+  0xb00 -> cycleCarry
+  0xb80 -> cycleCarry
+  0xc00 -> cycleCarry
+  0xc80 -> cycleCarry
+  0xb02 -> instretCarry
+  0xb82 -> instretCarry
+  0xc02 -> instretCarry
+  0xc82 -> instretCarry
+  _ -> False
+  where
+    cycleCarry = counterCarry (cpuCycle machine)
+    instretCarry = counterCarry (cpuInstret machine)
 
 csrReadStep :: Machine -> (Machine, RegisterWrite, StepOutput)
 csrReadStep machine =
@@ -869,6 +949,8 @@ csrReadStep machine =
    in case readCsr (csrAddress instruction) machine of
         Nothing -> invalid
         Just (_, True) | csrWriteRequested instruction -> invalid
+        Just (_, _) | counterReadBusy (csrAddress instruction) machine ->
+          withoutRegister (machine, (0, Nothing, Nothing))
         Just (value, _) -> withoutRegister
           (machine {cpuPhase = CsrWrite, cpuCsrValue = value}, (0, Nothing, Nothing))
 
@@ -903,7 +985,7 @@ finishInstructionWithTx machine request = finishWith machine Nothing request
 -- PC register, a cycle after any write here, so it always sees the new word.
 -- Whether that PC has left the program is checked in 'cpuStep'.
 finishWith :: Machine -> Maybe (MemAddr, Word32) -> Maybe Byte -> (Machine, StepOutput)
-finishWith machine write request = (machine {cpuPhase = Fetch}, (0, write, request))
+finishWith machine write request = (machine {cpuPhase = Fetch, cpuCountRetirement = True}, (0, write, request))
 
 haltMachine :: Machine -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 haltMachine machine = (halt machine, (0, Nothing, Nothing))

@@ -685,11 +685,96 @@ prop_mret_restores_status = property $ do
   trapMpie regs === True
   write === Nothing
 
+-- Interpret the pipelined carry in the independent test reference only.
+counterValue :: Counter64 -> Unsigned 64
+counterValue Counter64 {..} =
+  (resize (counterHi + if counterCarry then 1 else 0) `shiftL` 32) .|. resize counterLo
+
+prop_split_counter_matches_64_bit_reference :: Property
+prop_split_counter_matches_64_bit_reference = property $ do
+  highWord <- forAll (Gen.integral Range.constantBounded)
+  distance <- forAll (Gen.integral (Range.linear 0 5))
+  operations <- forAll (Gen.list (Range.linear 20 50) $ do
+    inc <- Gen.bool
+    write <- Gen.choice [P.pure Nothing, Just <$> ((,) <$> Gen.bool <*> Gen.integral Range.constantBounded)]
+    P.pure (inc, write))
+  let initial = Counter64 (maxBound - distance) highWord False
+      reference value (inc, write) = case write of
+        Just (False, new) -> (value .&. 0xffffffff00000000) .|. resize new
+        Just (True, new) -> (resize new `shiftL` 32) .|. (value .&. 0xffffffff)
+        Nothing -> if inc then value + 1 else value
+      checkSteps _ _ [] = success
+      checkSteps counter value (op@(inc, write):rest) = do
+        let counter' = tickCounter inc write counter
+            value' = reference value op
+        counterValue counter' === value'
+        checkSteps counter' value' rest
+  checkSteps initial (counterValue initial) operations
+  counterValue (tickCounter False Nothing (tickCounter True Nothing (Counter64 maxBound maxBound False))) === 0
+
+prop_counter_csr_reads_wait_for_carry :: Property
+prop_counter_csr_reads_wait_for_carry = property $ do
+  highWord <- forAll (Gen.integral Range.constantBounded)
+  P.mapM_ (\address -> do
+    let isCycle = address == 0xb80 || address == 0xc80
+        m = initialMachine {cpuRunning = True, cpuPhase = CsrRead,
+              cpuInstruction = csrInstruction address 2 1 0,
+              cpuCycle = if isCycle then Counter64 0 highWord True else initialCounter,
+              cpuInstret = if isCycle then initialCounter else Counter64 0 highWord True}
+        (waited, _) = machineStep m (0, Nothing, True)
+        (readState, _) = machineStep waited (0, Nothing, True)
+    cpuPhase waited === CsrRead
+    cpuPhase readState === CsrWrite
+    cpuCsrValue readState === highWord + 1
+    ) [0xb80, 0xc80, 0xb82, 0xc82]
+
+prop_counters_retire_precisely :: Property
+prop_counters_retire_precisely = withTests 1 $ property $ do
+  let program = [addi 10 0 7, sw 2 1 0, 0x0000a183, 0x02210233,
+                 csrInstruction 0x340 2 5 0, 0x10500073, 0x00000073]
+      (cycles, stopped) = runUntilHalt 1000
+        (startSim (runningMachine [(1, 0x100), (2, 5)] 28) (ramFromList program))
+      drained = runInputs stopped (P.replicate 5 Nothing)
+  counterValue (cpuInstret (simMachine drained)) === 6
+  counterValue (cpuCycle (simMachine drained)) === fromIntegral (cycles + 5)
+  let waiting = initialMachine {cpuPhase = TxWrite, cpuRunning = True, cpuB = 0x21}
+      stalled = P.iterate (\m -> P.fst (machineStep m (0, Nothing, False))) waiting P.!! 20
+      (completed, (_, _, byte)) = machineStep stalled (0, Nothing, True)
+      counted = P.fst (machineStep completed (0, Nothing, False))
+  counterValue (cpuInstret stalled) === 0
+  byte === Just 0x21
+  counterValue (cpuInstret counted) === 1
+
+prop_counter_write_overrides_retirement :: Property
+prop_counter_write_overrides_retirement = withTests 1 $ property $ do
+  let program = [addi 1 0 7, csrInstruction 0xb02 1 0 1,
+                 csrInstruction 0xc02 2 3 0, csrInstruction 0xc02 2 4 0, 0x00000073]
+      (_, stopped) = runUntilHalt 300 (startSim (runningMachine [] 20) (ramFromList program))
+      machine = simMachine stopped
+  cpuRegs machine !! (3 :: Index 32) === 7
+  cpuRegs machine !! (4 :: Index 32) === 8
+  counterValue (cpuInstret machine) === 9
+  -- Explicit writes override a simultaneous tick; a low write preserves a
+  -- preceding overflow while a high write replaces the carried high word.
+  tickCounter True (Just (False, 17)) (Counter64 0 9 True) === Counter64 17 10 False
+  tickCounter True (Just (True, 17)) (Counter64 0 9 True) === Counter64 0 17 False
+  P.mapM_ (\address -> do
+    let m = initialMachine {cpuPhase = CsrRead,
+              cpuInstruction = csrInstruction address 1 0 0}
+        (fault, _, _) = cpuStep m 0 Nothing True
+    cpuPhase fault === Trap
+    cpuExceptionCause fault === 2
+    ) [0xc00, 0xc80, 0xc02, 0xc82]
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("All six CSR read/modify/write forms", prop_csr_read_modify_write),
+    [ ("Split counters match a 64-bit reference", prop_split_counter_matches_64_bit_reference),
+      ("Counter CSR reads wait for carry", prop_counter_csr_reads_wait_for_carry),
+      ("Precise retirement and UART stalls", prop_counters_retire_precisely),
+      ("Counter writes override implicit increments", prop_counter_write_overrides_retirement),
+      ("All six CSR read/modify/write forms", prop_csr_read_modify_write),
       ("CSR access rules and WARL masks", prop_csr_access_rules_and_masks),
       ("Guest trap handler resumes with mret", prop_guest_handler_resumes_with_mret),
       ("MRET restores machine status", prop_mret_restores_status),

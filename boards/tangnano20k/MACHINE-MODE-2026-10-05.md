@@ -115,13 +115,80 @@ Resources: 7,639 LUT4s, 2,511 flip-flops, 32 BSRAM blocks.
 Image SHA-256: `a2e89522be688958329a7f96be16d72840813ad5dd1820c2bcc5cac70a17f81c`.
 The matching image is loaded in board SRAM; flash was not modified.
 
-### Remaining step 1 work
+### Counter continuation
 
-Implement `mcycle`/`mcycleh`, `minstret`/`minstreth`, and their read-only user
-aliases, with split registered carry and tests for rollover, writes and precise
-retirement (faulting instructions must not retire). No timer/interrupt sources
-or official architecture-test claim is made in this slice.
+`mcycle`/`mcycleh` and `minstret`/`minstreth` now provide writable 64-bit
+counters. `cycle`/`cycleh` and `instret`/`instreth` are read-only aliases;
+attempted writes trap with cause 2. Unknown counter addresses still trap.
+
+Each counter uses two 32-bit words and a registered overflow bit. The high
+word consumes the carry on the next clock. A CSR read waits for that carry
+to settle before selecting its word into the existing CSR read register.
+There is no 64-bit increment or carry adjustment in the CSR read mux.
+Software still needs the usual high/low/high retry when sampling a running
+64-bit counter across separate RV32 instructions.
+
+Retirement is a registered pulse from successful instruction completion.
+Loads, stores, CSR instructions, MRET and the temporary no-op WFI retire once;
+UART and multiply/divide stalls add no extra retirements. Trapping instructions,
+including ECALL and illegal CSR writes, do not retire. Explicit counter writes
+override that clock's implicit increment and affect only the selected half.
+A low-half write drains an earlier carry; a high-half write replaces it.
+
+Physical reset initializes both counters to zero. The cycle counter counts
+every core clock, including host programming and stopped time. Host RUN,
+RESET and Ctrl-C preserve counters; guests can reset the writable halves.
+The instruction counter counts guest execution only. Counter write requests
+and retirement pulses are applied on the following clock, before a subsequent
+instruction can read the counter.
+
+The FP-RISC target dispatches these eight CSR addresses. Its CSR fixture now
+checks writable halves, rollover, high aliases and increasing retirement.
+TIME and interrupt sources belong to step 2, so this does not claim the full
+Zicntr extension. Official architecture tests remain step 4.
+
+The initial counter image (seed 1, route target 115.2 MHz, reported maximum
+142.90 MHz, SHA-256
+`9b7ea5c9610b7db3be2f29c243feaa782c64dfebdfd8732ffafd05383861547f`)
+failed at 96 MHz: the counter fixture returned truncated `C27\nDONE`, and
+the existing C arithmetic regression also lost string characters. The same
+routed design with only the PLL changed to 72 MHz passed ten runs of all 27
+counter assertions and the complete processor regression. These diagnostics
+show why the modeled maximum is insufficient for the roadmap's 96 MHz gate.
+
 
 Exception and CSR semantics follow the
 [RISC-V machine-mode specification](https://docs.riscv.org/reference/isa/priv/machine.html)
 and [Zicsr specification](https://docs.riscv.org/reference/isa/unpriv/zicsr.html).
+
+### Final counter validation at 96 MHz
+
+The replacement placement uses seed 2 and a 144 MHz route target; its modeled
+maximum is 147.19 MHz. `build.sh` now defaults to margin 1.5 and tries seed 2
+first, matching this build. Reproduce with `FREQ_MHZ=96 MARGIN=1.5 SEEDS=2
+boards/tangnano20k/build.sh`; each new build still needs physical checks.
+Resources: 7,840 LUT4s, 2,687 flip-flops and 32 BSRAM blocks.
+Final image SHA-256:
+`3c29163eb1375600f2b5e22ac953f68c6af0c487ac39d12e202e603275b58958`.
+Verified frequency is 96 MHz; this is not a higher-clock claim.
+
+- `stack test --fast --test-arguments='-p SimpleRisc'`: all suites pass,
+  including 26 SimpleRisc properties. Counter properties compare randomized
+  increments/writes against a 64-bit reference, force carry, check exact
+  retirement during UART stalls and traps, and check explicit-write priority.
+- Generated RTL Icarus UART smoke: exact `HiDONE`.
+- `check_counters.py --freq-mhz 96`: ten runs of 27 assertions each pass.
+- `check_traps.py --freq-mhz 96`: three runs of 89 assertions each pass.
+- `check_processor.py --freq-mhz 96`: all five exact arithmetic runs, UART,
+  Ctrl-C, memory clear/reload and byte/halfword/word stress checks pass.
+- `check_rv32m.py --freq-mhz 96`: 30,720 reference comparisons pass.
+- `check_rv32i.py --freq-mhz 96 --repeat 1`: 3,840 comparisons pass.
+- FP-RISC `tests/check_tangnano20k.py --port /dev/cu.usbserial-20250303171
+  --freq-mhz 96`: host/link/ISA/loader checks, three builtin smoke runs,
+  three updated counter CSR fixture runs, all seven refusal cases and recovery
+  pass. The fixture leaves `mtvec` nonzero to check runtime exit cleanup.
+
+The board is left running the replacement 96 MHz image in SRAM; flash is
+unchanged. Step 1 is complete within the roadmap's scope. Step 3 removes
+end-of-image halting, the vector-zero trap compatibility and the hardware
+host loader, then step 4 supplies the official conformance baseline.
