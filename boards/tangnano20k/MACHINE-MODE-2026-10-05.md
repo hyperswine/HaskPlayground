@@ -1,8 +1,11 @@
 # Machine-mode roadmap: precise exception entry, 2026-10-05
 
-This is the first independent slice of `simple-risc-roadmap.md` step 1.
-It does not complete machine mode. Software-visible CSR instructions,
-`mret`, `wfi`, identification CSRs and counters remain to be implemented.
+This records two independent slices of `simple-risc-roadmap.md` step 1.
+The exception foundation was committed as `0b03fb8`; the CSR/trap-return
+continuation below makes the handler state software-visible. Machine mode
+remains incomplete until split cycle and retirement counters are implemented.
+
+## First slice: exception foundation
 
 ## Implemented
 
@@ -21,12 +24,11 @@ It does not complete machine mode. Software-visible CSR instructions,
 - Trap vector zero retains the existing `DONE` termination protocol. RUN and
   RESET clear trap state. The memory map and software ABI are unchanged.
 
-Trap vector and trap registers are currently Haskell state, not accessible
-through guest CSR instructions. Handler redirection, cause/EPC/value and
-MIE/MPIE transitions are verified in simulation. Synthesis may remove these
-unobservable register fields until CSR reads/writes are connected; hardware
-checks in this slice validate fault termination and legal-access controls,
-not software-visible trap register contents.
+In the first slice, trap vector/registers were Haskell state without guest CSR
+access. Handler redirection and cause/EPC/value/status transitions were checked
+in simulation; hardware validated fault termination and legal-access controls.
+The continuation below connects CSR reads/writes and validates this state
+on the physical board.
 
 ## Verification
 
@@ -58,11 +60,68 @@ The board is left running this 96 MHz SRAM image; flash is not modified.
 Image: `output/tangnano20k/simple_risc.fs`.
 SHA-256: `476718c48f0c3962d9ffc325234a4b4d0c50b54aff8b711d99a67dd17a0a4223`.
 
-## Next slice
+## Second slice: registered CSR access and machine trap return
 
-Add registered `CsrRead`/`CsrWrite` stages and the trap/status/scratch CSRs,
-then `mret` and a real guest trap handler. Add read-only identification CSRs,
-interrupt-enable placeholders and split counters to finish step 1. Update
-both C and FP-RISC CSR interfaces only once guest CSR accesses exist.
+`CsrRead` selects one CSR into a register and checks access legality;
+`CsrWrite` performs the registered read/modify/write and requests rd writeback.
+All six CSRRW/CSRRS/CSRRC and immediate forms are implemented. Write
+suppression uses the encoded rs1/zimm: a nonzero source register containing
+zero still requests a write. These CSRs have no read side effects.
 
-The exception semantics follow the [RISC-V machine-mode specification](https://docs.riscv.org/reference/isa/priv/machine.html).
+Supported CSRs: `mstatus`, `mstatush`, `misa`, `mie`, `mip`, `mtvec`,
+`mscratch`, `mepc`, `mcause`, `mtval`, and the four read-only machine IDs.
+`misa` reads RV32IM; IDs read zero. `mstatus` exposes MIE/MPIE and fixed
+MPP=M. `mtvec` and `mepc` mask the low two bits. `mie` retains MSIE/MTIE/MEIE;
+`mip` and `mstatush` are currently WARL zero. Unknown CSRs and writes to
+read-only CSRs raise cause 2 with the instruction in `mtval`.
+
+`TrapReturn` restores PC/MIE/MPIE for `mret`. `wfi` is a no-op until step 2.
+Ordinary instructions retain their existing staging; CSR instructions take
+ten cycles and MRET nine. RUN/RESET clear trap, scratch and enable state.
+
+C now builds with `rv32im_zicsr`; the FP-RISC target builds with
+`rv32im_zicsr_zifencei`. FP-RISC CSR helpers dispatch real instructions for
+implemented addresses and panic for unknown runtime CSR numbers. IRQ/wait and
+atomic runtime APIs remain unsupported. Both runtimes clear `mtvec` on exit
+so a guest handler cannot intercept the legacy host ECALL termination.
+These updated runtimes require the matching CSR-enabled processor image.
+
+### Validation of the continuation
+
+- `stack test --fast`: all suites pass, including 22 SimpleRisc properties.
+  New properties cover all six CSR forms, rd=x0/rs1=x0/immediate forms,
+  read-only/unknown CSR failures, WARL masks, MRET status restoration and an
+  end-to-end guest handler that advances `mepc` and resumes.
+- Generated RTL Icarus smoke: exact `HiDONE`.
+- `check_traps.py --freq-mhz 96`: three complete runs of 89 assertions each.
+  The C guest checks CSR read/modify/write, every planned synchronous exception
+  class, precise PC/cause/value and status after MRET. It leaves its handler
+  installed to verify startup's exit compatibility.
+- `check_processor.py --freq-mhz 96`: all C arithmetic, UART, reset, clear/reload
+  and byte/halfword/word stress checks pass.
+- `check_rv32m.py --freq-mhz 96`: all 30,720 comparisons pass.
+- `check_rv32i.py --freq-mhz 96 --repeat 1`: all 3,840 comparisons pass; both
+  comparison harnesses now enable Zicsr for their shared C startup.
+- FP-RISC `tests/check_tangnano20k.py --port /dev/cu.usbserial-20250303171
+  --freq-mhz 96`: host/link/ISA/loader checks, three builtin smoke runs,
+  three CSR fixture runs, seven failure/refusal cases and recovery all pass.
+- The final FP-RISC CSR fixture deliberately leaves `mtvec` nonzero;
+  `tests/check_tangnano20k_csr.py --port /dev/cu.usbserial-20250303171
+  --freq-mhz 96` passes all three board runs, testing `hal_poweroff` cleanup.
+
+Build: seed 1, requested route target 115.2 MHz, estimated post-route maximum
+131.86 MHz. Verified operation is 96 MHz; this is not a higher-clock claim.
+Resources: 7,639 LUT4s, 2,511 flip-flops, 32 BSRAM blocks.
+Image SHA-256: `a2e89522be688958329a7f96be16d72840813ad5dd1820c2bcc5cac70a17f81c`.
+The matching image is loaded in board SRAM; flash was not modified.
+
+### Remaining step 1 work
+
+Implement `mcycle`/`mcycleh`, `minstret`/`minstreth`, and their read-only user
+aliases, with split registered carry and tests for rollover, writes and precise
+retirement (faulting instructions must not retire). No timer/interrupt sources
+or official architecture-test claim is made in this slice.
+
+Exception and CSR semantics follow the
+[RISC-V machine-mode specification](https://docs.riscv.org/reference/isa/priv/machine.html)
+and [Zicsr specification](https://docs.riscv.org/reference/isa/unpriv/zicsr.html).

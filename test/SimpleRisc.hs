@@ -587,11 +587,113 @@ prop_faulting_store_never_writes_ram = withTests 1 $ property $ do
   ramRead (simRam drained) 64 === 0
   simTransmitted drained === doneBytes
 
+csrInstruction :: Word32 -> Word32 -> Word32 -> Word32 -> Word32
+csrInstruction address kind rd source =
+  (address `shiftL` 20) .|. (source `shiftL` 15) .|. (kind `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x73
+
+prop_csr_read_modify_write :: Property
+prop_csr_read_modify_write = property $ do
+  old <- forAll (Gen.integral Range.constantBounded)
+  operand <- forAll (Gen.integral Range.constantBounded)
+  P.mapM_ (\kind -> P.mapM_ (\source -> P.mapM_ (\rd -> do
+    let instruction = csrInstruction 0x340 kind rd source
+        immediate = kind >= 5
+        value = if immediate then source else if source == 0 then 0 else operand
+        write = kind == 1 || kind == 5 || source /= 0
+        result = case kind .&. 3 of
+          1 -> value
+          2 -> old .|. value
+          _ -> old .&. complement value
+        m = initialMachine {cpuRunning = True, cpuPhase = Commit, cpuPc = 16,
+              cpuInstruction = instruction, cpuA = if source == 0 then 0 else operand,
+              cpuScratch = old, cpuComputed = Computed Nothing 20 0 Nothing 0}
+        (reading, _, _) = commitInstruction m True
+        (writing, _, _) = cpuStep reading 0 Nothing True
+        (finished, registerWrite, _) = cpuStep writing 0 Nothing True
+    cpuPhase reading === CsrRead
+    cpuPhase writing === CsrWrite
+    cpuCsrValue writing === old
+    cpuScratch writing === old
+    cpuScratch finished === if write then result else old
+    cpuPc finished === 20
+    registerWrite === Just (regIndex rd, old)
+    ) [0, 3]) [0, 1, 31]) [1, 2, 3, 5, 6, 7]
+
+prop_csr_access_rules_and_masks :: Property
+prop_csr_access_rules_and_masks = property $ do
+  value <- forAll (Gen.integral Range.constantBounded)
+  let base = initialMachine {cpuPhase = CsrRead, cpuRunning = True}
+      checkAccess address kind source faults = do
+        let instruction = csrInstruction address kind 0 source
+            (m, write, output) = cpuStep base {cpuInstruction = instruction} 0 Nothing True
+        cpuPhase m === if faults then Trap else CsrWrite
+        write === Nothing
+        output === (0, Nothing, Nothing)
+        if faults then do
+          cpuExceptionCause m === 2
+          cpuExceptionValue m === instruction
+        else success
+  P.mapM_ (\address -> do
+    checkAccess address 2 0 False
+    checkAccess address 3 0 False
+    checkAccess address 6 0 False
+    checkAccess address 7 0 False
+    checkAccess address 1 0 True
+    checkAccess address 5 0 True
+    checkAccess address 2 1 True -- rs1 has a zero value but is not x0
+    checkAccess address 3 1 True
+    ) [0x301, 0xf11, 0xf12, 0xf13, 0xf14]
+  checkAccess 0x999 2 0 True
+  checkAccess 0x999 1 0 True
+  readCsr 0x301 base === Just (0x40001100, True)
+  let written address = writeCsr address value base
+      regs = cpuTrapRegisters (written 0x300)
+  readCsr 0x300 (written 0x300) === Just (0x1800 .|. (value .&. 0x88), False)
+  trapMie regs === testBit value 3
+  trapMpie regs === testBit value 7
+  trapVector (cpuTrapRegisters (written 0x305)) === value .&. complement 3
+  trapEpc (cpuTrapRegisters (written 0x341)) === value .&. complement 3
+  cpuInterruptEnable (written 0x304) === value .&. 0x888
+  readCsr 0x310 (written 0x310) === Just (0, False)
+  readCsr 0x344 (written 0x344) === Just (0, False)
+
+prop_guest_handler_resumes_with_mret :: Property
+prop_guest_handler_resumes_with_mret = withTests 1 $ property $ do
+  let program = [addi 1 0 32, csrInstruction 0x305 1 0 1,
+                 0x00000073, addi 6 0 42,
+                 csrInstruction 0x305 1 0 0, 0x00000073,
+                 0, 0,
+                 csrInstruction 0x341 2 2 0, addi 2 2 4,
+                 csrInstruction 0x341 1 0 2, 0x30200073]
+      (_, stopped) = runUntilHalt 1000 (startSim (runningMachine [] 48) (ramFromList program))
+      machine = simMachine stopped
+  cpuRunning machine === False
+  cpuRegs machine !! (6 :: Index 32) === 42
+  trapEpc (cpuTrapRegisters machine) === 20
+  trapCause (cpuTrapRegisters machine) === 11
+
+prop_mret_restores_status :: Property
+prop_mret_restores_status = property $ do
+  previous <- forAll Gen.bool
+  let m = initialMachine {cpuPhase = TrapReturn, cpuRunning = True,
+            cpuTrapRegisters = initialTrapRegisters {trapEpc = 0x100, trapMpie = previous}}
+      (returned, write, _) = cpuStep m 0 Nothing True
+      regs = cpuTrapRegisters returned
+  cpuPc returned === 0x100
+  cpuPhase returned === Fetch
+  trapMie regs === previous
+  trapMpie regs === True
+  write === Nothing
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Precise staged exception entry", prop_precise_exception_entry),
+    [ ("All six CSR read/modify/write forms", prop_csr_read_modify_write),
+      ("CSR access rules and WARL masks", prop_csr_access_rules_and_masks),
+      ("Guest trap handler resumes with mret", prop_guest_handler_resumes_with_mret),
+      ("MRET restores machine status", prop_mret_restores_status),
+      ("Precise staged exception entry", prop_precise_exception_entry),
       ("Trap DONE compatibility and reset", prop_trap_compatibility_and_reset),
       ("Faulting store never writes RAM", prop_faulting_store_never_writes_ram),
       ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),

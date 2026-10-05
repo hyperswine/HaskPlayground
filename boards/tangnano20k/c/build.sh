@@ -12,7 +12,7 @@ prog="${1:?usage: build.sh PROGRAM (a .c file in $here, without .c)}"
 out="$root/output/tangnano20k/c"
 mkdir -p "$out"
 cc="${CROSS:-riscv64-unknown-elf-}gcc"
-"$cc" -march=rv32im -mabi=ilp32 -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib -nostartfiles \
+"$cc" -march=rv32im_zicsr -mabi=ilp32 -O2 -Wall -Wextra -ffreestanding -fno-builtin -nostdlib -nostartfiles \
   -ffunction-sections -fdata-sections -Wl,--gc-sections -Wl,--no-warn-rwx-segments -T "$here/link.ld" \
   "$here/crt0.S" "$here/uart.c" "$here/$prog.c" -o "$out/$prog.elf"
 "${CROSS:-riscv64-unknown-elf-}objcopy" -O binary "$out/$prog.elf" "$out/$prog.bin"

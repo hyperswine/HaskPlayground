@@ -37,7 +37,9 @@
 -- of the program (falling off the end, or jumping past it), the CPU stops and
 -- transmits the four ASCII bytes "DONE".  A backward branch in the final word
 -- therefore loops as expected.  ECALL, EBREAK and an
--- illegal instruction also stop the CPU and produce DONE.  While running,
+-- illegal instruction enter the machine trap handler; with mtvec zero they
+-- stop the CPU and produce DONE for host compatibility. CSR instructions and
+-- MRET support direct-mode handlers; counters/interrupts are still pending. While running,
 -- received UART bytes are placed in the one-byte RXDATA register; byte 0x03
 -- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
 --
@@ -93,6 +95,9 @@ data CpuPhase
     Commit
   | -- | Enter an exception handler from registered cause/value inputs.
     Trap
+  | CsrRead
+  | CsrWrite
+  | TrapReturn
   | -- | Put the load address on the BRAM bus.
     LoadIssue
   | LoadDelay
@@ -117,7 +122,7 @@ data CpuPhase
 
 
 -- A dedicated state bit drives each stage instead of decoding a binary tag.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 25
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 28
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -142,7 +147,10 @@ data CpuPhase
     ConstrRepr 'StoreCommit 2097152 2097152 [],
     ConstrRepr 'TxWrite 4194304 4194304 [],
     ConstrRepr 'ShiftFinish 8388608 8388608 [],
-    ConstrRepr 'Trap 16777216 16777216 []
+    ConstrRepr 'Trap 16777216 16777216 [],
+    ConstrRepr 'CsrRead 33554432 33554432 [],
+    ConstrRepr 'CsrWrite 67108864 67108864 [],
+    ConstrRepr 'TrapReturn 134217728 134217728 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -208,8 +216,7 @@ data HostState
 data ReplyState = NoReply | DoneReply (Unsigned 3)
   deriving (Generic, NFDataX, Show, Eq)
 
--- | Machine-mode trap registers. CSR instructions are the next roadmap slice.
--- Track the MIE/MPIE stack for future CSR access; only machine mode is used.
+-- | Software-visible machine-mode trap registers. Only machine mode is used.
 data TrapRegisters = TrapRegisters
   { trapVector :: Word32,
     trapEpc :: Word32,
@@ -245,6 +252,10 @@ data Machine = Machine
     cpuTrapRegisters :: TrapRegisters,
     cpuExceptionCause :: Word32,
     cpuExceptionValue :: Word32,
+    cpuScratch :: Word32,
+    cpuInterruptEnable :: Word32,
+    cpuCsrValue :: Word32,
+    cpuCsrSource :: Word32,
     cpuMulDiv :: MulDivUnit,
     cpuMemoryWord :: Word32,
     cpuAlignedLoad :: Word32,
@@ -286,6 +297,10 @@ initialMachine =
       cpuTrapRegisters = initialTrapRegisters,
       cpuExceptionCause = 0,
       cpuExceptionValue = 0,
+      cpuScratch = 0,
+      cpuInterruptEnable = 0,
+      cpuCsrValue = 0,
+      cpuCsrSource = 0,
       cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
@@ -471,7 +486,7 @@ stoppedStep machine received txReady =
   let (machineWithReply, replyByte) = sendReply machine txReady
    in case (hostState machineWithReply, received) of
         (HostIdle, Just 0x50) -> idleOut machineWithReply {hostState = ProgramCountLo} replyByte
-        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, cpuTrapRegisters = initialTrapRegisters, rxHolding = Nothing} replyByte
+        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, cpuTrapRegisters = initialTrapRegisters, cpuScratch = 0, cpuInterruptEnable = 0, rxHolding = Nothing} replyByte
         (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
         (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
         (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
@@ -528,6 +543,10 @@ resetCpu machine =
       cpuTrapRegisters = initialTrapRegisters,
       cpuExceptionCause = 0,
       cpuExceptionValue = 0,
+      cpuScratch = 0,
+      cpuInterruptEnable = 0,
+      cpuCsrValue = 0,
+      cpuCsrSource = 0,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
       cpuMergedStore = 0,
@@ -623,6 +642,9 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
                Commit -> commitInstruction machineRx txReady
                Trap -> withoutRegister (enterTrap machineRx)
+               CsrRead -> csrReadStep machineRx
+               CsrWrite -> csrWriteStep machineRx
+               TrapReturn -> withoutRegister (returnFromTrap machineRx)
                LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadDelay}, (memoryIndex address, Nothing, Nothing))
                LoadDelay -> next machineRx {cpuPhase = LoadCapture}
                LoadCapture -> next machineRx {cpuPhase = LoadWait}
@@ -754,6 +776,16 @@ commitInstruction machine txReady =
         0x73
           | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
           | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
+          | instruction == 0x3020_0073 -> withoutRegister (machine {cpuPhase = TrapReturn}, (0, Nothing, Nothing))
+          | instruction == 0x1050_0073 -> noWrite nextPc -- WFI is a hint until interrupts exist.
+          | funct3 == 1 || funct3 == 2 || funct3 == 3 || funct3 == 5 || funct3 == 6 || funct3 == 7 ->
+              withoutRegister
+                ( machine {cpuPhase = CsrRead,
+                    cpuCsrSource = if testBit funct3 2
+                      then resize ((instruction `shiftR` 15) .&. 0x1f)
+                      else cpuA machine},
+                  (0, Nothing, Nothing)
+                )
           | otherwise -> invalid
         _ -> invalid
 
@@ -786,6 +818,80 @@ enterTrap machine =
       -- Temporary host compatibility until roadmap step 3 introduces finisher.
       result = if trapVector regs == 0 then halt trapped else trapped
    in (result, (0, Nothing, Nothing))
+
+-- | These CSRs have no read side effects, so CSRRW rd=x0 can share the same
+-- read stage. Write suppression uses the encoded rs1/zimm, not its value.
+csrWriteRequested :: Word32 -> Bool
+csrWriteRequested instruction =
+  let kind = instructionFunct3 instruction
+   in kind == 1 || kind == 5 || instructionRs1 instruction /= 0
+
+csrAddress :: Word32 -> Unsigned 12
+csrAddress instruction = resize (instruction `shiftR` 20)
+
+readCsr :: Unsigned 12 -> Machine -> Maybe (Word32, Bool)
+readCsr address machine = case address of
+  0x300 -> Just (0x1800 .|. (if trapMie regs then 8 else 0) .|. (if trapMpie regs then 0x80 else 0), False)
+  0x301 -> Just (0x4000_1100, True) -- read-only RV32IM
+  0x304 -> Just (cpuInterruptEnable machine, False)
+  0x305 -> Just (trapVector regs, False)
+  0x310 -> Just (0, False) -- mstatush, all fields WARL zero
+  0x340 -> Just (cpuScratch machine, False)
+  0x341 -> Just (trapEpc regs, False)
+  0x342 -> Just (trapCause regs, False)
+  0x343 -> Just (trapValue regs, False)
+  0x344 -> Just (0, False) -- mip, no interrupt sources until step 2
+  0xf11 -> Just (0, True)
+  0xf12 -> Just (0, True)
+  0xf13 -> Just (0, True)
+  0xf14 -> Just (0, True)
+  _ -> Nothing
+  where
+    regs = cpuTrapRegisters machine
+
+writeCsr :: Unsigned 12 -> Word32 -> Machine -> Machine
+writeCsr address value machine = case address of
+  0x300 -> machine {cpuTrapRegisters = regs {trapMie = testBit value 3, trapMpie = testBit value 7}}
+  0x304 -> machine {cpuInterruptEnable = value .&. 0x888}
+  0x305 -> machine {cpuTrapRegisters = regs {trapVector = value .&. complement 3}}
+  0x340 -> machine {cpuScratch = value}
+  0x341 -> machine {cpuTrapRegisters = regs {trapEpc = value .&. complement 3}}
+  0x342 -> machine {cpuTrapRegisters = regs {trapCause = value}}
+  0x343 -> machine {cpuTrapRegisters = regs {trapValue = value}}
+  _ -> machine -- mstatush/mip writes are ignored; invalid access checked in CsrRead
+  where
+    regs = cpuTrapRegisters machine
+
+csrReadStep :: Machine -> (Machine, RegisterWrite, StepOutput)
+csrReadStep machine =
+  let instruction = cpuInstruction machine
+      invalid = withoutRegister (raiseException machine 2 instruction)
+   in case readCsr (csrAddress instruction) machine of
+        Nothing -> invalid
+        Just (_, True) | csrWriteRequested instruction -> invalid
+        Just (value, _) -> withoutRegister
+          (machine {cpuPhase = CsrWrite, cpuCsrValue = value}, (0, Nothing, Nothing))
+
+csrWriteStep :: Machine -> (Machine, RegisterWrite, StepOutput)
+csrWriteStep machine =
+  let instruction = cpuInstruction machine
+      old = cpuCsrValue machine
+      source = cpuCsrSource machine
+      value = case instructionFunct3 instruction .&. 3 of
+        1 -> source
+        2 -> old .|. source
+        _ -> old .&. complement source
+      updated = if csrWriteRequested instruction then writeCsr (csrAddress instruction) value machine else machine
+   in withRegister (instructionRd instruction) old
+        (finishInstruction updated {cpuPc = cLink (cpuComputed machine)} Nothing)
+
+returnFromTrap :: Machine -> (Machine, StepOutput)
+returnFromTrap machine =
+  let regs = cpuTrapRegisters machine
+   in finishInstruction machine
+        { cpuPc = trapEpc regs,
+          cpuTrapRegisters = regs {trapMie = trapMpie regs, trapMpie = True}
+        } Nothing
 
 finishInstruction :: Machine -> Maybe (MemAddr, Word32) -> (Machine, StepOutput)
 finishInstruction machine write = finishWith machine write Nothing

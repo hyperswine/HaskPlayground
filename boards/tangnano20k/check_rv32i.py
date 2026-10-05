@@ -35,7 +35,7 @@ def build(directory):
     runtime = Path(__file__).resolve().parent / 'c'
     elf = directory / 'rv32i_stress.elf'
     binary = elf.with_suffix('.bin')
-    subprocess.run(['riscv64-unknown-elf-gcc', '-march=rv32im', '-mabi=ilp32', '-Os', '-ffreestanding',
+    subprocess.run(['riscv64-unknown-elf-gcc', '-march=rv32im_zicsr', '-mabi=ilp32', '-Os', '-ffreestanding',
         '-fno-builtin', '-nostdlib', '-nostartfiles', '-I', str(runtime), '-T', str(runtime/'link.ld'),
         str(runtime/'crt0.S'), str(runtime/'uart.c'), str(source), '-o', str(elf)], check=True)
     subprocess.run(['riscv64-unknown-elf-objcopy', '-O', 'binary', str(elf), str(binary)], check=True)

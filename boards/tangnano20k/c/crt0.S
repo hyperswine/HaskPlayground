@@ -1,5 +1,5 @@
-/* crt0.S -- startup for SimpleRisc (RV32IM, no CSRs: any CSR instruction
- * halts this CPU).  The host loads the image at address 0 and runs it from
+/* crt0.S -- startup for SimpleRisc (RV32IM + Zicsr).
+ * The host loads the image at address 0 and runs it from
  * there with every register zero.  Set the stack and global pointers, zero
  * .bss, run main, then ECALL: SimpleRisc stops and sends "DONE".
  */
@@ -18,5 +18,6 @@ _start:
     addi  t0, t0, 4
     j     1b
 2:  call  main
+    csrw  mtvec, zero /* restore host DONE compatibility after guest handlers */
     ecall
 3:  j     3b

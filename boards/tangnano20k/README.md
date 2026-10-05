@@ -48,9 +48,17 @@ rate. Setting a non-standard speed through `tcsetattr` alone fails with
 `c/` holds a minimal C runtime for SimpleRisc: `crt0.S` (sets `sp` and `gp`,
 zeroes `.bss`, calls `main`, then `ecall`, which halts the CPU and sends
 "DONE"), `link.ld` (64 KiB at address 0, stack at the top) and a UART driver
-(`uart.h`, `uart.c`). Programs build with the `rv32im/ilp32` support in
-`riscv64-unknown-elf-gcc`, with no libc or libgcc. The startup code must not use
-CSR instructions: any CSR instruction halts this CPU.
+(`uart.h`, `uart.c`). Programs build with `rv32im_zicsr/ilp32` support in
+`riscv64-unknown-elf-gcc`, with no libc or libgcc. Startup clears `mtvec` before
+its final ECALL so guest trap handlers do not intercept host termination.
+
+SimpleRisc supports the six Zicsr instructions, direct-mode machine traps,
+`mret`, and `wfi` as a no-op until interrupts are implemented. The trap/status,
+scratch and identification CSRs are available; counters remain pending.
+Unknown CSRs and writes to read-only CSRs trap. See
+[MACHINE-MODE-2026-10-05.md](MACHINE-MODE-2026-10-05.md) for implementation
+boundaries and measured board results. `check_traps.py` runs a guest C handler
+that checks CSR operations, trap cause/PC/value and return status.
 
 ```bash
 boards/tangnano20k/c/build.sh hello

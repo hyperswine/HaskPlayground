@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check exception termination and legal access controls on the board.
 
-This first roadmap slice has no software-visible CSRs yet. Exact cause, EPC,
-trap value and absence of memory side effects are checked by Haskell properties;
-this hardware test checks that faults stop before the UART failure marker.
+Exact cause, EPC, trap value and absence of memory side effects are checked by
+Haskell properties and check_traps.py. This test leaves mtvec zero and checks
+that faults stop before the UART failure marker.
 """
 import argparse
 import os

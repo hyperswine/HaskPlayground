@@ -5,8 +5,9 @@ the Tang Nano 20K at 96 MHz: unmodified `gcc -march=rv32im` output and
 FP-RISC's builtin runtime both work. It is still far from a real core in
 five ways, and this plan addresses them in turn:
 
-1. No machine mode: no CSRs, traps or `mret`; `ecall`, `ebreak` and illegal
-   instructions halt the CPU.
+1. Machine mode is in progress: CSRs, synchronous traps and `mret` work;
+   cycle/retirement counters remain. Traps with `mtvec` zero retain the host
+   halt convention until step 3.
 2. No timer or interrupts.
 3. Non-RISC-V behaviour inside the CPU: halting when the PC reaches the end of
    the loaded image, and the program loader, `DONE` reply and Ctrl-C living in
@@ -38,18 +39,18 @@ makes it competitive.
 
 ## Implementation status (2026-10-05)
 
-Step 1 has started with precise exception detection and a registered Trap
-stage. Misaligned accesses now fault before side effects; illegal encodings,
-ECALL/EBREAK and access faults record the correct cause/value in simulation.
-All 31 new hardware cases, the processor regression checks and 30,720 RV32M
-comparisons pass at 96 MHz. See
+Step 1 now has precise exceptions, registered CSR read/modify/write stages,
+software-visible trap/status/scratch/identification registers, `mret`, and a
+no-op `wfi` until interrupts exist. The C guest handler passes 89 assertions
+on each of three runs at 96 MHz; the processor regression checks and 30,720
+RV32M comparisons pass. FP-RISC CSR reads/writes and host termination with an
+installed handler also pass on the board. See
 [the implementation and measured results](boards/tangnano20k/MACHINE-MODE-2026-10-05.md).
 
-This is a partial step: guest CSR instructions, `mret`, `wfi` and counters
-remain. Trap registers and nonzero handler redirection are currently
-simulation-visible only. The existing host protocol and software ABI remain
-in place. Next: registered CSR access and `mret`, then a guest trap-handler
-hardware test and the remaining step 1 CSRs/counters.
+Step 1 remains partial: split cycle/retirement counters and their aliases are
+next. The memory map and host protocol remain in place; C and FP-RISC build
+with Zicsr and clear `mtvec` on exit for the temporary `DONE` compatibility
+rule. No timer/interrupt sources or official architecture-test claim yet.
 
 ## Step 1: machine mode (Zicsr and traps)
 
