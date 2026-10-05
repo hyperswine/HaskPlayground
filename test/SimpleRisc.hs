@@ -497,11 +497,104 @@ prop_uart_rx_holding_register_is_one_byte_deep = property $ do
   rxHolding consumed === Nothing
   emptyStatus === 0b01
 
+-- First machine-mode slice: exception entry must be precise and side-effect free.
+prop_precise_exception_entry :: Property
+prop_precise_exception_entry = property $ do
+  pc <- forAll (Gen.integral (Range.linear 0 0x3fff))
+  enabled <- forAll Gen.bool
+  let faultPc = pc * 4
+      base = initialMachine
+        { cpuRunning = True, cpuPhase = Commit, cpuPc = faultPc,
+          cpuRegs = replace (1 :: Index 32) 0x12345678 (repeat 0),
+          rxHolding = Just 0x5a,
+          cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapMie = enabled}
+        }
+      -- instruction, target/address, taken branch, cause, mtval
+      cases = [ (0x00000000, 0, Nothing, 2, 0),
+                (0xffffffff, 0, Nothing, 2, 0xffffffff),
+                (0x00000073, 0, Nothing, 11, 0),
+                (0x00100073, 0, Nothing, 3, faultPc),
+                (0x00200073, 0, Nothing, 2, 0x00200073),
+                (0x000000ef, 6, Nothing, 0, 6), -- JAL x1
+                (0x000080e7, 6, Nothing, 0, 6), -- JALR x1
+                (0x00000063, 6, Just True, 0, 6),
+                (0x00002083, 1, Nothing, 4, 1), -- LW
+                (0x00002083, 2, Nothing, 4, 2),
+                (0x00002083, 3, Nothing, 4, 3),
+                (0x00001083, 1, Nothing, 4, 1), -- LH
+                (0x00005083, 3, Nothing, 4, 3), -- LHU
+                (0x00002023, 1, Nothing, 6, 1), -- SW
+                (0x00001023, 3, Nothing, 6, 3), -- SH
+                (0x00002083, 0x10000, Nothing, 5, 0x10000),
+                (0x00002023, 0x10000, Nothing, 7, 0x10000),
+                (0x00002083, 0x10001, Nothing, 4, 0x10001), -- alignment priority
+                (0x00003083, uartRxData, Nothing, 2, 0x00003083), -- invalid UART load width
+                (0x00003023, uartTxData, Nothing, 2, 0x00003023),
+                (0x00002023, uartStatus, Nothing, 7, uartStatus)
+              ]
+  P.mapM_ (\(instruction, address, taken, cause, value) -> do
+    let m = base {cpuInstruction = instruction,
+                  cpuComputed = Computed Nothing (faultPc + 4) address taken address}
+        (queued, write, output) = commitInstruction m True
+        (entered, trapWrite, trapOutput) = cpuStep queued 0 Nothing True
+        regs = cpuTrapRegisters entered
+    cpuPhase queued === Trap
+    cpuPc queued === faultPc
+    cpuTrapRegisters queued === cpuTrapRegisters base
+    write === Nothing
+    output === (0, Nothing, Nothing)
+    cpuPhase entered === Fetch
+    cpuPc entered === 0x100
+    cpuRunning entered === True
+    trapEpc regs === faultPc
+    trapCause regs === cause
+    trapValue regs === value
+    trapMie regs === False
+    trapMpie regs === enabled
+    cpuRegs entered === cpuRegs base
+    rxHolding entered === Just 0x5a
+    trapWrite === Nothing
+    trapOutput === (0, Nothing, Nothing)
+    ) cases
+
+prop_trap_compatibility_and_reset :: Property
+prop_trap_compatibility_and_reset = withTests 1 $ property $ do
+  let m = (runningMachine [] 4) {cpuInstruction = 0x00000073, cpuPhase = Commit}
+      (queued, _, _) = commitInstruction m True
+      (stopped, _, _) = cpuStep queued 0 Nothing True
+      resumed = runInputs (startSim stopped (blankRam 0)) (P.replicate 4 Nothing)
+      reset = resetCpu stopped
+  cpuRunning stopped === False
+  trapCause (cpuTrapRegisters stopped) === 11
+  simTransmitted resumed === doneBytes
+  cpuTrapRegisters reset === initialTrapRegisters
+  let (notTaken, write, _) = commitInstruction
+        m {cpuInstruction = 0x00000063, cpuComputed = Computed Nothing 4 6 (Just False) 0} True
+  cpuPhase notTaken === Fetch
+  cpuPc notTaken === 4
+  write === Nothing
+
+prop_faulting_store_never_writes_ram :: Property
+prop_faulting_store_never_writes_ram = withTests 1 $ property $ do
+  let sim = startSim (runningMachine [(1, 0x100), (2, 0xdeadbeef)] 8)
+            (ramFromList [sw 2 1 1, 0x00000073])
+      (_, stopped) = runUntilHalt 100 sim
+      drained = runInputs stopped (P.replicate 5 Nothing)
+      regs = cpuTrapRegisters (simMachine drained)
+  trapCause regs === 6
+  trapValue regs === 0x101
+  trapEpc regs === 0
+  ramRead (simRam drained) 64 === 0
+  simTransmitted drained === doneBytes
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),
+    [ ("Precise staged exception entry", prop_precise_exception_entry),
+      ("Trap DONE compatibility and reset", prop_trap_compatibility_and_reset),
+      ("Faulting store never writes RAM", prop_faulting_store_never_writes_ram),
+      ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),
       ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
       ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
       ("RESET-MEM is exactly 16384 clear cycles", prop_reset_memory_takes_exactly_16384_clear_cycles),

@@ -91,6 +91,8 @@ data CpuPhase
   | -- | Write back, update the PC and start the next fetch or the memory/UART
     -- access.
     Commit
+  | -- | Enter an exception handler from registered cause/value inputs.
+    Trap
   | -- | Put the load address on the BRAM bus.
     LoadIssue
   | LoadDelay
@@ -115,7 +117,7 @@ data CpuPhase
 
 
 -- A dedicated state bit drives each stage instead of decoding a binary tag.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 24
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 25
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -139,7 +141,8 @@ data CpuPhase
     ConstrRepr 'StoreMerge 1048576 1048576 [],
     ConstrRepr 'StoreCommit 2097152 2097152 [],
     ConstrRepr 'TxWrite 4194304 4194304 [],
-    ConstrRepr 'ShiftFinish 8388608 8388608 []
+    ConstrRepr 'ShiftFinish 8388608 8388608 [],
+    ConstrRepr 'Trap 16777216 16777216 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -205,6 +208,21 @@ data HostState
 data ReplyState = NoReply | DoneReply (Unsigned 3)
   deriving (Generic, NFDataX, Show, Eq)
 
+-- | Machine-mode trap registers. CSR instructions are the next roadmap slice.
+-- Track the MIE/MPIE stack for future CSR access; only machine mode is used.
+data TrapRegisters = TrapRegisters
+  { trapVector :: Word32,
+    trapEpc :: Word32,
+    trapCause :: Word32,
+    trapValue :: Word32,
+    trapMie :: Bool,
+    trapMpie :: Bool
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
+initialTrapRegisters :: TrapRegisters
+initialTrapRegisters = TrapRegisters 0 0 0 0 False False
+
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     -- | Registered writeback request; consumed during the next fetch.
@@ -224,6 +242,9 @@ data Machine = Machine
     -- bank flip-flops directly; OperandSelect completes the read next cycle.
     cpuIsRegOp :: Bool,
     cpuComputed :: Computed,
+    cpuTrapRegisters :: TrapRegisters,
+    cpuExceptionCause :: Word32,
+    cpuExceptionValue :: Word32,
     cpuMulDiv :: MulDivUnit,
     cpuMemoryWord :: Word32,
     cpuAlignedLoad :: Word32,
@@ -262,6 +283,9 @@ initialMachine =
       cpuImm = 0,
       cpuIsRegOp = False,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
+      cpuTrapRegisters = initialTrapRegisters,
+      cpuExceptionCause = 0,
+      cpuExceptionValue = 0,
       cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
@@ -447,7 +471,7 @@ stoppedStep machine received txReady =
   let (machineWithReply, replyByte) = sendReply machine txReady
    in case (hostState machineWithReply, received) of
         (HostIdle, Just 0x50) -> idleOut machineWithReply {hostState = ProgramCountLo} replyByte
-        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, rxHolding = Nothing} replyByte
+        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, cpuTrapRegisters = initialTrapRegisters, rxHolding = Nothing} replyByte
         (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
         (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
         (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
@@ -501,6 +525,9 @@ resetCpu machine =
       cpuImm = 0,
       cpuIsRegOp = False,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
+      cpuTrapRegisters = initialTrapRegisters,
+      cpuExceptionCause = 0,
+      cpuExceptionValue = 0,
       cpuMemoryWord = 0,
       cpuAlignedLoad = 0,
       cpuMergedStore = 0,
@@ -595,6 +622,7 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
                Commit -> commitInstruction machineRx txReady
+               Trap -> withoutRegister (enterTrap machineRx)
                LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadDelay}, (memoryIndex address, Nothing, Nothing))
                LoadDelay -> next machineRx {cpuPhase = LoadCapture}
                LoadCapture -> next machineRx {cpuPhase = LoadWait}
@@ -681,8 +709,11 @@ commitInstruction machine txReady =
         Just value -> withRegister rd value (finishInstruction machine {cpuPc = nextPc} Nothing)
         Nothing -> invalid
       noWrite newPc = withoutRegister (finishInstruction machine {cpuPc = newPc} Nothing)
-      jumpAndLink newPc = withRegister rd nextPc (finishInstruction machine {cpuPc = newPc} Nothing)
-      invalid = withoutRegister (haltMachine machine)
+      jumpAndLink newPc
+        | newPc .&. 3 /= 0 = fault 0 newPc
+        | otherwise = withRegister rd nextPc (finishInstruction machine {cpuPc = newPc} Nothing)
+      fault cause value = withoutRegister (raiseException machine cause value)
+      invalid = fault 2 instruction
       address = cAddress
    in case opcode of
         0x37 -> normal -- LUI
@@ -696,34 +727,65 @@ commitInstruction machine txReady =
         -- branches
         0x63 ->
           case cTaken of
+            Just True | cTarget .&. 3 /= 0 -> fault 0 cTarget
             Just takeBranch -> noWrite (if takeBranch then cTarget else nextPc)
             Nothing -> invalid
-        -- loads
-        0x03 ->
-          if isUartAddress address
-            then
+        -- Validate the encoding and alignment before touching RAM or a device.
+        -- Address misalignment takes priority over an out-of-map address.
+        0x03
+          | not (validLoad funct3) -> invalid
+          | misalignedMemory funct3 address -> fault 4 address
+          | isUartAddress address ->
               let (value, machine') = readUart address txReady machine
                in withRegister rd value (finishInstruction machine' {cpuPc = nextPc} Nothing)
-            else
-              if validMemoryAddress address && validLoad funct3
-                then
-                  withoutRegister (machine {cpuPc = nextPc, cpuPhase = LoadIssue}, (0, Nothing, Nothing))
-                else invalid
-        -- stores
-        0x23 ->
-          if address == uartTxData
-            then
+          | validMemoryAddress address ->
+              withoutRegister (machine {cpuPc = nextPc, cpuPhase = LoadIssue}, (0, Nothing, Nothing))
+          | otherwise -> fault 5 address
+        0x23
+          | not (validStore funct3) -> invalid
+          | misalignedMemory funct3 address -> fault 6 address
+          | address == uartTxData ->
               withoutRegister (machine {cpuPc = nextPc, cpuPhase = TxWrite}, (0, Nothing, Nothing))
-            else
-              if validMemoryAddress address && validStore funct3
-                then
-                  -- Word stores need no read/modify/write cycle.
-                  let phase = if funct3 == 0b010 then StoreWrite else StoreIssue
-                   in withoutRegister (machine {cpuPc = nextPc, cpuPhase = phase}, (0, Nothing, Nothing))
-                else invalid
+          | validMemoryAddress address ->
+              let phase = if funct3 == 0b010 then StoreWrite else StoreIssue
+               in withoutRegister (machine {cpuPc = nextPc, cpuPhase = phase}, (0, Nothing, Nothing))
+          | otherwise -> fault 7 address
         0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
-        0x73 -> invalid -- ECALL / EBREAK terminate the program.
+        0x73
+          | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
+          | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
+          | otherwise -> invalid
         _ -> invalid
+
+-- | A halfword must be 2-aligned and a word 4-aligned; byte accesses are free.
+misalignedMemory :: BitVector 3 -> Word32 -> Bool
+misalignedMemory funct3 address
+  | funct3 == 0b010 = address .&. 3 /= 0
+  | funct3 == 0b001 || funct3 == 0b101 = testBit address 0
+  | otherwise = False
+
+-- | Capture the exception without retiring, advancing PC, writing rd or issuing
+-- a memory/UART request. The next stage owns the trap register write muxes.
+raiseException :: Machine -> Word32 -> Word32 -> (Machine, StepOutput)
+raiseException machine cause value =
+  ( machine {cpuPhase = Trap, cpuExceptionCause = cause, cpuExceptionValue = value},
+    (0, Nothing, Nothing)
+  )
+
+enterTrap :: Machine -> (Machine, StepOutput)
+enterTrap machine =
+  let regs = cpuTrapRegisters machine
+      updated = regs
+        { trapEpc = cpuPc machine .&. complement 3,
+          trapCause = cpuExceptionCause machine,
+          trapValue = cpuExceptionValue machine,
+          trapMpie = trapMie regs,
+          trapMie = False
+        }
+      trapped = machine {cpuTrapRegisters = updated, cpuPc = trapVector regs .&. complement 3, cpuPhase = Fetch}
+      -- Temporary host compatibility until roadmap step 3 introduces finisher.
+      result = if trapVector regs == 0 then halt trapped else trapped
+   in (result, (0, Nothing, Nothing))
 
 finishInstruction :: Machine -> Maybe (MemAddr, Word32) -> (Machine, StepOutput)
 finishInstruction machine write = finishWith machine write Nothing

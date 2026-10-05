@@ -15,7 +15,7 @@ There's a script to auto copy stuff from verilog output to examples. Use lushay 
 
 ## Tang Nano 20K
 
-Building the Clash designs (including the SimpleRisc RV32I core) for the Tang Nano 20K, the clock speeds reached on the board, and a known USB-UART bridge issue: see [boards/tangnano20k/README.md](boards/tangnano20k/README.md).
+Building the Clash designs (including the SimpleRisc RV32IM core) for the Tang Nano 20K, the clock speeds reached on the board, and a known USB-UART bridge issue: see [boards/tangnano20k/README.md](boards/tangnano20k/README.md). The plan for turning SimpleRisc into a full RISC-V core (machine mode, interrupts, a boot ROM, the official architecture tests, a pipeline) is in [simple-risc-roadmap.md](simple-risc-roadmap.md).
 
 ## NeoMusic
 
