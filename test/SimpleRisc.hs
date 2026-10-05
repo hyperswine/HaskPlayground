@@ -265,6 +265,27 @@ prop_register_banks_and_writeback = property $ do
   assert (not (cpuRunning (simMachine halted)))
   P.mapM_ (\i -> ramRead (simRam halted) (fromIntegral (64+i)) === if i == 0 then 0 else value i + 1) [0..31 :: Int]
 
+-- Every barrel-shifter distance through register and immediate instructions.
+-- Include negative inputs to prove sign extension across the new boundary.
+prop_shift_stages_all_distances :: Property
+prop_shift_stages_all_distances = withTests 1 . property $ do
+  P.mapM_ checkShift
+    [(op, a, n, immediate) | op <- [ShiftLeft, ShiftRight, ShiftRightArithmetic],
+      a <- [0, 1, maxBound, 0x8000_0000, 0x7fff_ffff, 0x5555_5555],
+      n <- [0..31], immediate <- [False, True]]
+  where
+    checkShift (op, a, n, immediate) = do
+      let registerInstruction = encodeArithmetic op
+          instruction = if immediate
+            then (registerInstruction .&. complement (31 `shiftL` 20) .&. complement 0x7f)
+              .|. (n `shiftL` 20) .|. 0x13
+            else registerInstruction
+          machine = runningMachine [(1, a), (2, n)] 4
+          (cycles, halted) = runUntilHalt 50 (startSim machine (ramFromList [instruction]))
+      cpuRegs (simMachine halted) !! (3 :: Index 32) === arithmeticResult op a n
+      assert (not (cpuRunning (simMachine halted)))
+      cycles === 9 + 5
+
 prop_simple_instructions_take_eight_cycles_each :: Property
 prop_simple_instructions_take_eight_cycles_each = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
@@ -488,6 +509,7 @@ simpleRiscGroup =
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
       ("Simple instructions take eight cycles each", prop_simple_instructions_take_eight_cycles_each),
+      ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
       ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),

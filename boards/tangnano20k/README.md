@@ -95,7 +95,8 @@ judge:
 | 1 cycle per instruction (early version) | 52 MHz | 27 MHz | 51 MHz |
 | 2 cycles per instruction | 63 MHz | 51 MHz | not tested higher |
 | 5 cycles per instruction (previous; retested 2026-10-05) | ~126 MHz | 51 MHz | 96 MHz |
-| 8 cycles per instruction (2026-10-05) | 149.08 MHz, seed 2 | 96 MHz | higher clocks not tested |
+| 8 cycles per instruction (earlier 2026-10-05) | 149.08 MHz, seed 2 | 96 MHz with the earlier suite; expanded ALU test passes at 51 MHz | expanded ALU test fails at 96, 102 and 108 MHz |
+| 8 cycles ordinary / 9 cycles shifts (clock sweep, 2026-10-05) | 150.58 MHz, seed 2 | 108 and 114 MHz | 117 MHz: incorrect sieve; 120 MHz: subtraction failure |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
 (`MARGIN=1.2` by default). To test above what timing allows, build with
@@ -108,17 +109,23 @@ directly. `src/SimpleRisc.hs` now uses one-hot CPU stages, two-stage register
 reads (four banks of eight), registered writeback, registered RAM commands and
 readback, separate load/store alignment registers, and a queued UART request.
 The iterative multiply/divide unit registers its 33-bit arithmetic before
-committing each step. Ordinary instructions take eight clocks; nonzero-divisor
+committing each step. The barrel shifter now registers its result after the first two shift levels
+and finishes the remaining three levels in a separate stage. Ordinary
+instructions take eight clocks, shifts take nine; nonzero-divisor
 M operations add 68 unit clocks. These changes trade cycles for shorter paths.
 
 Run the hardware regressions after loading a bitstream:
 
 ```bash
-python3 boards/tangnano20k/check_processor.py --freq-mhz 96
-python3 boards/tangnano20k/check_rv32m.py --freq-mhz 96 --repeat 20
+python3 boards/tangnano20k/check_rv32i.py --freq-mhz 114 --repeat 10
+python3 boards/tangnano20k/check_processor.py --freq-mhz 114
+python3 boards/tangnano20k/check_rv32m.py --freq-mhz 114 --repeat 20
 ```
 
-The first checks five exact C arithmetic runs, UART echo, Ctrl-C recovery,
+The ALU test checks all ten RV32I register operations, every shift distance,
+signed edge cases and randomized operands against Python references (38,400
+comparisons across ten loads). The processor test checks five exact C arithmetic
+runs, UART echo, Ctrl-C recovery,
 memory clear/reload, and 64 passes of byte/halfword/word memory checks. The
 second compares all eight RV32M operations with host-generated results for
 192 operand pairs per load, including division by zero and signed overflow.
@@ -132,6 +139,14 @@ earlier full-suite run exposed an intermittent failure in the unchanged
 `test/PsramRegs.hs` snapshot-model property; the processor properties passed
 on that run too. The verified SRAM image SHA-256 is
 `2563be842bfbabcaf77c6a0e784feff27fc3077d2a28d2b01a4f423ecf51211e`.
+
+The 96 MHz result above is historical coverage, not a pass of the expanded
+ALU regression. The clock sweep found shift corruption at 96 MHz on that
+image and corrected it with the registered shifter. See
+[CLOCK-SWEEP-2026-10-05.md](CLOCK-SWEEP-2026-10-05.md) for the current
+114 MHz validation, failed higher clocks, bitstream hashes and replay commands.
+The build and host-tool defaults remain 96 MHz; use an explicit `--freq-mhz`
+matching the image loaded into the board.
 
 ## Known issue: the USB-UART bridge stops working
 

@@ -60,7 +60,8 @@ type MemAddr = Unsigned 14
 -- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
 -- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
 -- a simple instruction takes eight cycles: Fetch, FetchDelay, FetchCapture,
--- FetchWait, Decode, OperandSelect, Execute and Commit.
+-- FetchWait, Decode, OperandSelect, Execute and Commit. Shifts insert
+-- ShiftFinish before Commit and take nine cycles.
 -- The BRAM and the UART transmitter are only ever driven from registers, in
 -- stages of their own (Fetch, LoadIssue, StoreWrite, TxWrite...): on the GW2A
 -- their input timing is worse than nextpnr models.  The
@@ -83,6 +84,8 @@ data CpuPhase
     OperandSelect
   | -- | Do the arithmetic into 'cpuComputed'.
     Execute
+  | -- | Complete the upper three barrel-shifter levels from the registered partial result.
+    ShiftFinish
   | -- | Run the multiply/divide unit ('cpuMulDiv') until it has a result.
     MulDiv
   | -- | Write back, update the PC and start the next fetch or the memory/UART
@@ -112,7 +115,7 @@ data CpuPhase
 
 
 -- A dedicated state bit drives each stage instead of decoding a binary tag.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 23
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 24
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -135,7 +138,8 @@ data CpuPhase
     ConstrRepr 'StoreWait 524288 524288 [],
     ConstrRepr 'StoreMerge 1048576 1048576 [],
     ConstrRepr 'StoreCommit 2097152 2097152 [],
-    ConstrRepr 'TxWrite 4194304 4194304 []
+    ConstrRepr 'TxWrite 4194304 4194304 [],
+    ConstrRepr 'ShiftFinish 8388608 8388608 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -572,12 +576,20 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                  let op2 = if cpuIsRegOp then cpuB else cpuImm
                      -- OP with funct7 = 1 is the M extension.
                      isMulDiv = cpuIsRegOp && instruction `shiftR` 25 == 1
+                     isShift = (instruction .&. 0x7f == 0x13 || cpuIsRegOp)
+                       && (instructionFunct3 instruction == 0b001 || instructionFunct3 instruction == 0b101)
                   in next
                        machineRx
-                         { cpuPhase = if isMulDiv then MulDiv else Commit,
+                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else Commit,
                            cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2,
                            cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
                          }
+               ShiftFinish ->
+                 let op2 = if cpuIsRegOp then cpuB else cpuImm
+                     partial = cAlu cpuComputed
+                     result = fmap (\value -> shiftResult (instructionFunct3 instruction)
+                       ((instruction `shiftR` 25) .&. 0x7f) value (fromIntegral (op2 .&. 0x1c))) partial
+                  in next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = result}}
                MulDiv ->
                  case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
                    Left unit -> next machineRx {cpuMulDiv = unit}
@@ -613,7 +625,8 @@ withoutRegister :: (Machine, StepOutput) -> (Machine, RegisterWrite, StepOutput)
 withoutRegister (machine, output) = (machine, Nothing, output)
 
 -- | Execute stage: every adder and the ALU, in parallel, for whichever
--- instruction this turns out to be.
+-- instruction this turns out to be. Shifts compute their low two levels here
+-- and ShiftFinish completes the high three levels.
 -- The immediate has already been decoded for the instruction's format, so
 -- each adder has fixed, registered inputs and nothing is muxed in front of it.
 compute :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Computed
@@ -622,8 +635,8 @@ compute pc instruction a b imm op2 =
     { cAlu = case opcode of
         0x37 -> Just imm -- LUI
         0x17 -> Just pcPlusImm -- AUIPC
-        0x13 -> alu funct3 funct7 False a op2
-        0x33 -> alu funct3 funct7 True a op2
+        0x13 -> aluWithShiftMask 3 funct3 funct7 False a op2
+        0x33 -> aluWithShiftMask 3 funct3 funct7 True a op2
         _ -> Nothing,
       cLink = pc + 4,
       cTarget = if opcode == 0x67 then aPlusImm .&. complement 1 else pcPlusImm, -- JALR; JAL and branches
@@ -812,23 +825,34 @@ storeValue funct3 byteOffset value oldWord = case funct3 of
 -- | OP (register-register) and OP-IMM arithmetic on @a@ and @op2@; Nothing for
 -- an illegal funct7.
 alu :: BitVector 3 -> Word32 -> Bool -> Word32 -> Word32 -> Maybe Word32
-alu funct3 funct7 isRegister a op2 = if legal then Just value else Nothing
+alu = aluWithShiftMask 0x1f
+
+-- Only the shift distance is masked; adders retain their registered inputs.
+aluWithShiftMask :: Word32 -> BitVector 3 -> Word32 -> Bool -> Word32 -> Word32 -> Maybe Word32
+aluWithShiftMask mask funct3 funct7 isRegister a op2 = if legal then Just value else Nothing
   where
     alternate = funct7 == 0x20 -- SUB and SRA/SRAI
     isShift = funct3 == 0b001 || funct3 == 0b101
     legal
       | isRegister = funct7 == 0 || (alternate && (funct3 == 0b000 || funct3 == 0b101))
       | otherwise = not isShift || funct7 == 0 || (alternate && funct3 == 0b101)
-    shamt = fromIntegral (op2 .&. 0x1f)
+    shamt = fromIntegral (op2 .&. mask)
     value = case funct3 of
       0b000 -> if isRegister && alternate then a - op2 else a + op2 -- ADD(I), SUB
-      0b001 -> a `shiftL` shamt -- SLL(I)
+      0b001 -> shiftResult funct3 funct7 a shamt -- SLL(I)
       0b010 -> boolWord (signed32 a < signed32 op2) -- SLT(I)
       0b011 -> boolWord (a < op2) -- SLT(I)U
       0b100 -> a `xor` op2 -- XOR(I)
-      0b101 -> if alternate then unsigned32 (signed32 a `shiftR` shamt) else a `shiftR` shamt -- SRL(I), SRA(I)
+      0b101 -> shiftResult funct3 funct7 a shamt -- SRL(I), SRA(I)
       0b110 -> a .|. op2 -- OR(I)
       _ -> a .&. op2 -- AND(I)
+
+-- | One part of a shift; arithmetic shifts preserve the sign at both stages.
+shiftResult :: BitVector 3 -> Word32 -> Word32 -> Int -> Word32
+shiftResult funct3 funct7 value amount
+  | funct3 == 0b001 = value `shiftL` amount
+  | funct7 == 0x20 = unsigned32 (signed32 value `shiftR` amount)
+  | otherwise = value `shiftR` amount
 
 -- | One cycle of the multiply/divide unit for the M instruction @funct3@ on
 -- operands @a@ (rs1) and @b@ (rs2): the next unit state, or the result.
