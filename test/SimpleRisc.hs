@@ -102,6 +102,24 @@ wordBytes word =
     resize (word `shiftR` 24)
   ]
 
+-- Drive a real registered bus transaction to its CPU acknowledgement. Stop
+-- before Fetch so unit assertions can inspect the writeback/exception pulse.
+settleBus :: Machine -> (Machine, StepOutput)
+settleBus = go (32 :: Int)
+  where
+    go fuel machine
+      | cpuPhase machine /= BusWait || fuel == 0 = (machine, (0, Nothing, Nothing))
+      | otherwise = let (next, output) = machineStep machine {cpuRunning = True} (0, Nothing, True)
+                    in if cpuPhase next == BusWait then go (fuel - 1) next else (next, output)
+
+commitSettled :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
+commitSettled machine ready =
+  let (queued, write, output) = commitInstruction machine ready
+   in if cpuPhase queued == BusWait
+        then let (completed, response) = settleBus queued
+              in (completed, cpuPendingWrite completed, response)
+        else (queued, write, output)
+
 -- Instruction encoders -------------------------------------------------------
 
 addi :: Word32 -> Word32 -> Word32 -> Word32
@@ -211,7 +229,8 @@ prop_arithmetic_instruction_stores_expected_result = property $ do
           }
       -- op x3,x1,x2; sw x3,256(x0)
       ram = ramFromList [encodeArithmetic operation, 0x1030_2023]
-      finished = runInputs (startSim machine ram) (P.replicate 30 Nothing)
+      (_, halted) = runUntilHalt 200 (startSim machine ram)
+      finished = runInputs halted (P.replicate 5 Nothing)
       expected = arithmeticResult operation a b
 
   cpuRegs (simMachine finished) !! (3 :: Index 32) === expected
@@ -312,8 +331,9 @@ prop_uart_tx_store_waits_for_ready = property $ do
   let registers = (2, uartTxData) : P.zip [1, 3, 4] (P.map resize bytes)
       -- sw x1,0(x2); sw x3,0(x2); sw x4,0(x2)
       ram = ramFromList [sw 1 2 0, sw 3 2 0, sw 4 2 0]
-      schedule = readiness P.++ P.replicate 40 True
-      finished = P.foldl (\sim ready -> stepSimReady ready sim Nothing) (startSim (runningMachine registers 12) ram) schedule
+      waiting = P.foldl (\sim ready -> stepSimReady ready sim Nothing) (startSim (runningMachine registers 12) ram) readiness
+      (_, halted) = runUntilHalt 1000 waiting
+      finished = runInputs halted (P.replicate 5 Nothing)
 
   simTransmitted finished === bytes P.++ doneBytes
   assert (not (cpuRunning (simMachine finished)))
@@ -483,13 +503,18 @@ prop_uart_rx_holding_register_is_one_byte_deep = property $ do
   first <- forAll (Gen.filter (/= 0x03) (Gen.integral Range.constantBounded))
   second <- forAll (Gen.filter (/= 0x03) (Gen.integral Range.constantBounded))
   let running = initialMachine {cpuRunning = True, programEnd = 64, cpuPhase = Fetch}
-      (withFirst, _) = runningStep running 0 (Just first) True
+      (withFirst, _) = machineStep running (0, Just first, True)
       -- Keep this latch-focused property from advancing into an instruction
       -- decode between the two simulated receive cycles.
-      (afterSecond, _) = runningStep withFirst {cpuPhase = Fetch} 0 (Just second) True
-      (status, afterStatus) = readUart uartStatus True afterSecond
-      (value, consumed) = readUart uartRxData True afterStatus
-      (emptyStatus, _) = readUart uartStatus True consumed
+      (afterSecond, _) = machineStep withFirst {cpuPhase = Fetch} (0, Just second, True)
+      readThroughBus address m =
+        let (completed, write, _) = commitSettled m
+              {cpuPhase = Commit, cpuInstruction = 0x00002083,
+               cpuComputed = Computed Nothing 0 0 Nothing address} True
+         in (maybe 0 P.snd write, completed)
+      (status, afterStatus) = readThroughBus uartStatus afterSecond
+      (value, consumed) = readThroughBus uartRxData afterStatus
+      (emptyStatus, _) = readThroughBus uartStatus consumed
 
   rxHolding afterSecond === Just first
   status === 0b11
@@ -535,7 +560,7 @@ prop_precise_exception_entry = property $ do
   P.mapM_ (\(instruction, address, taken, cause, value) -> do
     let m = base {cpuInstruction = instruction,
                   cpuComputed = Computed Nothing (faultPc + 4) address taken address}
-        (queued, write, output) = commitInstruction m True
+        (queued, write, output) = commitSettled m True
         (entered, trapWrite, trapOutput) = cpuStep queued 0 Nothing True
         regs = cpuTrapRegisters entered
     cpuPhase queued === Trap
@@ -737,9 +762,11 @@ prop_counters_retire_precisely = withTests 1 $ property $ do
       drained = runInputs stopped (P.replicate 5 Nothing)
   counterValue (cpuInstret (simMachine drained)) === 6
   counterValue (cpuCycle (simMachine drained)) === fromIntegral (cycles + 5)
-  let waiting = initialMachine {cpuPhase = TxWrite, cpuRunning = True, cpuB = 0x21}
+  let waiting = initialMachine {cpuPhase = BusWait, cpuRunning = True, cpuInstruction = 0x0020a023,
+          systemBus = initialBus {busPhase = BusTx, busRequest = BusRequest uartTxData 0 True 0x21}}
       stalled = P.iterate (\m -> P.fst (machineStep m (0, Nothing, False))) waiting P.!! 20
-      (completed, (_, _, byte)) = machineStep stalled (0, Nothing, True)
+      (offered, (_, _, byte)) = machineStep stalled (0, Nothing, True)
+      completed = P.fst (machineStep offered (0, Nothing, False))
       counted = P.fst (machineStep completed (0, Nothing, False))
   counterValue (cpuInstret stalled) === 0
   byte === Just 0x21
@@ -770,16 +797,19 @@ prop_registered_memory_decode :: Property
 prop_registered_memory_decode = property $ do
   ramAddress <- forAll (Gen.integral (Range.linear 0 65535))
   P.mapM_ (\(address, target) -> do
-    let before = initialMachine {cpuRunning = True, cpuPhase = MemoryDecode,
-          cpuComputed = Computed Nothing 4 0 Nothing address,
-          cpuMemoryTarget = UnmappedTarget}
-        (decoded, (_, write, byte)) = machineStep before (0, Nothing, True)
-    cpuPhase decoded === Commit
-    cpuMemoryTarget decoded === target
-    cpuPc decoded === 0
-    counterValue (cpuInstret decoded) === 0
-    write === Nothing
-    byte === Nothing
+    let q = BusRequest address 2 False 0
+        (accepted, earlyResponse, earlyOutput, earlyRx) = busStep initialBus (Just q) 0 True Nothing
+        (decoded, response, output, consumeRx) = busStep accepted Nothing 0 True Nothing
+    busPhase accepted === BusDecode
+    busRequest accepted === q
+    earlyResponse === Nothing
+    earlyOutput === (0, Nothing, Nothing)
+    earlyRx === False
+    busPhase decoded === BusDispatch
+    busTarget decoded === target
+    response === Nothing
+    output === (0, Nothing, Nothing)
+    consumeRx === False
     ) [(ramAddress, RamTarget), (uartTxData, UartTxTarget),
        (uartStatus, UartStatusTarget), (uartRxData, UartRxTarget),
        (exitDevice, ExitTarget), (exitDevice + 4, UnmappedTarget),
@@ -794,9 +824,10 @@ prop_finisher_commands = property $ do
           cpuB = value, cpuComputed = Computed Nothing 8 0 Nothing exitDevice,
           cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapValue = 42}}
         (queued, _, command) = commitInstruction base True
-        (completed, response) = machineStep queued (0, Nothing, True)
+        (completed, response) = settleBus queued
         (counted, _) = machineStep completed (0, Nothing, True)
-    cpuPhase queued === ExitWrite
+    cpuPhase queued === BusWait
+    cpuBusRequest queued === Just (BusRequest exitDevice (if width == 2 then 2 else 1) True value)
     command === (0, Nothing, Nothing)
     response === (0, Nothing, Nothing)
     cpuRunning completed === not stops
@@ -811,7 +842,7 @@ prop_finisher_commands = property $ do
   P.mapM_ (\(instruction, address, expectedCause) -> do
     let m = initialMachine {cpuPhase = Commit, cpuInstruction = instruction,
           cpuComputed = Computed Nothing 4 0 Nothing address}
-        (result, write, output) = commitInstruction m True
+        (result, write, output) = commitSettled m True
     output === (0, Nothing, Nothing)
     case expectedCause of
       Nothing -> do
@@ -828,11 +859,92 @@ prop_finisher_commands = property $ do
        (0x00202023, exitDevice + 2, Just 6),
        (0x00202023, exitDevice + 4, Just 7)]
 
+prop_bus_completion_and_rx_race :: Property
+prop_bus_completion_and_rx_race = property $ do
+  byte <- forAll (Gen.integral (Range.linear 128 255))
+  address <- (* 4) <$> forAll (Gen.integral (Range.linear 0 16383))
+  value <- forAll (Gen.integral Range.constantBounded)
+  P.mapM_ (\(width, expected) -> do
+    let before = initialBus {busPhase = BusDispatch, busTarget = UartRxTarget,
+          busRequest = BusRequest uartRxData width False 0}
+        (after, response, output, consume) = busStep before Nothing 0 True (Just byte)
+        (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte)
+    response === Just (BusResponse expected False False)
+    output === (0, Nothing, Nothing)
+    consume === True
+    repeated === Nothing
+    repeatedOutput === (0, Nothing, Nothing)
+    repeatedConsume === False
+    ) [(0, resize byte .|. 0xffffff00), (4, resize byte), (1, resize byte), (2, resize byte)]
+  let writing = initialBus {busPhase = BusRamWrite,
+        busRequest = BusRequest address 2 True value, busValue = value}
+      (idle, ack, write, consume) = busStep writing Nothing 0 True Nothing
+      (_, repeatedAck, repeatedWrite, _) = busStep idle Nothing 0 True Nothing
+  ack === Just (BusResponse 0 False False)
+  write === (0, Just (fromIntegral (address `div` 4), value), Nothing)
+  consume === False
+  repeatedAck === Nothing
+  repeatedWrite === (0, Nothing, Nothing)
+  -- A byte arriving while an empty RX read is completed belongs to the next
+  -- read; it must not be cleared by an unconditional consume pulse.
+  let reading = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+        cpuInstruction = 0x0000a083,
+        systemBus = initialBus {busPhase = BusDispatch, busTarget = UartRxTarget,
+          busRequest = BusRequest uartRxData 2 False 0}}
+      (arrived, _) = machineStep reading (0, Just byte, True)
+  cpuBusResponse arrived === Just (BusResponse 0 False False)
+  rxHolding arrived === Just byte
+
+prop_bus_wait_faults_and_cancel :: Property
+prop_bus_wait_faults_and_cancel = property $ do
+  value <- forAll (Gen.integral Range.constantBounded)
+  P.mapM_ (\write -> do
+    let before = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+          cpuPc = 4, cpuInstruction = if write then 0x0020a023 else 0x0000a083,
+          cpuComputed = Computed Nothing 8 0 Nothing 0x20000000}
+        (waiting, pendingWrite, output) = cpuStep before 0 Nothing True
+        (fault, faultWrite, faultOutput) = cpuStep
+          before {cpuBusResponse = Just (BusResponse value True False)} 0 Nothing True
+        (completed, registerWrite, _) = cpuStep
+          before {cpuBusResponse = Just (BusResponse value False False)} 0 Nothing True
+    cpuPhase waiting === BusWait
+    cpuPc waiting === 4
+    cpuCountRetirement waiting === False
+    pendingWrite === Nothing
+    output === (0, Nothing, Nothing)
+    cpuPhase fault === Trap
+    cpuPc fault === 4
+    cpuExceptionCause fault === if write then 7 else 5
+    cpuExceptionValue fault === 0x20000000
+    cpuCountRetirement fault === False
+    faultWrite === Nothing
+    faultOutput === (0, Nothing, Nothing)
+    cpuPhase completed === Fetch
+    cpuPc completed === 8
+    cpuCountRetirement completed === True
+    registerWrite === if write then Nothing else Just (1, value)
+    ) [False, True]
+  P.mapM_ (\phase -> do
+    let before = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+          cpuBusRequest = Just (BusRequest uartTxData 0 True 0x41),
+          systemBus = initialBus {busPhase = phase, busTarget = UartTxTarget,
+            busRequest = BusRequest 0x100 2 True value, busValue = value}}
+        (cancelled, output) = machineStep before (0, Just 3, True)
+    cpuRunning cancelled === False
+    cpuBusRequest cancelled === Nothing
+    cpuBusResponse cancelled === Nothing
+    busPhase (systemBus cancelled) === BusIdle
+    output === (0, Nothing, Nothing)
+    ) [BusDecode, BusDispatch, BusLoadIssue, BusLoadWait, BusStoreIssue,
+       BusStoreMerge, BusRamWrite, BusTx, BusReply]
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Registered memory target selection", prop_registered_memory_decode),
+    [ ("Bus completes once and preserves concurrent RX", prop_bus_completion_and_rx_race),
+      ("Bus waits, precise faults and cancellation", prop_bus_wait_faults_and_cancel),
+      ("Registered memory target selection", prop_registered_memory_decode),
       ("Registered finisher commands and access rules", prop_finisher_commands),
       ("Split counters match a 64-bit reference", prop_split_counter_matches_64_bit_reference),
       ("Counter CSR reads wait for carry", prop_counter_csr_reads_wait_for_carry),

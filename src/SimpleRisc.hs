@@ -66,67 +66,31 @@ type MemAddr = Unsigned 14
 -- FetchWait, Decode, OperandSelect, Execute and Commit. Shifts insert
 -- ShiftFinish before Commit and take nine cycles.
 -- The BRAM and the UART transmitter are only ever driven from registers, in
--- stages of their own (Fetch, LoadIssue, StoreWrite, TxWrite...): on the GW2A
+-- stages of their own (Fetch, BusLoadIssue, BusRamWrite, BusTx...): on the GW2A
 -- their input timing is worse than nextpnr models.  The
 -- values passed between stages live in their own 'Machine' fields, each
 -- written by a single stage, rather than in the phase: overlapping them in one
 -- register put a many-way mux in front of every bit.
 data CpuPhase
-  = -- | Put the PC on the BRAM address bus.
-    Fetch
-  | -- | Wait for the registered BRAM command to reach the RAM.
-    FetchDelay
-  | -- | Wait for the registered BRAM output.
-    FetchCapture
-  | -- | Latch the instruction word from the BRAM into 'cpuInstruction' and
-    -- compare the PC against the end of the program.
-    FetchWait
-  | -- | Read four eight-register banks, or halt if past the end.
-    Decode
-  | -- | Select one of four registered register-file banks.
-    OperandSelect
-  | -- | Do the arithmetic into 'cpuComputed'.
-    Execute
-  | -- | Complete the upper three barrel-shifter levels from the registered partial result.
-    ShiftFinish
-  | -- | Run the multiply/divide unit ('cpuMulDiv') until it has a result.
-    MulDiv
-  | -- | Write back, update the PC and start the next fetch or the memory/UART
-    -- access.
-    Commit
-  | -- | Enter an exception handler from registered cause/value inputs.
-    Trap
+  = Fetch
+  | FetchDelay
+  | FetchCapture
+  | FetchWait
+  | Decode
+  | OperandSelect
+  | Execute
+  | ShiftFinish
+  | MulDiv
+  | Commit
+  | Trap
   | CsrRead
   | CsrWrite
   | TrapReturn
-  | -- | Put the load address on the BRAM bus.
-    LoadIssue
-  | LoadDelay
-  | LoadCapture
-  | LoadWait
-  | -- | Align the loaded word latched in 'cpuMemoryWord'.
-    LoadAlign
-  | LoadCommit
-  | -- | Write a whole word to the BRAM.
-    StoreWrite
-  | -- | Put a byte/halfword store's address on the BRAM bus to read the old word.
-    StoreIssue
-  | StoreDelay
-  | StoreCapture
-  | StoreWait
-  | -- | Merge a byte or halfword into the old word latched in 'cpuMemoryWord'.
-    StoreMerge
-  | StoreCommit
-  | -- | Wait for the UART transmitter, then hand it the byte.
-    TxWrite
-  | -- | Interpret a registered finisher write, independently of trap handling.
-    ExitWrite
-  | MemoryDecode
+  | BusWait
   deriving (Generic, NFDataX, Show, Eq)
 
-
--- A dedicated state bit drives each stage instead of decoding a binary tag.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 30
+-- One dedicated state bit per CPU stage.
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 15
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -134,29 +98,14 @@ data CpuPhase
     ConstrRepr 'Decode 16 16 [],
     ConstrRepr 'OperandSelect 32 32 [],
     ConstrRepr 'Execute 64 64 [],
-    ConstrRepr 'MulDiv 128 128 [],
-    ConstrRepr 'Commit 256 256 [],
-    ConstrRepr 'LoadIssue 512 512 [],
-    ConstrRepr 'LoadDelay 1024 1024 [],
-    ConstrRepr 'LoadCapture 2048 2048 [],
-    ConstrRepr 'LoadWait 4096 4096 [],
-    ConstrRepr 'LoadAlign 8192 8192 [],
-    ConstrRepr 'LoadCommit 16384 16384 [],
-    ConstrRepr 'StoreWrite 32768 32768 [],
-    ConstrRepr 'StoreIssue 65536 65536 [],
-    ConstrRepr 'StoreDelay 131072 131072 [],
-    ConstrRepr 'StoreCapture 262144 262144 [],
-    ConstrRepr 'StoreWait 524288 524288 [],
-    ConstrRepr 'StoreMerge 1048576 1048576 [],
-    ConstrRepr 'StoreCommit 2097152 2097152 [],
-    ConstrRepr 'TxWrite 4194304 4194304 [],
-    ConstrRepr 'ShiftFinish 8388608 8388608 [],
-    ConstrRepr 'Trap 16777216 16777216 [],
-    ConstrRepr 'CsrRead 33554432 33554432 [],
-    ConstrRepr 'CsrWrite 67108864 67108864 [],
-    ConstrRepr 'TrapReturn 134217728 134217728 [],
-    ConstrRepr 'ExitWrite 268435456 268435456 [],
-    ConstrRepr 'MemoryDecode 536870912 536870912 []
+    ConstrRepr 'ShiftFinish 128 128 [],
+    ConstrRepr 'MulDiv 256 256 [],
+    ConstrRepr 'Commit 512 512 [],
+    ConstrRepr 'Trap 1024 1024 [],
+    ConstrRepr 'CsrRead 2048 2048 [],
+    ConstrRepr 'CsrWrite 4096 4096 [],
+    ConstrRepr 'TrapReturn 8192 8192 [],
+    ConstrRepr 'BusWait 16384 16384 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -269,6 +218,112 @@ tickCounter increment write counter =
 data MemoryTarget = RamTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | UnmappedTarget
   deriving (Generic, NFDataX, Show, Eq)
 
+-- Single outstanding data transaction. The CPU registers the request and
+-- waits for a registered response; the bus alone owns device side effects.
+data BusRequest = BusRequest
+  { busAddress :: Word32, busWidth :: BitVector 3,
+    busWrite :: Bool, busData :: Word32 }
+  deriving (Generic, NFDataX, Show, Eq)
+
+data BusResponse = BusResponse
+  { responseValue :: Word32, responseFault :: Bool, responseExit :: Bool }
+  deriving (Generic, NFDataX, Show, Eq)
+
+data BusPhase = BusIdle | BusDecode | BusDispatch
+  | BusLoadIssue | BusLoadDelay | BusLoadCapture | BusLoadWait | BusLoadAlign
+  | BusReply | BusStoreIssue | BusStoreDelay | BusStoreCapture | BusStoreWait
+  | BusStoreMerge | BusRamWrite | BusTx
+  deriving (Generic, NFDataX, Show, Eq)
+
+{-# ANN module (DataReprAnn $(liftQ [t| BusPhase |]) 16
+  [ ConstrRepr 'BusIdle 1 1 [],
+    ConstrRepr 'BusDecode 2 2 [],
+    ConstrRepr 'BusDispatch 4 4 [],
+    ConstrRepr 'BusLoadIssue 8 8 [],
+    ConstrRepr 'BusLoadDelay 16 16 [],
+    ConstrRepr 'BusLoadCapture 32 32 [],
+    ConstrRepr 'BusLoadWait 64 64 [],
+    ConstrRepr 'BusLoadAlign 128 128 [],
+    ConstrRepr 'BusReply 256 256 [],
+    ConstrRepr 'BusStoreIssue 512 512 [],
+    ConstrRepr 'BusStoreDelay 1024 1024 [],
+    ConstrRepr 'BusStoreCapture 2048 2048 [],
+    ConstrRepr 'BusStoreWait 4096 4096 [],
+    ConstrRepr 'BusStoreMerge 8192 8192 [],
+    ConstrRepr 'BusRamWrite 16384 16384 [],
+    ConstrRepr 'BusTx 32768 32768 []
+  ]) #-}
+
+data BusState = BusState
+  { busPhase :: BusPhase, busRequest :: BusRequest, busTarget :: MemoryTarget,
+    busWord :: Word32, busValue :: Word32 }
+  deriving (Generic, NFDataX)
+
+initialBus :: BusState
+initialBus = BusState BusIdle (BusRequest 0 0 False 0) UnmappedTarget 0 0
+
+-- Response and RX-consume are pulses. A stalled TX emits neither; a completed
+-- transfer emits exactly one response and, where appropriate, one side effect.
+busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte ->
+  (BusState, Maybe BusResponse, StepOutput, Bool)
+busStep state request memoryWord txReady rx =
+  let q = busRequest state
+      width = busWidth q
+      address = busAddress q
+      advance phase = (state {busPhase = phase}, Nothing, (0, Nothing, Nothing), False)
+      respond value fault exiting consume =
+        (state {busPhase = BusIdle}, Just (BusResponse value fault exiting), (0, Nothing, Nothing), consume)
+      valid = (if busWrite q then validStore width else validLoad width)
+        && not (misalignedMemory width address)
+   in case busPhase state of
+        BusIdle -> case request of
+          Nothing -> advance BusIdle
+          Just new -> (state {busPhase = BusDecode, busRequest = new}, Nothing, (0, Nothing, Nothing), False)
+        BusDecode -> (state {busPhase = BusDispatch, busTarget = decodeMemoryTarget address}, Nothing, (0, Nothing, Nothing), False)
+        BusDispatch
+          | not valid -> respond 0 True False False
+          | otherwise -> case busTarget state of
+              RamTarget
+                | not (busWrite q) -> advance BusLoadIssue
+                | width == 2 -> (state {busPhase = BusRamWrite, busValue = busData q}, Nothing, (0, Nothing, Nothing), False)
+                | otherwise -> advance BusStoreIssue
+              UartTxTarget
+                | busWrite q -> advance BusTx
+                | otherwise -> respond 0 False False False
+              UartStatusTarget
+                | busWrite q -> respond 0 True False False
+                | otherwise -> respond (loadValue width 0
+                    ((if txReady then 1 else 0) .|. (case rx of Nothing -> 0; Just _ -> 2))) False False False
+              UartRxTarget
+                | busWrite q -> respond 0 True False False
+                | otherwise -> respond (loadValue width 0 (maybe 0 resize rx)) False False
+                    (case rx of Nothing -> False; Just _ -> True)
+              ExitTarget
+                | width == 0 || width == 4 -> respond 0 True False False
+                | not (busWrite q) -> respond 0 False False False
+                | otherwise -> let status = busData q .&. 0xffff
+                    in respond 0 False (status == 0x5555 || status == 0x3333) False
+              UnmappedTarget -> respond 0 True False False
+        BusLoadIssue -> (state {busPhase = BusLoadDelay}, Nothing, (memoryIndex address, Nothing, Nothing), False)
+        BusLoadDelay -> advance BusLoadCapture
+        BusLoadCapture -> advance BusLoadWait
+        BusLoadWait -> (state {busPhase = BusLoadAlign, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), False)
+        BusLoadAlign -> (state {busPhase = BusReply,
+            busValue = loadValue width (resize address) (busWord state)}, Nothing, (0, Nothing, Nothing), False)
+        BusReply -> respond (busValue state) False False False
+        BusStoreIssue -> (state {busPhase = BusStoreDelay}, Nothing, (memoryIndex address, Nothing, Nothing), False)
+        BusStoreDelay -> advance BusStoreCapture
+        BusStoreCapture -> advance BusStoreWait
+        BusStoreWait -> (state {busPhase = BusStoreMerge, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), False)
+        BusStoreMerge -> (state {busPhase = BusRamWrite,
+            busValue = storeValue width (resize address) (busData q) (busWord state)}, Nothing, (0, Nothing, Nothing), False)
+        BusRamWrite -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
+            (0, Just (memoryIndex address, busValue state), Nothing), False)
+        BusTx
+          | txReady -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
+              (0, Nothing, Just (resize (busData q))), False)
+          | otherwise -> advance BusTx
+
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     -- | Registered writeback request; consumed during the next fetch.
@@ -301,10 +356,9 @@ data Machine = Machine
     cpuCountRetirement :: Bool,
     cpuCounterWrite :: Maybe (Unsigned 12, Word32),
     cpuMulDiv :: MulDivUnit,
-    cpuMemoryTarget :: MemoryTarget,
-    cpuMemoryWord :: Word32,
-    cpuAlignedLoad :: Word32,
-    cpuMergedStore :: Word32,
+    systemBus :: BusState,
+    cpuBusRequest :: Maybe BusRequest,
+    cpuBusResponse :: Maybe BusResponse,
     cpuRunning :: Bool,
     programEnd :: Word32,
     hostState :: HostState,
@@ -351,10 +405,9 @@ initialMachine =
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
       cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
-      cpuMemoryTarget = UnmappedTarget,
-      cpuMemoryWord = 0,
-      cpuAlignedLoad = 0,
-      cpuMergedStore = 0,
+      systemBus = initialBus,
+      cpuBusRequest = Nothing,
+      cpuBusResponse = Nothing,
       cpuRunning = False,
       programEnd = 0,
       hostState = HostIdle,
@@ -494,16 +547,29 @@ machineStep machine (memoryWord, received, txReady) =
 -- The physical circuit supplies a registered Ctrl-C decode, preventing the
 -- 8-bit byte comparison from preceding the controller's high-fanout reset mux.
 machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
-machineStepDecoded machine input =
-  let (machine', output) = machineStepCore
-        machine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing} input
+machineStepDecoded machine input@(memoryWord, received, txReady, emergencyReset) =
+  let receivedMachine = case (cpuRunning machine && not emergencyReset, received, rxHolding machine) of
+        (True, Just byte, Nothing) -> machine {rxHolding = Just byte}
+        _ -> machine
+      (machine', coreOutput) = machineStepCore
+        receivedMachine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing, cpuBusRequest = Nothing} input
+      cancelled = emergencyReset || not (cpuRunning machine)
+      (bus', response, busOutput, consumeRx) = if cancelled
+        then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), False)
+        else busStep (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine)
+      busActive = case busPhase (systemBus machine) of
+        BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
+        _ -> True
+      output = if busActive && not cancelled then busOutput else coreOutput
       counterWrite lowAddress highAddress = case cpuCounterWrite machine of
         Just (address, value)
           | address == lowAddress -> Just (False, value)
           | address == highAddress -> Just (True, value)
         _ -> Nothing
       counted = machine'
-        { cpuCycle = tickCounter True (counterWrite 0xb00 0xb80) (cpuCycle machine),
+        { systemBus = bus', cpuBusResponse = response,
+          rxHolding = if consumeRx then Nothing else rxHolding machine',
+          cpuCycle = tickCounter True (counterWrite 0xb00 0xb80) (cpuCycle machine),
           cpuInstret = tickCounter (cpuCountRetirement machine)
             (counterWrite 0xb02 0xb82) (cpuInstret machine)
         }
@@ -610,10 +676,9 @@ resetCpu machine =
       cpuCsrSource = 0,
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
-      cpuMemoryTarget = UnmappedTarget,
-      cpuMemoryWord = 0,
-      cpuAlignedLoad = 0,
-      cpuMergedStore = 0,
+      systemBus = initialBus,
+      cpuBusRequest = Nothing,
+      cpuBusResponse = Nothing,
       cpuRunning = False,
       rxHolding = Nothing
     }
@@ -644,12 +709,10 @@ cpuStep machine memoryWord received txReady
   = cpuStepDecoded machine memoryWord received txReady (received == Just 0x03)
 
 cpuStepDecoded :: Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
-cpuStepDecoded machine memoryWord received txReady emergencyReset
+cpuStepDecoded machine memoryWord _received txReady emergencyReset
   | emergencyReset = (resetCpu machine, Nothing, (0, Nothing, Nothing))
   | otherwise =
-      let machineRx = case (received, rxHolding machine) of
-            (Just byte, Nothing) -> machine {rxHolding = Just byte}
-            _ -> machine
+      let machineRx = machine
           next m = withoutRegister (m, (0, Nothing, Nothing))
        in let Machine {..} = machineRx
               instruction = cpuInstruction
@@ -686,12 +749,11 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                  let op2 = if cpuIsRegOp then cpuB else cpuImm
                      -- OP with funct7 = 1 is the M extension.
                      isMulDiv = cpuIsRegOp && instruction `shiftR` 25 == 1
-                     isMemory = instruction .&. 0x7f == 0x03 || instruction .&. 0x7f == 0x23
                      isShift = (instruction .&. 0x7f == 0x13 || cpuIsRegOp)
                        && (instructionFunct3 instruction == 0b001 || instructionFunct3 instruction == 0b101)
                   in next
                        machineRx
-                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else if isMemory then MemoryDecode else Commit,
+                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else Commit,
                            cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2,
                            cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
                          }
@@ -705,41 +767,22 @@ cpuStepDecoded machine memoryWord received txReady emergencyReset
                  case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
-               MemoryDecode -> next machineRx
-                 {cpuPhase = Commit, cpuMemoryTarget = decodeMemoryTarget address}
-               Commit -> commitInstructionDecoded machineRx txReady
+               Commit -> commitInstruction machineRx txReady
                Trap -> withoutRegister (enterTrap machineRx)
                CsrRead -> csrReadStep machineRx
                CsrWrite -> csrWriteStep machineRx
                TrapReturn -> withoutRegister (returnFromTrap machineRx)
-               LoadIssue -> withoutRegister (machineRx {cpuPhase = LoadDelay}, (memoryIndex address, Nothing, Nothing))
-               LoadDelay -> next machineRx {cpuPhase = LoadCapture}
-               LoadCapture -> next machineRx {cpuPhase = LoadWait}
-               LoadWait -> next machineRx {cpuPhase = LoadAlign, cpuMemoryWord = memoryWord}
-               StoreWrite -> withoutRegister (finishInstruction machineRx (Just (memoryIndex address, cpuB)))
-               StoreIssue -> withoutRegister (machineRx {cpuPhase = StoreDelay}, (memoryIndex address, Nothing, Nothing))
-               StoreDelay -> next machineRx {cpuPhase = StoreCapture}
-               StoreCapture -> next machineRx {cpuPhase = StoreWait}
-               ExitWrite ->
-                 let status = cpuB .&. 0xffff
-                     completed = machineRx {cpuCountRetirement = True}
-                  in if status == 0x5555 || status == 0x3333
-                       then withoutRegister (haltMachine completed)
-                       else withoutRegister (finishInstruction machineRx Nothing)
-               TxWrite
-                 | txReady -> withoutRegister (finishInstructionWithTx machineRx (Just (resize cpuB)))
-                 | otherwise -> next machineRx
-               LoadAlign -> next machineRx
-                 { cpuPhase = LoadCommit,
-                   cpuAlignedLoad = loadValue (instructionFunct3 instruction) (resize address) cpuMemoryWord
-                 }
-               LoadCommit -> withRegister (instructionRd instruction) cpuAlignedLoad (finishInstruction machineRx Nothing)
-               StoreWait -> next machineRx {cpuPhase = StoreMerge, cpuMemoryWord = memoryWord}
-               StoreMerge -> next machineRx
-                 { cpuPhase = StoreCommit,
-                   cpuMergedStore = storeValue (instructionFunct3 instruction) (resize address) cpuB cpuMemoryWord
-                 }
-               StoreCommit -> withoutRegister (finishInstruction machineRx (Just (memoryIndex address, cpuMergedStore)))
+               BusWait -> case cpuBusResponse of
+                 Nothing -> next machineRx
+                 Just response
+                   | responseFault response -> withoutRegister (raiseException machineRx
+                       (if testBit instruction 5 then 7 else 5) address)
+                   | responseExit response -> withoutRegister (haltMachine
+                       machineRx {cpuPc = cLink cpuComputed, cpuCountRetirement = True})
+                   | testBit instruction 5 -> withoutRegister (finishInstruction
+                       machineRx {cpuPc = cLink cpuComputed} Nothing)
+                   | otherwise -> withRegister (instructionRd instruction) (responseValue response)
+                       (finishInstruction machineRx {cpuPc = cLink cpuComputed} Nothing)
 
 withRegister :: Index 32 -> Word32 -> (Machine, StepOutput) -> (Machine, RegisterWrite, StepOutput)
 withRegister index value (machine, output) = (machine, Just (index, value), output)
@@ -793,12 +836,7 @@ instructionFunct3 instruction = pack (resize ((instruction `shiftR` 12) .&. 7) :
 
 -- | Commit stage: act on the values the Execute stage computed.
 commitInstruction :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
--- Direct semantic helper; the circuit uses the registered MemoryDecode stage.
-commitInstruction machine txReady = commitInstructionDecoded
-  machine {cpuMemoryTarget = decodeMemoryTarget (cAddress (cpuComputed machine))} txReady
-
-commitInstructionDecoded :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
-commitInstructionDecoded machine txReady =
+commitInstruction machine _txReady =
   let instruction = cpuInstruction machine
       Computed {..} = cpuComputed machine
       opcode = instruction .&. 0x7f
@@ -815,6 +853,9 @@ commitInstructionDecoded machine txReady =
       fault cause value = withoutRegister (raiseException machine cause value)
       invalid = fault 2 instruction
       address = cAddress
+      requestBus write = withoutRegister
+        (machine {cpuPhase = BusWait,
+          cpuBusRequest = Just (BusRequest address funct3 write (cpuB machine))}, (0, Nothing, Nothing))
    in case opcode of
         0x37 -> normal -- LUI
         0x17 -> normal -- AUIPC
@@ -835,29 +876,11 @@ commitInstructionDecoded machine txReady =
         0x03
           | not (validLoad funct3) -> invalid
           | misalignedMemory funct3 address -> fault 4 address
-          | cpuMemoryTarget machine == ExitTarget ->
-              if funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b101
-                then withRegister rd 0 (finishInstruction machine {cpuPc = nextPc} Nothing)
-                else fault 5 address
-          | isUartTarget (cpuMemoryTarget machine) ->
-              let (value, machine') = readUartTarget (cpuMemoryTarget machine) txReady machine
-               in withRegister rd value (finishInstruction machine' {cpuPc = nextPc} Nothing)
-          | cpuMemoryTarget machine == RamTarget ->
-              withoutRegister (machine {cpuPc = nextPc, cpuPhase = LoadIssue}, (0, Nothing, Nothing))
-          | otherwise -> fault 5 address
+          | otherwise -> requestBus False
         0x23
           | not (validStore funct3) -> invalid
           | misalignedMemory funct3 address -> fault 6 address
-          | cpuMemoryTarget machine == ExitTarget ->
-              if funct3 == 0b001 || funct3 == 0b010
-                then withoutRegister (machine {cpuPc = nextPc, cpuPhase = ExitWrite}, (0, Nothing, Nothing))
-                else fault 7 address
-          | cpuMemoryTarget machine == UartTxTarget ->
-              withoutRegister (machine {cpuPc = nextPc, cpuPhase = TxWrite}, (0, Nothing, Nothing))
-          | cpuMemoryTarget machine == RamTarget ->
-              let phase = if funct3 == 0b010 then StoreWrite else StoreIssue
-               in withoutRegister (machine {cpuPc = nextPc, cpuPhase = phase}, (0, Nothing, Nothing))
-          | otherwise -> fault 7 address
+          | otherwise -> requestBus True
         0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
         0x73
           | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
@@ -1072,23 +1095,6 @@ decodeMemoryTarget address
   | address == uartRxData = UartRxTarget
   | address == exitDevice = ExitTarget
   | otherwise = UnmappedTarget
-
-isUartTarget :: MemoryTarget -> Bool
-isUartTarget target = target == UartTxTarget || target == UartStatusTarget || target == UartRxTarget
-
-readUart :: Word32 -> Bool -> Machine -> (Word32, Machine)
-readUart address = readUartTarget (decodeMemoryTarget address)
-
-readUartTarget :: MemoryTarget -> Bool -> Machine -> (Word32, Machine)
-readUartTarget target txReady machine
-  | target == UartStatusTarget =
-      ( (if txReady then 1 else 0) .|. (if hasByte (rxHolding machine) then 2 else 0), machine )
-  | target == UartRxTarget =
-      (maybe 0 resize (rxHolding machine), machine {rxHolding = Nothing})
-  | otherwise = (0, machine)
-  where
-    hasByte Nothing = False
-    hasByte (Just {}) = True
 
 validLoad :: BitVector 3 -> Bool
 validLoad funct3 = funct3 == 0b000 || funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b100 || funct3 == 0b101

@@ -11,8 +11,8 @@ five ways, and this plan addresses them in turn:
 2. No timer or interrupts.
 3. Non-RISC-V behaviour inside the CPU: halting when the PC reaches the end of
    the loaded image, and the program loader, `DONE` reply and Ctrl-C living in
-   the CPU's state machine. There is also no bus: the UART addresses are
-   hard-wired into the load/store logic.
+   the CPU's state machine. Data accesses now use a registered bus; instruction
+   fetch and the hardware host loader still access RAM directly.
 4. Never checked against the official architecture tests.
 5. Slow: one instruction at a time, 8 cycles each, about 75 for
    multiply/divide.
@@ -55,8 +55,12 @@ preserving `mtvec`. The temporary ECALL/end-of-image halt rules remain for
 older binaries until the boot ROM replaces the hardware host controller.
 The finisher/device-selection slice passes its 15 exit cases and all existing
 CPU, counter, trap, RV32IM and FP-RISC checks at 96 MHz. No timer/interrupt
-sources or official architecture-test claim yet. The rest of step 3 is the
-registered bus, RAM relocation and boot ROM, followed by step 4's conformance
+sources or official architecture-test claim yet. The registered data bus also
+passes 3,852 mixed-width RAM/RX checks and
+the existing CPU, counter, trap and RV32IM regressions at 96 MHz. Its
+request/response interface preserves precise faults and waits for completion
+before changing the PC or destination register. The rest of step 3 is
+RAM relocation and boot ROM, followed by step 4's conformance
 baseline. See [the system separation slice](boards/tangnano20k/SYSTEM-BUS-2026-10-05.md).
 
 ## Step 1: machine mode (Zicsr and traps)

@@ -65,6 +65,8 @@ retirement and faulting instructions that must not retire.
 `check_finisher.py` verifies explicit success/failure exits with a nonzero
 trap vector and an infinite loop after the store; see
 [SYSTEM-BUS-2026-10-05.md](SYSTEM-BUS-2026-10-05.md).
+`check_bus.py --freq-mhz 96` checks mixed-width RAM traffic, signed UART RX
+loads and single consumption through the registered data bus on three runs.
 
 ```bash
 boards/tangnano20k/c/build.sh hello
@@ -113,6 +115,7 @@ judge:
 | 8 cycles ordinary / 9 cycles shifts (clock sweep, 2026-10-05) | 150.58 MHz, seed 2 | 108 and 114 MHz | 117 MHz: incorrect sieve; 120 MHz: subtraction failure |
 | machine traps, Zicsr and split counters (2026-10-05) | 147.19 MHz, seed 2, route target 144 MHz | 96 MHz: counter, trap, CPU, RV32IM and FP-RISC suites | seed 1 at target 115.2 MHz loses string characters at 96 MHz despite a reported 142.90 MHz maximum |
 | finisher and registered device target (2026-10-05) | 144.61 MHz, seed 3, route target 144 MHz | 96 MHz: finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seed 2 misses the route margin target at 137.84 MHz; not loaded |
+| registered data bus (2026-10-05) | 144.61 MHz, seed 7, route target 144 MHz | 96 MHz: bus, finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seeds 3, 2, 1, 4, 5 and 6 miss the margin; not loaded |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
 (`MARGIN=1.5` by default, seed 3 tried first). To test above what timing allows, build with

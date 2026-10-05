@@ -103,3 +103,62 @@ Actual verification is at 96 MHz; no higher-frequency claim is made.
 
 The new image is loaded in board SRAM; flash is unchanged. This completes
 only the first step 3 slice, not the full bus/boot-ROM milestone.
+
+## Registered data bus continuation
+
+The CPU now issues one registered `BusRequest` containing address, width
+(instruction funct3, including load signedness), write direction and data,
+then waits in `BusWait`. It keeps the original PC and destination register
+until a registered `BusResponse` arrives. Fault responses raise precise load
+or store access faults with the original PC and address; invalid encodings
+and misaligned accesses are rejected before issuing a request.
+
+A separate bus state machine registers target selection and owns RAM read
+latency, byte/halfword read-modify-write, UART TX waits, RX consumption and
+finisher completion. Responses, RAM writes and transmitted bytes are pulses:
+a stalled transfer cannot repeat its side effect. Ordinary arithmetic still
+takes eight clocks; memory instructions pay for the request/response handoff.
+Signed byte loads from UART RX now correctly sign-extend high-bit bytes.
+
+RX reads consume only the byte present before their completion edge. An
+empty read coinciding with a new byte returns zero and preserves that byte
+for the next read. Ctrl-C cancels unissued bus work and resets the CPU;
+it cannot undo a physical command registered on an earlier clock.
+
+This slice separates **data accesses**. Instruction fetch and the hardware
+host loader still use BRAM directly, RAM remains at zero, and the temporary
+host halt conventions remain. RAM relocation and the boot ROM are next.
+The C and FP-RISC runtime ABI and host protocol are unchanged.
+
+All Haskell suites pass, including 30 SimpleRisc properties. New properties
+cover single completion, signed RX loads, the RX arrival race, precise bus
+faults, waiting without architectural updates, and Ctrl-C cancellation.
+The generated RTL smoke test returns exact `HiDONE`. The new board fixture
+performs 1,284 checks per run over 256 RAM words and two host-supplied UART
+bytes; inline assembly forces actual `LH` and `LB` instructions, since GCC
+can otherwise optimize signed comparisons into unsigned loads.
+
+### Registered bus board results
+
+Placement seed 7 meets the 144 MHz route target at a modeled 144.61 MHz.
+Seeds 3, 2, 1, 4, 5 and 6 missed that margin at 136.22, 123.90, 140.25,
+142.51, 142.45 and 131.42 MHz respectively; none was loaded. Reproduce the
+final placement with `FREQ_MHZ=96 MARGIN=1.5 SEEDS=7
+boards/tangnano20k/build.sh`. It uses 8,161 LUT4s, 2,832 flip-flops and
+32 BSRAM blocks. Image SHA-256:
+`7ff9d560cff604e7b05983bf68385c02c46b23212cb1e443b264b0bf6ae3afc2`.
+
+On this image at **96 MHz**:
+
+- `check_bus.py`: three runs, 3,852 mixed-width RAM/RX checks pass.
+- `check_finisher.py`: all 15 explicit exit cases pass.
+- `check_counters.py`: all 270 assertions pass.
+- `check_traps.py`: all 267 assertions pass.
+- `check_processor.py`: arithmetic, UART, Ctrl-C, clear/reload and memory
+  stress all pass.
+- `check_rv32m.py`: 30,720 reference comparisons pass.
+- `check_rv32i.py --repeat 1`: 3,840 reference comparisons pass.
+- FP-RISC `tests/check_tangnano20k.py`: host/link/ISA/loader checks, three
+  smoke runs, three CSR runs, seven refusal cases and recovery pass.
+
+The board is left on this SRAM image; flash is unchanged.
