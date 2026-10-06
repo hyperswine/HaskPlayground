@@ -62,9 +62,9 @@ type MemAddr = Unsigned 14
 
 -- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
 -- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
--- a simple instruction takes eight cycles: Fetch, FetchDelay, FetchCapture,
--- FetchWait, Decode, OperandSelect, Execute and Commit. Shifts insert
--- ShiftFinish before Commit and take nine cycles.
+-- Fetch and register reads retain their existing registered stages.
+-- OperandSelect registers ALU controls; ExecuteFinish selects registered results.
+-- Ordinary instructions take nine cycles; shifts insert ShiftFinish for ten.
 -- The BRAM and the UART transmitter are only ever driven from registers, in
 -- stages of their own (Fetch, BusLoadIssue, BusRamWrite, BusTx...): on the GW2A
 -- their input timing is worse than nextpnr models.  The
@@ -79,6 +79,7 @@ data CpuPhase
   | Decode
   | OperandSelect
   | Execute
+  | ExecuteFinish
   | ShiftFinish
   | MulDiv
   | Commit
@@ -90,7 +91,7 @@ data CpuPhase
   deriving (Generic, NFDataX, Show, Eq)
 
 -- One dedicated state bit per CPU stage.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 15
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 16
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -105,7 +106,8 @@ data CpuPhase
     ConstrRepr 'CsrRead 2048 2048 [],
     ConstrRepr 'CsrWrite 4096 4096 [],
     ConstrRepr 'TrapReturn 8192 8192 [],
-    ConstrRepr 'BusWait 16384 16384 []
+    ConstrRepr 'BusWait 16384 16384 [],
+    ConstrRepr 'ExecuteFinish 32768 32768 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -324,6 +326,83 @@ busStep state request memoryWord txReady rx =
               (0, Nothing, Just (resize (busData q))), False)
           | otherwise -> advance BusTx
 
+-- Decode and operand selection are registered before the ALU carry chains;
+-- the result mux runs in a separate stage after all candidates are registered.
+data ExecuteControl = ExecuteControl
+  { execOpcode :: Word32, execFunct3 :: BitVector 3, execLegal :: Bool,
+    execSubtract :: Bool, execArithmeticShift :: Bool,
+    execShift :: Bool, execMulDiv :: Bool }
+  deriving (Generic, NFDataX)
+
+initialExecuteControl :: ExecuteControl
+initialExecuteControl = ExecuteControl 0 0 False False False False False
+
+decodeExecuteControl :: Word32 -> ExecuteControl
+decodeExecuteControl instruction =
+  let opcode = instruction .&. 0x7f
+      funct3 = instructionFunct3 instruction
+      funct7 = (instruction `shiftR` 25) .&. 0x7f
+      regOperation = opcode == 0x33
+      shiftOperation = funct3 == 1 || funct3 == 5
+      alternate = funct7 == 0x20
+      legal = if regOperation
+        then funct7 == 0 || (alternate && (funct3 == 0 || funct3 == 5))
+        else not shiftOperation || funct7 == 0 || (alternate && funct3 == 5)
+   in ExecuteControl opcode funct3 legal (regOperation && alternate) alternate
+        ((opcode == 0x13 || regOperation) && shiftOperation) (regOperation && funct7 == 1)
+
+-- High and low comparisons run in parallel; their registered results are
+-- combined in ExecuteFinish, avoiding a full 32-bit comparison carry chain.
+data CompareResults = CompareResults
+  { compareEqual :: Bool, compareHighEqual :: Bool, compareLowLess :: Bool,
+    compareSignedHighLess :: Bool, compareUnsignedHighLess :: Bool }
+  deriving (Generic, NFDataX)
+
+initialCompareResults :: CompareResults
+initialCompareResults = CompareResults False False False False False
+
+compareOperands :: Word32 -> Word32 -> CompareResults
+compareOperands a b =
+  let highA = resize (a `shiftR` 16) :: Unsigned 16
+      highB = resize (b `shiftR` 16) :: Unsigned 16
+      lowA = resize a :: Unsigned 16
+      lowB = resize b :: Unsigned 16
+   in CompareResults (a == b) (highA == highB) (lowA < lowB)
+        ((bitCoerce highA :: Signed 16) < (bitCoerce highB :: Signed 16)) (highA < highB)
+
+signedComparison, unsignedComparison :: CompareResults -> Bool
+signedComparison parts = compareSignedHighLess parts || (compareHighEqual parts && compareLowLess parts)
+unsignedComparison parts = compareUnsignedHighLess parts || (compareHighEqual parts && compareLowLess parts)
+
+branchTakenPrepared :: BitVector 3 -> CompareResults -> Maybe Bool
+branchTakenPrepared kind parts = case kind of
+  0 -> Just (compareEqual parts)
+  1 -> Just (not (compareEqual parts))
+  4 -> Just (signedComparison parts)
+  5 -> Just (not (signedComparison parts))
+  6 -> Just (unsignedComparison parts)
+  7 -> Just (not (unsignedComparison parts))
+  _ -> Nothing
+
+aluCandidates :: ExecuteControl -> Word32 -> Word32 -> Vec 8 Word32
+aluCandidates control a b =
+  (if execSubtract control then a - b else a + b) :>
+  (a `shiftL` fromIntegral (b .&. 3)) :>
+  0 :> 0 :>
+  (a `xor` b) :>
+  (if execArithmeticShift control
+    then unsigned32 (signed32 a `shiftR` fromIntegral (b .&. 3))
+    else a `shiftR` fromIntegral (b .&. 3)) :>
+  (a .|. b) :> (a .&. b) :> Nil
+
+selectedAlu :: ExecuteControl -> Vec 8 Word32 -> CompareResults -> Maybe Word32
+selectedAlu control candidates parts = if execLegal control then Just value else Nothing
+  where
+    value = case execFunct3 control of
+      2 -> boolWord (signedComparison parts)
+      3 -> boolWord (unsignedComparison parts)
+      _ -> candidates !! (fromIntegral (unpack (execFunct3 control) :: Unsigned 3) :: Index 8)
+
 data Machine = Machine
   { cpuRegs :: Vec 32 Word32,
     -- | Registered writeback request; consumed during the next fetch.
@@ -339,15 +418,22 @@ data Machine = Machine
     -- | The instruction's immediate, whichever format it uses.
     cpuImm :: Word32,
     -- | OP (register-register) rather than OP-IMM: the ALU takes rs2, not the
-    -- immediate.  Selected in Execute so Decode's register read feeds
+    -- immediate. Selected in OperandSelect so Decode's register read feeds
     -- bank flip-flops directly; OperandSelect completes the read next cycle.
     cpuIsRegOp :: Bool,
+    cpuOp2 :: Word32,
+    cpuExecuteControl :: ExecuteControl,
+    cpuAluCandidates :: Vec 8 Word32,
+    cpuAluCompare :: CompareResults,
+    cpuBranchCompare :: CompareResults,
     cpuComputed :: Computed,
     cpuTrapRegisters :: TrapRegisters,
     cpuExceptionCause :: Word32,
     cpuExceptionValue :: Word32,
     cpuScratch :: Word32,
     cpuInterruptEnable :: Word32,
+    cpuCsrSelection :: Vec 13 Bool,
+    cpuCsrReadOnly :: Bool,
     cpuCsrValue :: Word32,
     cpuCsrSource :: Word32,
     cpuCycle :: Counter64,
@@ -392,12 +478,19 @@ initialMachine =
       cpuB = 0,
       cpuImm = 0,
       cpuIsRegOp = False,
+      cpuOp2 = 0,
+      cpuExecuteControl = initialExecuteControl,
+      cpuAluCandidates = repeat 0,
+      cpuAluCompare = initialCompareResults,
+      cpuBranchCompare = initialCompareResults,
       cpuComputed = Computed Nothing 0 0 Nothing 0,
       cpuTrapRegisters = initialTrapRegisters,
       cpuExceptionCause = 0,
       cpuExceptionValue = 0,
       cpuScratch = 0,
       cpuInterruptEnable = 0,
+      cpuCsrSelection = repeat False,
+      cpuCsrReadOnly = False,
       cpuCsrValue = 0,
       cpuCsrSource = 0,
       cpuCycle = initialCounter,
@@ -651,6 +744,10 @@ sendReply machine True = case replyState machine of
         next = if n == 3 then NoReply else DoneReply (n + 1)
      in (machine {replyState = next}, Just byte)
 
+-- Reset architectural state and cancellation tokens. Pipeline temporaries
+-- are overwritten before use, so keeping them avoids host-reset data muxes.
+-- Host reset cancels architectural work. Pipeline temporaries remain held:
+-- each is overwritten before its next valid use, avoiding wide reset muxes.
 resetCpu :: Machine -> Machine
 resetCpu machine =
   machine
@@ -658,25 +755,12 @@ resetCpu machine =
       cpuPendingWrite = Nothing,
       cpuPc = 0,
       cpuPhase = Fetch,
-      cpuInstruction = 0,
-      cpuPastEnd = False,
-      cpuABanks = repeat 0,
-      cpuBBanks = repeat 0,
-      cpuA = 0,
-      cpuB = 0,
-      cpuImm = 0,
-      cpuIsRegOp = False,
-      cpuComputed = Computed Nothing 0 0 Nothing 0,
       cpuTrapRegisters = initialTrapRegisters,
-      cpuExceptionCause = 0,
-      cpuExceptionValue = 0,
       cpuScratch = 0,
       cpuInterruptEnable = 0,
-      cpuCsrValue = 0,
-      cpuCsrSource = 0,
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
-      systemBus = initialBus,
+      systemBus = (systemBus machine) {busPhase = BusIdle},
       cpuBusRequest = Nothing,
       cpuBusResponse = Nothing,
       cpuRunning = False,
@@ -740,28 +824,41 @@ cpuStepDecoded machine memoryWord _received txReady emergencyReset
                            cpuIsRegOp = instruction .&. 0x7f == 0x33
                          }
                OperandSelect ->
-                 next machineRx
-                   { cpuPhase = Execute,
-                     cpuA = selectRegisterBank (instructionRs1 instruction) cpuABanks,
-                     cpuB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
-                   }
+                 let selectedB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
+                  in next machineRx
+                       { cpuPhase = Execute,
+                         cpuA = selectRegisterBank (instructionRs1 instruction) cpuABanks,
+                         cpuB = selectedB,
+                         cpuOp2 = if cpuIsRegOp then selectedB else cpuImm,
+                         cpuExecuteControl = decodeExecuteControl instruction
+                       }
                Execute ->
-                 let op2 = if cpuIsRegOp then cpuB else cpuImm
-                     -- OP with funct7 = 1 is the M extension.
-                     isMulDiv = cpuIsRegOp && instruction `shiftR` 25 == 1
-                     isShift = (instruction .&. 0x7f == 0x13 || cpuIsRegOp)
-                       && (instructionFunct3 instruction == 0b001 || instructionFunct3 instruction == 0b101)
-                  in next
-                       machineRx
-                         { cpuPhase = if isMulDiv then MulDiv else if isShift then ShiftFinish else Commit,
-                           cpuComputed = compute cpuPc instruction cpuA cpuB cpuImm op2,
-                           cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
-                         }
+                 next machineRx
+                   { cpuPhase = if execMulDiv cpuExecuteControl then MulDiv else ExecuteFinish,
+                     cpuComputed = (compute cpuPc instruction cpuA cpuB cpuImm cpuOp2) {cAlu = Nothing, cTaken = Nothing},
+                     cpuAluCompare = compareOperands cpuA cpuOp2,
+                     cpuBranchCompare = compareOperands cpuA cpuB,
+                     cpuAluCandidates = aluCandidates cpuExecuteControl cpuA cpuOp2,
+                     cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
+                   }
+               ExecuteFinish ->
+                 let control = cpuExecuteControl
+                     result = case execOpcode control of
+                       0x37 -> Just cpuImm
+                       0x17 -> Just (cTarget cpuComputed)
+                       0x13 -> selectedAlu control cpuAluCandidates cpuAluCompare
+                       0x33 -> selectedAlu control cpuAluCandidates cpuAluCompare
+                       _ -> Nothing
+                  in next machineRx
+                       { cpuPhase = if execShift control then ShiftFinish else Commit,
+                         cpuComputed = cpuComputed {cAlu = result,
+                           cTaken = branchTakenPrepared (execFunct3 control) cpuBranchCompare}
+                       }
                ShiftFinish ->
-                 let op2 = if cpuIsRegOp then cpuB else cpuImm
-                     partial = cAlu cpuComputed
-                     result = fmap (\value -> shiftResult (instructionFunct3 instruction)
-                       ((instruction `shiftR` 25) .&. 0x7f) value (fromIntegral (op2 .&. 0x1c))) partial
+                 let control = cpuExecuteControl
+                     result = fmap (\value -> shiftResult (execFunct3 control)
+                       (if execArithmeticShift control then 0x20 else 0) value
+                       (fromIntegral (cpuOp2 .&. 0x1c))) (cAlu cpuComputed)
                   in next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = result}}
                MulDiv ->
                  case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
@@ -890,6 +987,8 @@ commitInstruction machine _txReady =
           | funct3 == 1 || funct3 == 2 || funct3 == 3 || funct3 == 5 || funct3 == 6 || funct3 == 7 ->
               withoutRegister
                 ( machine {cpuPhase = CsrRead,
+                    cpuCsrSelection = decodeCsrSelection (csrAddress instruction),
+                    cpuCsrReadOnly = csrAddress instruction == 0x301 || csrAddress instruction .&. 0xc00 == 0xc00,
                     cpuCsrSource = if testBit funct3 2
                       then resize ((instruction `shiftR` 15) .&. 0x1f)
                       else cpuA machine},
@@ -1002,14 +1101,43 @@ counterReadBusy address machine = case address of
 csrReadStep :: Machine -> (Machine, RegisterWrite, StepOutput)
 csrReadStep machine =
   let instruction = cpuInstruction machine
-      invalid = withoutRegister (raiseException machine 2 instruction)
-   in case readCsr (csrAddress instruction) machine of
-        Nothing -> invalid
-        Just (_, True) | csrWriteRequested instruction -> invalid
-        Just (_, _) | counterReadBusy (csrAddress instruction) machine ->
-          withoutRegister (machine, (0, Nothing, Nothing))
-        Just (value, _) -> withoutRegister
-          (machine {cpuPhase = CsrWrite, cpuCsrValue = value}, (0, Nothing, Nothing))
+      selection = cpuCsrSelection machine
+      -- Even a refused/busy read may latch a temporary value. It is used only
+      -- after successful completion, avoiding validity gates on the data mux.
+      captured = machine {cpuCsrValue = readSelectedCsr selection machine}
+      invalid = withoutRegister (raiseException captured 2 instruction)
+      busy = ((selection !! (8 :: Index 13) || selection !! (9 :: Index 13))
+                && counterCarry (cpuCycle machine))
+          || ((selection !! (10 :: Index 13) || selection !! (11 :: Index 13))
+                && counterCarry (cpuInstret machine))
+   in if not (or selection) || (cpuCsrReadOnly machine && csrWriteRequested instruction)
+        then invalid
+        else withoutRegister
+          (captured {cpuPhase = if busy then CsrRead else CsrWrite}, (0, Nothing, Nothing))
+
+-- CSR address comparisons are registered at Commit, before the data mux.
+decodeCsrSelection :: Unsigned 12 -> Vec 13 Bool
+decodeCsrSelection address =
+  (address == 0x300) :> (address == 0x301) :>
+  (address == 0x304) :> (address == 0x305) :>
+  (address == 0x340) :> (address == 0x341) :>
+  (address == 0x342) :> (address == 0x343) :>
+  (address == 0xb00 || address == 0xc00) :>
+  (address == 0xb80 || address == 0xc80) :>
+  (address == 0xb02 || address == 0xc02) :>
+  (address == 0xb82 || address == 0xc82) :>
+  (address == 0x310 || address == 0x344 || address == 0xf11 ||
+   address == 0xf12 || address == 0xf13 || address == 0xf14) :> Nil
+
+readSelectedCsr :: Vec 13 Bool -> Machine -> Word32
+readSelectedCsr selection machine =
+  let regs = cpuTrapRegisters machine
+      values = (0x1800 .|. (if trapMie regs then 8 else 0) .|. (if trapMpie regs then 0x80 else 0)) :>
+        0x4000_1100 :> cpuInterruptEnable machine :> trapVector regs :>
+        cpuScratch machine :> trapEpc regs :> trapCause regs :> trapValue regs :>
+        counterLo (cpuCycle machine) :> counterHi (cpuCycle machine) :>
+        counterLo (cpuInstret machine) :> counterHi (cpuInstret machine) :> 0 :> Nil
+   in fold (.|.) (zipWith (\selected value -> if selected then value else 0) selection values)
 
 csrWriteStep :: Machine -> (Machine, RegisterWrite, StepOutput)
 csrWriteStep machine =

@@ -14,7 +14,7 @@ five ways, and this plan addresses them in turn:
    the CPU's state machine. Data accesses now use a registered bus; instruction
    fetch and the hardware host loader still access RAM directly.
 4. Never checked against the official architecture tests.
-5. Slow: one instruction at a time, 8 cycles each, about 75 for
+5. Slow: one instruction at a time, 9 cycles each, about 75 for
    multiply/divide.
 
 Steps 1 to 4 make it a small but genuine RV32IM microcontroller core; step 5
@@ -36,6 +36,17 @@ makes it competitive.
 - **Keep software in step.** `boards/tangnano20k/c/` and fprisc's
   `machine/builtin/tangnano20k/` change in the same step as the hardware they
   depend on.
+
+## Execution timing experiment (2026-10-06)
+
+The serial core now prepares operands/control in OperandSelect, registers ALU
+candidates and half-width comparisons in Execute, then selects/composes results
+in ExecuteFinish. Ordinary instructions take nine clocks, shifts ten and CSR
+reads eleven; iterative multiply/divide bypasses ExecuteFinish. CSR selection
+is registered and host reset preserves overwritten pipeline temporaries.
+See [the experiment report](boards/tangnano20k/EXECUTE-TIMING-2026-10-06.md)
+for vendor timing and physical tests. This improves timing without completing
+step 5's instruction overlap. RAM relocation and boot ROM remain next in step 3.
 
 ## Implementation status (2026-10-05)
 
@@ -241,7 +252,7 @@ accesses trap rather than being emulated").
 
 ## Step 5: a real pipeline
 
-**Goal:** overlap instructions. Get from 8 cycles per instruction to under 2,
+**Goal:** overlap instructions. Get from 9 cycles per instruction to under 2,
 at the same verified 96 MHz.
 
 **Shape.** An in-order pipeline, deeper than the classic 5 stages because of

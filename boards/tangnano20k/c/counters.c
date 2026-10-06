@@ -35,7 +35,8 @@ int main(void) {
     check(READ(mcycleh) == 0xabcde && READ(0xc80) == 0xabcde);
     __asm__ volatile("csrr %0, mcycle\n csrr %1, 0xc00\n nop\n csrr %2, mcycle\n"
                      : "=r"(a), "=r"(b), "=r"(c) :: "memory");
-    check(b - a == 10); check(c - b == 18);
+    /* CSR reads take 11 clocks; the intervening NOP takes 9. */
+    check(b - a == 11); check(c - b == 20);
     __asm__ volatile("csrw minstreth, zero\n li t0, -1\n csrw minstret, t0\n"
                      "addi t1, zero, 1\n csrr %0, minstret\n csrr %1, minstreth\n"
                      : "=r"(a), "=r"(b) :: "t0", "t1", "memory");

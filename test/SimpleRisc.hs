@@ -303,16 +303,62 @@ prop_shift_stages_all_distances = withTests 1 . property $ do
           (cycles, halted) = runUntilHalt 50 (startSim machine (ramFromList [instruction]))
       cpuRegs (simMachine halted) !! (3 :: Index 32) === arithmeticResult op a n
       assert (not (cpuRunning (simMachine halted)))
-      cycles === 9 + 5
+      cycles === 10 + 5
 
-prop_simple_instructions_take_eight_cycles_each :: Property
-prop_simple_instructions_take_eight_cycles_each = property $ do
+prop_split_comparisons_match_reference :: Property
+prop_split_comparisons_match_reference = property $ do
+  a <- forAll (Gen.integral Range.constantBounded)
+  b <- forAll (Gen.integral Range.constantBounded)
+  let edges = [0, 1, 0xffff, 0x10000, 0x7fffffff, 0x80000000, 0xffff0000, maxBound]
+  P.mapM_ (\(left, right) -> do
+    let parts = compareOperands left right
+    signedComparison parts === (signed32 left < signed32 right)
+    unsignedComparison parts === (left < right)
+    P.mapM_ (\kind -> branchTakenPrepared kind parts === branchTaken kind left right) [0..7]
+    ) ((a,b) : [(left,right) | left <- edges, right <- edges])
+
+prop_registered_execution_matches_compute :: Property
+prop_registered_execution_matches_compute = property $ do
+  bits <- forAll (Gen.integral Range.constantBounded)
+  opcode <- forAll (Gen.element [0x37, 0x17, 0x13, 0x33, 0x03, 0x23, 0x63, 0x67, 0x6f, 0x73])
+  a <- forAll (Gen.integral Range.constantBounded)
+  b <- forAll (Gen.integral Range.constantBounded)
+  pc <- forAll (Gen.integral Range.constantBounded)
+  let raw = (bits .&. complement 0x7f) .|. opcode
+      -- M operations have their own iterative unit, covered separately.
+      instruction = if opcode == 0x33 && raw `shiftR` 25 == 1 then clearBit raw 25 else raw
+      immediate = decodeImmediate instruction
+      operandA = if instructionRs1 instruction == 0 then 0 else a
+      operandB = if instructionRs2 instruction == 0 then 0 else b
+      op2 = if opcode == 0x33 then operandB else immediate
+      before = initialMachine {cpuRunning = True, cpuPhase = OperandSelect,
+        cpuPc = pc, cpuInstruction = instruction, cpuABanks = repeat a, cpuBBanks = repeat b,
+        cpuImm = immediate, cpuIsRegOp = opcode == 0x33}
+      step m = let (m', _, _) = cpuStep m 0 Nothing True in m'
+      prepared = step before
+      executed = step prepared
+      completed = step executed
+      expected = compute pc instruction operandA operandB immediate op2
+  cpuPhase prepared === Execute
+  cpuOp2 prepared === op2
+  cpuPhase executed === ExecuteFinish
+  cAlu (cpuComputed completed) === cAlu expected
+  cLink (cpuComputed completed) === cLink expected
+  cTarget (cpuComputed completed) === cTarget expected
+  cTaken (cpuComputed completed) === cTaken expected
+  cAddress (cpuComputed completed) === cAddress expected
+  cpuPc completed === pc
+  cpuCountRetirement completed === False
+  cpuPendingWrite completed === Nothing
+
+prop_simple_instructions_take_nine_cycles_each :: Property
+prop_simple_instructions_take_nine_cycles_each = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
 
   -- Registered RAM commands add FetchDelay, including the final end check.
-  cycles === 8 * n + 5
+  cycles === 9 * n + 5
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
@@ -616,6 +662,30 @@ csrInstruction :: Word32 -> Word32 -> Word32 -> Word32 -> Word32
 csrInstruction address kind rd source =
   (address `shiftL` 20) .|. (source `shiftL` 15) .|. (kind `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x73
 
+prop_registered_csr_selection_matches_reference :: Property
+prop_registered_csr_selection_matches_reference = property $ do
+  value <- forAll (Gen.integral Range.constantBounded)
+  address <- forAll (Gen.integral (Range.linear 0 0xfff))
+  let base = initialMachine {cpuRunning = True,
+        cpuScratch = value, cpuInterruptEnable = value `xor` 0x888,
+        cpuTrapRegisters = initialTrapRegisters {trapVector = value `xor` 0x305,
+          trapEpc = value `xor` 0x341, trapCause = value `xor` 0x342,
+          trapValue = value `xor` 0x343, trapMie = testBit value 3, trapMpie = testBit value 7},
+        cpuCycle = Counter64 value (value `xor` 0xb80) False,
+        cpuInstret = Counter64 (value `xor` 0xb02) (value `xor` 0xb82) False}
+  P.mapM_ (\csr -> do
+    let m = base {cpuInstruction = csrInstruction csr 2 1 0}
+        (queued, _, _) = commitInstruction m True
+        (readState, _, _) = cpuStep queued 0 Nothing True
+    case readCsr (fromIntegral csr) base of
+      Nothing -> cpuPhase readState === Trap
+      Just (expected, _) -> do
+        cpuPhase readState === CsrWrite
+        cpuCsrValue readState === expected
+    ) (address : [0x300, 0x301, 0x304, 0x305, 0x310, 0x340, 0x341, 0x342,
+                  0x343, 0x344, 0xb00, 0xb80, 0xb02, 0xb82, 0xc00, 0xc80,
+                  0xc02, 0xc82, 0xf11, 0xf12, 0xf13, 0xf14])
+
 prop_csr_read_modify_write :: Property
 prop_csr_read_modify_write = property $ do
   old <- forAll (Gen.integral Range.constantBounded)
@@ -650,7 +720,9 @@ prop_csr_access_rules_and_masks = property $ do
   let base = initialMachine {cpuPhase = CsrRead, cpuRunning = True}
       checkAccess address kind source faults = do
         let instruction = csrInstruction address kind 0 source
-            (m, write, output) = cpuStep base {cpuInstruction = instruction} 0 Nothing True
+            (m, write, output) = cpuStep base {cpuInstruction = instruction,
+              cpuCsrSelection = decodeCsrSelection (fromIntegral address),
+              cpuCsrReadOnly = address == 0x301 || address .&. 0xc00 == 0xc00} 0 Nothing True
         cpuPhase m === if faults then Trap else CsrWrite
         write === Nothing
         output === (0, Nothing, Nothing)
@@ -744,6 +816,7 @@ prop_counter_csr_reads_wait_for_carry = property $ do
     let isCycle = address == 0xb80 || address == 0xc80
         m = initialMachine {cpuRunning = True, cpuPhase = CsrRead,
               cpuInstruction = csrInstruction address 2 1 0,
+              cpuCsrSelection = decodeCsrSelection (fromIntegral address),
               cpuCycle = if isCycle then Counter64 0 highWord True else initialCounter,
               cpuInstret = if isCycle then initialCounter else Counter64 0 highWord True}
         (waited, _) = machineStep m (0, Nothing, True)
@@ -787,7 +860,8 @@ prop_counter_write_overrides_retirement = withTests 1 $ property $ do
   tickCounter True (Just (True, 17)) (Counter64 0 9 True) === Counter64 0 17 False
   P.mapM_ (\address -> do
     let m = initialMachine {cpuPhase = CsrRead,
-              cpuInstruction = csrInstruction address 1 0 0}
+              cpuInstruction = csrInstruction address 1 0 0,
+              cpuCsrSelection = decodeCsrSelection (fromIntegral address), cpuCsrReadOnly = True}
         (fault, _, _) = cpuStep m 0 Nothing True
     cpuPhase fault === Trap
     cpuExceptionCause fault === 2
@@ -964,7 +1038,10 @@ simpleRiscGroup =
       ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
-      ("Simple instructions take eight cycles each", prop_simple_instructions_take_eight_cycles_each),
+      ("Registered CSR selection matches reference", prop_registered_csr_selection_matches_reference),
+      ("Registered execution matches compute", prop_registered_execution_matches_compute),
+      ("Split comparisons match signed/unsigned references", prop_split_comparisons_match_reference),
+      ("Simple instructions take nine cycles each", prop_simple_instructions_take_nine_cycles_each),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),

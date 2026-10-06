@@ -130,7 +130,7 @@ readback, separate load/store alignment registers, and a queued UART request.
 The iterative multiply/divide unit registers its 33-bit arithmetic before
 committing each step. The barrel shifter now registers its result after the first two shift levels
 and finishes the remaining three levels in a separate stage. Ordinary
-instructions take eight clocks, shifts take nine; nonzero-divisor
+instructions take nine clocks, shifts take ten; nonzero-divisor
 M operations add 68 unit clocks. These changes trade cycles for shorter paths.
 
 Run the hardware regressions after loading a bitstream:
@@ -234,3 +234,26 @@ hit a live stream.
 When a test suddenly returns nothing at all, check the setup before blaming
 the design: build the design for 27 MHz, which is known to pass, and run it.
 If that also returns nothing, the bridge is stuck; replug the board.
+
+## Gowin vendor analysis
+
+`boards/tangnano20k/build_gowin.sh` runs the licensed macOS vendor flow
+without programming the board. The default is 96 MHz; select another PLL
+clock with `FREQ_MHZ` (an integer multiple of 3). Reports and the SRAM image
+are written to `output/tangnano20k/gowin-$FREQ_MHZ/impl/pnr/`.
+`GOWIN_OUT` overrides the output directory and `GOWIN_PLACE_OPTION` selects
+vendor placement mode 0 through 4 (default 0).
+
+```bash
+FREQ_MHZ=108 boards/tangnano20k/build_gowin.sh
+```
+
+The build checks the requested clock and rejects any internal setup or hold
+violation. Gowin can generate a bitstream even when timing fails; the separate
+`check_gowin_timing.py` guard makes that failure visible to callers.
+
+The historical [vendor baseline](GOWIN-TIMING-2026-10-06.md) failed at
+96 MHz (84.444 MHz maximum). The
+[execution experiment](EXECUTE-TIMING-2026-10-06.md) records the staged ALU,
+split comparisons, registered CSR selection, timing trials and board results.
+Ordinary instructions now take nine clocks; this is still a serial core.
