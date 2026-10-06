@@ -268,7 +268,11 @@ initialBus = BusState BusIdle (BusRequest 0 0 False 0) UnmappedTarget 0 0
 -- transfer emits exactly one response and, where appropriate, one side effect.
 busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte ->
   (BusState, Maybe BusResponse, StepOutput, Bool)
-busStep state request memoryWord txReady rx =
+busStep = busStepWith decodeMemoryTarget
+
+busStepWith :: (Word32 -> MemoryTarget) -> BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte ->
+  (BusState, Maybe BusResponse, StepOutput, Bool)
+busStepWith decodeTarget state request memoryWord txReady rx =
   let q = busRequest state
       width = busWidth q
       address = busAddress q
@@ -281,7 +285,7 @@ busStep state request memoryWord txReady rx =
         BusIdle -> case request of
           Nothing -> advance BusIdle
           Just new -> (state {busPhase = BusDecode, busRequest = new}, Nothing, (0, Nothing, Nothing), False)
-        BusDecode -> (state {busPhase = BusDispatch, busTarget = decodeMemoryTarget address}, Nothing, (0, Nothing, Nothing), False)
+        BusDecode -> (state {busPhase = BusDispatch, busTarget = decodeTarget address}, Nothing, (0, Nothing, Nothing), False)
         BusDispatch
           | not valid -> respond 0 True False False
           | otherwise -> case busTarget state of
@@ -640,7 +644,10 @@ machineStep machine (memoryWord, received, txReady) =
 -- The physical circuit supplies a registered Ctrl-C decode, preventing the
 -- 8-bit byte comparison from preceding the controller's high-fanout reset mux.
 machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
-machineStepDecoded machine input@(memoryWord, received, txReady, emergencyReset) =
+machineStepDecoded = machineStepDecodedWith decodeMemoryTarget
+
+machineStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
+machineStepDecodedWith decodeTarget machine input@(memoryWord, received, txReady, emergencyReset) =
   let receivedMachine = case (cpuRunning machine && not emergencyReset, received, rxHolding machine) of
         (True, Just byte, Nothing) -> machine {rxHolding = Just byte}
         _ -> machine
@@ -649,7 +656,7 @@ machineStepDecoded machine input@(memoryWord, received, txReady, emergencyReset)
       cancelled = emergencyReset || not (cpuRunning machine)
       (bus', response, busOutput, consumeRx) = if cancelled
         then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), False)
-        else busStep (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine)
+        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine)
       busActive = case busPhase (systemBus machine) of
         BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
         _ -> True

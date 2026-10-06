@@ -22,6 +22,7 @@ import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import "haskplayground" SimpleRisc
 import qualified Prelude as P
+import qualified "haskplayground" SdramSimpleRisc as S
 
 -- | The 64 KiB memory as a sparse map: copying a 16384-entry vector on every
 -- write would make the simulations far too slow.  Unwritten words read as
@@ -1012,6 +1013,52 @@ prop_bus_wait_faults_and_cancel = property $ do
     ) [BusDecode, BusDispatch, BusLoadIssue, BusLoadWait, BusStoreIssue,
        BusStoreMerge, BusRamWrite, BusTx, BusReply]
 
+prop_sdram_waits_preserve_full_address :: Property
+prop_sdram_waits_preserve_full_address = property $ do
+  offset <- forAll (Gen.integral (Range.linear 0 0x1fffff))
+  value <- forAll (Gen.integral Range.constantBounded)
+  let address = 0x80000000 + (resize offset `shiftL` 2)
+      bus = initialBus {busPhase = BusRamWrite, busRequest = BusRequest address 2 True value, busValue = value}
+      m = initialMachine {cpuRunning = True, cpuPhase = BusWait, systemBus = bus}
+      input ready done = (0, ready, done, Nothing, True, False)
+      (queued, _) = S.step S.initialState {S.machine = m} (input False False)
+      (held, (req, wr, actualAddress, actualValue, _)) = S.step queued (input False False)
+      (accepted, _) = S.step held (input True False)
+      (waiting, (secondReq, _, _, _, _)) = S.step accepted (input False False)
+      (completed, _) = S.step waiting (input False True)
+  req === True
+  wr === True
+  actualAddress === offset
+  actualValue === value
+  secondReq === False
+  S.phase completed === S.Normal
+  cpuPc (S.machine waiting) === cpuPc (S.machine queued)
+  counterLo (cpuCycle (S.machine waiting)) === counterLo (cpuCycle (S.machine queued)) + 3
+
+prop_sdram_map_and_high_entry :: Property
+prop_sdram_map_and_high_entry = withTests 1 . property $ do
+  P.mapM_ (\address -> S.decodeTarget address === RamTarget)
+    [0, 0xffff, 0x80000000, 0x807fffff]
+  P.mapM_ (\address -> S.decodeTarget address === UnmappedTarget)
+    [0x10000, 0x7fffffff, 0x80800000, 0xffffffff]
+  S.decodeTarget exitDevice === ExitTarget
+  let (started, _) = S.step S.initialState {S.machine=initialMachine {programEnd=65536}}
+        (0,True,False,Just 0x48,True,False)
+  cpuPc (S.machine started) === 0x80000000
+  programEnd (S.machine started) === 0x80010000
+  cpuRunning (S.machine started) === True
+
+prop_sdram_reset_drains_pending_memory :: Property
+prop_sdram_reset_drains_pending_memory = withTests 1 . property $ do
+  let s=S.initialState {S.machine=initialMachine {cpuRunning=True}, S.phase=S.AwaitDone}
+      (cancelled, _) = S.step s (0,False,False,Just 3,True,True)
+      (drained, _) = S.step cancelled (123,False,True,Nothing,True,False)
+  cpuRunning (S.machine cancelled) === False
+  S.phase cancelled === S.AwaitDone
+  S.phase drained === S.Normal
+  cpuBusRequest (S.machine drained) === Nothing
+  cpuPendingWrite (S.machine drained) === Nothing
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
@@ -1038,6 +1085,9 @@ simpleRiscGroup =
       ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
+      ("SDRAM holds full word addresses across waits", prop_sdram_waits_preserve_full_address),
+      ("SDRAM map and high entry boundaries", prop_sdram_map_and_high_entry),
+      ("SDRAM reset drains pending memory", prop_sdram_reset_drains_pending_memory),
       ("Registered CSR selection matches reference", prop_registered_csr_selection_matches_reference),
       ("Registered execution matches compute", prop_registered_execution_matches_compute),
       ("Split comparisons match signed/unsigned references", prop_split_comparisons_match_reference),

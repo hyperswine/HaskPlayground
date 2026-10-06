@@ -19,12 +19,14 @@ import argparse, fcntl, os, select, struct, sys, termios, time
 CLOCKS_PER_BIT = 868
 
 
-def frame_bytes(image: bytes, text: bytes) -> bytes:
+def frame_bytes(image: bytes, text: bytes, ram_base: int = 0) -> bytes:
+    if ram_base not in (0, 0x80000000):
+        raise ValueError("RAM base must be 0 or 0x80000000")
     image += b"\0" * (-len(image) % 4)
     count = len(image) // 4
     if count > 16384:
         sys.exit(f"image is {count} words; SimpleRisc's memory holds 16384")
-    return b"P" + struct.pack("<H", count) + image + b"R" + text
+    return b"P" + struct.pack("<H", count) + image + (b"H" if ram_base else b"R") + text
 
 
 def open_port(port: str, baud: int) -> int:
@@ -46,12 +48,13 @@ def main() -> None:
     parser.add_argument("--input", default="", help="text sent after the program starts (\\n allowed)")
     parser.add_argument("--port", default="/dev/cu.usbserial-20250303171")
     parser.add_argument("--freq-mhz", type=float, default=96, help="core clock; baud = clock / 868")
+    parser.add_argument("--ram-base", type=lambda x: int(x, 0), default=0, choices=(0, 0x80000000), help="execution address; high base requires SDRAM image")
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--frame", help="write the host byte stream as hex, one byte per line, and exit")
     args = parser.parse_args()
 
     with open(args.image, "rb") as f:
-        frame = frame_bytes(f.read(), args.input.encode().decode("unicode_escape").encode("latin-1"))
+        frame = frame_bytes(f.read(), args.input.encode().decode("unicode_escape").encode("latin-1"), args.ram_base)
     if args.frame:
         with open(args.frame, "w") as f:
             f.write("".join(f"{b:02x}\n" for b in frame))

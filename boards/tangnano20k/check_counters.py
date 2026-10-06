@@ -10,13 +10,16 @@ from run_program import frame_bytes, open_port
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--sdram',action='store_true',help='check mcycle includes variable SDRAM waits')
     parser.add_argument('--port', default='/dev/cu.usbserial-20250303171')
     parser.add_argument('--freq-mhz', type=float, default=96)
     args = parser.parse_args()
     if args.freq_mhz <= 0:
         parser.error('frequency must be positive')
     root = Path(__file__).resolve().parents[2]
-    subprocess.run([str(root / 'boards/tangnano20k/c/build.sh'), 'counters'], check=True)
+    build_env=os.environ.copy()
+    if args.sdram: build_env['SIMPLE_RISC_SDRAM']='1'
+    subprocess.run([str(root / 'boards/tangnano20k/c/build.sh'), 'counters'], check=True, env=build_env)
     image = (root / 'output/tangnano20k/c/counters.bin').read_bytes()
     fd = open_port(args.port, round(args.freq_mhz * 1e6 / 868))
     try:

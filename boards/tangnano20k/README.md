@@ -7,6 +7,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 | Design | Source | Build script | Clock |
 |---|---|---|---|
 | SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh` | PLL, default 96 MHz |
+| SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
 ```bash
@@ -257,3 +258,14 @@ The historical [vendor baseline](GOWIN-TIMING-2026-10-06.md) failed at
 [execution experiment](EXECUTE-TIMING-2026-10-06.md) records the staged ALU,
 split comparisons, registered CSR selection, timing trials and board results.
 Ordinary instructions now take nine clocks; this is still a serial core.
+
+## SDRAM main-memory experiment
+
+[The SDRAM report and build instructions](sdram/README.md) describe the
+standalone full-capacity test and the separate uncached processor image.
+All 8 MiB passed 12,582,912 word comparisons. The processor runs at 54 MHz
+with RAM at `0x80000000` and a zero-address compatibility alias; C uses a
+1 MiB working set and FP-RISC uses a 2 MiB allocation on this image.
+Use `--freq-mhz 54` with board tools and `--ram-base 0x80000000` for high-linked
+programs. The legacy loader still limits images to 64 KiB, and `M` clears
+only the compatibility 64 KiB. SRAM programming leaves flash unchanged.

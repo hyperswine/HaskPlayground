@@ -50,6 +50,7 @@ library
       NeoMusic.Sheet
       PsramRegs
       QuantUI
+      SdramSimpleRisc
       SimpleRisc
       WASM.Actors
       WASM.Main

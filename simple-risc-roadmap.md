@@ -48,6 +48,17 @@ See [the experiment report](boards/tangnano20k/EXECUTE-TIMING-2026-10-06.md)
 for vendor timing and physical tests. This improves timing without completing
 step 5's instruction overlap. RAM relocation and boot ROM remain next in step 3.
 
+## SDRAM experiment (2026-10-06)
+
+A separate `SdramSimpleRisc` image now uses all 8 MiB of SDRAM at `0x80000000`
+for code, data, BSS, heap and stack, with the first 64 KiB aliased at zero.
+The controller passes a full-capacity test and physical C/FP-RISC programs.
+The prototype runs at 54 MHz, so it does not yet satisfy this roadmap's
+96 MHz completion gate. It retains the hardware loader and legacy halt rules;
+`H` selects high-address entry and loader images remain limited to 64 KiB.
+Next: recover CPU clock/throughput, then replace the loader with boot ROM.
+See [the measured results](boards/tangnano20k/sdram/README.md).
+
 ## Implementation status (2026-10-05)
 
 Step 1 is complete within this roadmap's M-mode scope: precise exceptions,
