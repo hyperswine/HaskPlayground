@@ -42,6 +42,20 @@ def open_port(port: str, baud: int) -> int:
     return fd
 
 
+def send_frame(fd: int, frame: bytes) -> None:
+    """Drain partial nonblocking writes before starting the execution timeout."""
+    pending = memoryview(frame)
+    while pending:
+        _, writable, _ = select.select([], [fd], [], 1)
+        if not writable:
+            continue
+        try:
+            pending = pending[os.write(fd, pending):]
+        except BlockingIOError:
+            pass
+    termios.tcdrain(fd)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("image")
@@ -64,8 +78,7 @@ def main() -> None:
     baud = round(args.freq_mhz * 1e6 / CLOCKS_PER_BIT)
     fd = open_port(args.port, baud)
     try:
-        os.write(fd, frame)
-        termios.tcdrain(fd)
+        send_frame(fd, frame)
         output = b""
         deadline = time.time() + args.timeout
         while not output.endswith(b"DONE") and time.time() < deadline:

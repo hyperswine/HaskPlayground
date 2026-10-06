@@ -325,3 +325,18 @@ accesses trapping from step 1.
 3. **UART interrupts directly on `MEIP`** (assumed), or a minimal PLIC for
    future devices.
 4. **Step 5's ambition:** the full pipeline, or the fetch-overlap step first.
+
+## Separate RV64/Base experiment, 2026-10-06
+
+The user-requested 64-bit variant is in
+[boards/tangnano20k/rv64](boards/tangnano20k/rv64/README.md). It is a serial
+Verilog RV64IM core using the existing unified cache and 8 MiB SDRAM. It is
+verified on this board at 27 MHz, with 1,628 arithmetic/load/store reference
+cases, precise synchronous traps and a single-threaded FP-RISC Base host.
+That host supplies unavailable-service errors and explicit UART virtual file,
+environment, input and clock services; its software floating point avoids F/D.
+The existing FP-RISC WAT parser and WASM VM ran a small guest returning 42.
+
+This branch of work does not mark the roadmap's 96 MHz gate, interrupt step,
+official architecture tests or pipeline step complete. The original RV32 Clash
+implementation and its cached 66 MHz SDRAM configuration remain separate.

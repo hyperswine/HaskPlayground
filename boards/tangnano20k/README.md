@@ -269,3 +269,11 @@ with RAM at `0x80000000` and a zero-address compatibility alias; C uses a
 Use `--freq-mhz 54` with board tools and `--ram-base 0x80000000` for high-linked
 programs. The legacy loader still limits images to 64 KiB, and `M` clears
 only the compatibility 64 KiB. SRAM programming leaves flash unchanged.
+
+## Separate RV64IM / Base host experiment
+
+[rv64/README.md](rv64/README.md) describes the serial 64-bit variant verified at
+27 MHz with cached 8 MiB SDRAM. It runs FP-RISC's experimental single-threaded
+Base host with UART virtual devices and software floating point, including a
+small guest in the existing WASM VM. Use its matching FPGA image and host
+clock; the RV32 configurations documented above remain separate.

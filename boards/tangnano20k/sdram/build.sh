@@ -6,7 +6,7 @@ mode="${1:-test}"
 freq="${SDRAM_FREQ_MHZ:-54}"
 cache="${SDRAM_CACHE:-1}"
 case "$cache" in 0|1) ;; *) echo "SDRAM_CACHE must be 0 or 1" >&2;exit 1;; esac
-case "$freq" in 54|60|66) ;; *) echo "supported SDRAM clocks: 54, 60, 66 MHz" >&2;exit 1;; esac
+case "$freq" in 27|54|60|66) ;; *) echo "supported SDRAM clocks: 27, 54, 60, 66 MHz" >&2;exit 1;; esac
 case "$mode" in
  test) top="$here/test_top.v"; rtl="";;
  core) top="$here/core_top.v";
@@ -32,7 +32,7 @@ if sys.argv[4]=='core':
     (out/'core_top.v').write_text(top)
 if sys.argv[4]=='test':
     (out/'test_top.v').write_text((src/'test_top.v').read_text().replace("24'd2700000",f"24'd{freq*50000}").replace("25'd13500000",f"25'd{freq*250000}"))
-(out/'pll.v').write_text((src/'pll.v').read_text().replace('FBDIV_SEL=17',f'FBDIV_SEL={freq//3-1}'))
+(out/'pll.v').write_text((src/'pll.v').read_text().replace('FBDIV_SEL=17',f'FBDIV_SEL={freq//3-1}').replace('ODIV_SEL=16','ODIV_SEL=32' if freq==27 else 'ODIV_SEL=16'))
 (out/'memory.v').write_text((src/'memory.v').read_text().replace('FREQ=54000000',f'FREQ={freq*1000000}'))
 PYTHON
 top="$out/${mode}_top.v"
