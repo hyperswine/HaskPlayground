@@ -1,11 +1,62 @@
 # Tang Nano 20K SDRAM experiment
 
 The board's 64-Mbit, 32-bit SDR SDRAM is now usable as 8 MiB of main memory.
-This is a separate 54 MHz processor image, with uncached instruction fetch,
-data and loader writes all going through SDRAM. The established BRAM image
+This is a separate processor image with a unified 1 KiB word cache and
+54/60/66 MHz clock options. Code, data and loader writes share the cache. The established BRAM image
 and its 96/108 MHz build remain available.
 
-## Physical validation (2026-10-06)
+## Cached 66 MHz experiment (2026-10-06)
+
+A 256-entry direct-mapped cache stores one physical word per entry, using two
+block RAMs. It has synchronous lookup, a valid bit and full physical tags.
+Writes invalidate the indexed entry, go through to SDRAM and complete only
+after the backing write. Reset sweeps all entries before accepting requests.
+There are no dirty lines or separate instruction/data copies. Both RAM aliases
+and loader writes use physical word addresses, keeping code uploads and modified
+instructions coherent. Ctrl-C leaves the cache transaction to drain with the
+existing wrapper. Refresh continues independently during hits.
+
+Measured repeated reads of a 512-byte array (25,600 reads, checksum 1,625,600):
+
+| Image | Measured cycles | Time |
+| --- | ---: | ---: |
+| Uncached 54 MHz | 2,933,382 | 54.322 ms |
+| Cached 54 MHz | 2,389,660 | 44.253 ms |
+| Cached 66 MHz | 2,389,648 | 36.207 ms |
+
+Counts vary by a few clocks when refresh overlaps the timed section. The
+uncached reference was rebuilt with `SDRAM_CACHE=0` and rechecked on the board.
+Cache alone saves 18.5% of cycles; cache plus clock gives about 1.50x throughput
+on this workload. This is a small repeated-read workload, not a general FP-RISC
+speedup claim; streaming misses and write-heavy workloads can pay lookup overhead.
+`benchmark.c` also checks stores/reads through both aliases and executes code
+modified through the low alias with `fence.i`.
+
+Cached 54 MHz STA reports Fmax 70.692 MHz, +4.373 ns setup slack. The tested
+66 MHz placement reports Fmax 66.165 MHz, +0.038 ns, zero setup/hold violations.
+Its limiting paths are routed logic inside the processor, not the cache RAM.
+The margin is small and full SDRAM I/O signoff is still outstanding. 66 MHz is
+an experimental board-tested setting, not completion of the 96 MHz roadmap gate.
+The controller retains its existing <=66.7 MHz timing parameters; higher SDRAM
+clocks need revised CAS/delay parameters and a wider initialization cycle counter,
+or a separate SDRAM clock with a verified clock-domain bridge.
+
+At 66 MHz the full-capacity tester passes all six phases, 12,582,912 comparisons,
+including masked writes and the frequency-adjusted 250 ms retention pause.
+The cached CPU passes 38,400 RV32I and 30,720 RV32M reference comparisons,
+3,852 bus checks, 270 counter checks, 267 trap checks, 15 finisher cases,
+arithmetic/UART/Ctrl-C/reload tests, alias/instruction coherence and the full
+1 MiB working set/all-bank/end-of-memory checks. Cache simulation additionally
+checks hits, conflicts, write completion, reset invalidation and memory backpressure.
+
+The complete FP-RISC builtin smoke/CSR/refusal/recovery harness passes at
+66 MHz on the zero alias. The high-linked 2 MiB allocation fixture also passes,
+including its 32 sampled words, final byte, free and successful exit.
+
+Tested cached processor SHA-256:
+`0d4e7e54fe6e70ea7f268aa8f3ce8337ffa0c8065c3caec4cbdd2365ffc06565`.
+
+## Original uncached validation (2026-10-06)
 
 The standalone tester passes all 2,097,152 words in six phases: zero, ones,
 address hash, complemented hash, zero plus four independent byte-mask writes,
@@ -58,7 +109,7 @@ Bitstream SHA-256:
   in the host runners for high-linked images. Byte framing is otherwise unchanged.
 - `M` clears the compatibility 64 KiB, not all SDRAM; startup code initializes
   BSS. Ctrl-C cancels CPU work and drains an outstanding memory operation.
-- Cycle counters count physical memory wait clocks. No cache exists yet.
+- Cycle counters count physical memory wait clocks, including cache lookup.
 
 `SdramSimpleRisc` wraps the existing serial core. It captures full addresses
 before the old 14-bit memory index, stops controller advancement during an
@@ -82,11 +133,25 @@ python3 boards/tangnano20k/check_counters.py --freq-mhz 54 --sdram
 
 The host starts the standalone test after opening the UART, preventing lost
 initial reports. Build uses the licensed macOS Gowin flow and rejects internal
-timing violations. Programming is SRAM-only. Both clocks currently run at
-54 MHz; higher CPU frequency needs a faster controller or a clock-domain bridge,
-then repeated timing and physical tests. Caches are the next throughput step.
+timing violations. Programming is SRAM-only. Both clocks run at the selected frequency. The default remains 54 MHz.
+`SDRAM_CACHE=0` builds a comparison image that bypasses the cache.
+`SDRAM_FREQ_MHZ=66` selects the experimentally validated higher clock.
 The boot ROM, removal of legacy halt rules and larger loader frames remain
 roadmap work; this is not completion of the full system-separation step.
+
+For the faster cached image:
+
+```bash
+SDRAM_FREQ_MHZ=66 SDRAM_OUT="$PWD/output/tangnano20k/sdram-cache66" \
+  boards/tangnano20k/sdram/build.sh core
+openFPGALoader -b tangnano20k output/tangnano20k/sdram-cache66/impl/pnr/sdram_test.fs
+python3 boards/tangnano20k/sdram/check_cache.py --freq-mhz 66
+python3 boards/tangnano20k/sdram/check_core.py --freq-mhz 66
+```
+
+Use the same frequency for `build.sh test`, `check.py --freq-mhz 66`, all
+processor check scripts and the FP-RISC runner. `SDRAM_OUT` must be absolute.
+The standalone tester bypasses the cache to exercise every SDRAM word.
 
 ## Controller provenance
 
@@ -98,3 +163,11 @@ readback. The PLL uses the reference's shifted SDRAM clock phase. `memory.v`
 adds request/completion handling and autonomous refresh. The embedded-memory
 port names let Gowin connect the dedicated SDRAM pins; the pin report confirms
 those connections.
+
+The cache's standalone simulation can be reproduced with:
+
+```bash
+iverilog -g2012 -s cache_tb -o /tmp/sdram-cache-tb \
+  boards/tangnano20k/sdram/cache.v boards/tangnano20k/sdram/cache_tb.v
+vvp /tmp/sdram-cache-tb
+```

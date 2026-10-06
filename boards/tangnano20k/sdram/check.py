@@ -7,8 +7,9 @@ from run_program import open_port
 p=argparse.ArgumentParser(description=__doc__)
 p.add_argument('--port',default='/dev/cu.usbserial-20250303171')
 p.add_argument('--timeout',type=float,default=120)
+p.add_argument('--freq-mhz',type=float,default=54)
 a=p.parse_args()
-fd=open_port(a.port,round(54e6/868))
+fd=open_port(a.port,round(a.freq_mhz*1e6/868))
 try:
     time.sleep(.1); os.write(fd,b'S');
     buf=b''; phase=0; deadline=time.monotonic()+a.timeout

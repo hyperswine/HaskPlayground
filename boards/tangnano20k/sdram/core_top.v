@@ -11,8 +11,14 @@ module top(input clk_27m,btn_s1,uart_rx,output uart_tx,
  sdram_simple_risc core(.clk(clk),.reset(reset),.enable(1'b1),.uart_rx(uart_rx),.uart_tx(uart_tx),
  .memory_data(rdata),.memory_ready(ready),.memory_done(done),.memory_req(req),
  .memory_write(write),.memory_address(address),.memory_wdata(wdata));
- sdram_memory mem(.clk(clk),.clk_sdram(clk_sdram),.reset(reset),.req(req),.write(write),
- .address(address),.wdata(wdata),.mask(4'b1111),.ready(ready),.done(done),.rdata(rdata),
+ wire mem_req,mem_write,mem_ready,mem_done;
+ wire [20:0] mem_address;wire [31:0] mem_wdata,mem_rdata;
+ sdram_cache cache(.clk(clk),.reset(reset),.req(req),.write(write),.address(address),
+ .wdata(wdata),.ready(ready),.done(done),.rdata(rdata),
+ .memory_req(mem_req),.memory_write(mem_write),.memory_address(mem_address),
+ .memory_wdata(mem_wdata),.memory_ready(mem_ready),.memory_done(mem_done),.memory_rdata(mem_rdata));
+ sdram_memory mem(.clk(clk),.clk_sdram(clk_sdram),.reset(reset),.req(mem_req),.write(mem_write),
+ .address(mem_address),.wdata(mem_wdata),.mask(4'b1111),.ready(mem_ready),.done(mem_done),.rdata(mem_rdata),
  .O_sdram_clk(O_sdram_clk),.O_sdram_cke(O_sdram_cke),.O_sdram_cs_n(O_sdram_cs_n),
  .O_sdram_cas_n(O_sdram_cas_n),.O_sdram_ras_n(O_sdram_ras_n),.O_sdram_wen_n(O_sdram_wen_n),
  .O_sdram_dqm(O_sdram_dqm),.O_sdram_addr(O_sdram_addr),.O_sdram_ba(O_sdram_ba),.IO_sdram_dq(IO_sdram_dq));

@@ -53,7 +53,9 @@ step 5's instruction overlap. RAM relocation and boot ROM remain next in step 3.
 A separate `SdramSimpleRisc` image now uses all 8 MiB of SDRAM at `0x80000000`
 for code, data, BSS, heap and stack, with the first 64 KiB aliased at zero.
 The controller passes a full-capacity test and physical C/FP-RISC programs.
-The prototype runs at 54 MHz, so it does not yet satisfy this roadmap's
+The cached prototype now passes hardware checks at 66 MHz, with a 1 KiB
+unified write-through cache. A repeated-read workload is about 1.50x faster
+than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
 96 MHz completion gate. It retains the hardware loader and legacy halt rules;
 `H` selects high-address entry and loader images remain limited to 64 KiB.
 Next: recover CPU clock/throughput, then replace the loader with boot ROM.
