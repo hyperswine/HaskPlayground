@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE BinaryLiterals #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
@@ -33,11 +34,19 @@
 --   * 0x1000_0008: UART RXDATA (read low byte, consuming it)
 --   * 0x1000_000c: UART CTRL (bit 0 = interrupt while a byte is waiting,
 --     bit 1 = interrupt while the transmitter is ready)
---   * 0x1000_1000: SPI DATA (write: send the low byte while receiving one;
---     read: the last byte received)
---   * 0x1000_1004: SPI STATUS (bit 0 = a transfer is in progress)
---   * 0x1000_1008: SPI CTRL (bit 0 = chip select asserted; bits 8-15 = half
---     an SCK period in clocks, minus one)
+--   * 0x1000_1000-0x1000_1fff: the I/O complex, outside the CPU (word
+--     accesses only, one handshake per access):
+--     - 0x1000_1000 SPI DATA (write: send the low byte while receiving one;
+--       read: the last byte received)
+--     - 0x1000_1004 SPI STATUS (bit 0 = a transfer is in progress)
+--     - 0x1000_1008 SPI CTRL (bit 0 = chip select asserted; bits 8-15 = half
+--       an SCK period in clocks, minus one)
+--     - 0x1000_1100 DMA ADDR (RAM byte address, word aligned)
+--     - 0x1000_1104 DMA COUNT (bytes, a multiple of 4; reads what is left)
+--     - 0x1000_1108 DMA CTRL (write starts: bit 0 = send RAM to SPI, else
+--       receive SPI to RAM; bit 1 = before receiving, clock 0xff until a
+--       start token, which must be 0xfe)
+--     - 0x1000_110c DMA STATUS (bit 0 busy, bit 1 error, bits 8-15 token)
 --   * 0x8000_0000 - 0x8000_ffff: 64 KiB RAM
 --
 -- Everything else raises an access fault.  The physical UART is 8-N-1 at
@@ -70,6 +79,7 @@ import Clash.Prelude
 import Clash.Annotations.BitRepresentation (DataReprAnn(..), ConstrRepr(..), liftQ)
 import Language.Haskell.TH.Syntax (addDependentFile, runIO)
 import qualified Prelude as P
+import Data.Maybe (isJust, isNothing)
 
 type Word32 = Unsigned 32
 
@@ -271,7 +281,9 @@ data Devices = Devices
     devMeip :: Bool,
     devUartRxInterrupt :: Bool,
     devUartTxInterrupt :: Bool,
-    devSpi :: Spi
+    -- | The I/O complex's answer this cycle, injected by the circuit around
+    -- the CPU (never stepped here).
+    devIo :: Maybe Word32
   }
   deriving (Generic, NFDataX, Show, Eq)
 
@@ -322,7 +334,7 @@ stepSpi start control spi
 
 initialDevices :: Devices
 initialDevices = Devices False maxBound maxBound initialCounter False False False False
-  0 False 0 False False False False False initialSpi
+  0 False 0 False False False False False Nothing
 
 -- | The UART's interrupt number on the PLIC, as on QEMU virt.
 uartIrq :: Word32
@@ -343,7 +355,7 @@ pendingInterrupts devices =
 data MemoryTarget = RamTarget | RomTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | BootCauseTarget
   | ClintMsipTarget | ClintCompareLoTarget | ClintCompareHiTarget | ClintTimeLoTarget | ClintTimeHiTarget
   | PlicPriorityTarget | PlicPendingTarget | PlicEnableTarget | PlicThresholdTarget | PlicClaimTarget
-  | UartControlTarget | SpiDataTarget | SpiStatusTarget | SpiControlTarget | UnmappedTarget
+  | UartControlTarget | IoTarget | UnmappedTarget
   deriving (Generic, NFDataX, Show, Eq)
 
 -- Single outstanding data transaction. The CPU registers the request and
@@ -360,10 +372,10 @@ data BusResponse = BusResponse
 data BusPhase = BusIdle | BusDecode | BusDispatch
   | BusLoadIssue | BusLoadDelay | BusLoadCapture | BusLoadWait | BusLoadAlign
   | BusReply | BusStoreIssue | BusStoreDelay | BusStoreCapture | BusStoreWait
-  | BusStoreMerge | BusRamWrite | BusTx
+  | BusStoreMerge | BusRamWrite | BusTx | BusIo
   deriving (Generic, NFDataX, Show, Eq)
 
-{-# ANN module (DataReprAnn $(liftQ [t| BusPhase |]) 16
+{-# ANN module (DataReprAnn $(liftQ [t| BusPhase |]) 17
   [ ConstrRepr 'BusIdle 1 1 [],
     ConstrRepr 'BusDecode 2 2 [],
     ConstrRepr 'BusDispatch 4 4 [],
@@ -379,7 +391,8 @@ data BusPhase = BusIdle | BusDecode | BusDispatch
     ConstrRepr 'BusStoreWait 4096 4096 [],
     ConstrRepr 'BusStoreMerge 8192 8192 [],
     ConstrRepr 'BusRamWrite 16384 16384 [],
-    ConstrRepr 'BusTx 32768 32768 []
+    ConstrRepr 'BusTx 32768 32768 [],
+    ConstrRepr 'BusIo 65536 65536 []
   ]) #-}
 
 data BusState = BusState
@@ -450,6 +463,10 @@ busStepWith decodeTarget state request memoryWord txReady rx bootCause devices =
                 | busWrite q -> respond 0 True False NoEffect
                 | otherwise -> respond (loadValue width 0 (resize bootCause)) False False ConsumeBootCause
               UnmappedTarget -> respond 0 True False NoEffect
+              -- The I/O complex: word accesses, answered by a handshake.
+              IoTarget
+                | width /= 2 -> respond 0 True False NoEffect
+                | otherwise -> advance BusIo
               -- CLINT, PLIC and UART control registers are word-only.
               target
                 | width /= 2 -> respond 0 True False NoEffect
@@ -478,6 +495,9 @@ busStepWith decodeTarget state request memoryWord txReady rx bootCause devices =
           | txReady -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
               (0, Nothing, Just (resize (busData q))), NoEffect)
           | otherwise -> advance BusTx
+        BusIo -> case devIo devices of
+          Just value -> respond (if busWrite q then 0 else value) False False NoEffect
+          Nothing -> advance BusIo
 
 -- | A device register's value; only for the CLINT/PLIC/UART-control targets.
 deviceRead :: MemoryTarget -> Devices -> Word32
@@ -492,9 +512,6 @@ deviceRead target devices = case target of
   PlicEnableTarget -> if devPlicEnable devices then 1 `shiftL` 10 else 0
   PlicThresholdTarget -> resize (devPlicThreshold devices)
   UartControlTarget -> (if devUartRxInterrupt devices then 1 else 0) .|. (if devUartTxInterrupt devices then 2 else 0)
-  SpiDataTarget -> resize (spiIn (devSpi devices))
-  SpiStatusTarget -> boolWord (spiBusy (devSpi devices))
-  SpiControlTarget -> boolWord (spiSelect (devSpi devices)) .|. (resize (spiDivider (devSpi devices)) `shiftL` 8)
   _ -> 0
 
 -- | Writes to read-only device registers (PLIC pending) are ignored.
@@ -536,7 +553,7 @@ stepDevices rxWaiting txReady effect devices =
           devMeip = plicClaimable devices,
           devUartRxInterrupt = maybe devUartRxInterrupt (`testBit` 0) (write UartControlTarget),
           devUartTxInterrupt = maybe devUartTxInterrupt (`testBit` 1) (write UartControlTarget),
-          devSpi = stepSpi (resize <$> write SpiDataTarget) (write SpiControlTarget) devSpi
+          devIo = Nothing
         }
 
 -- | The interrupt to take, highest priority first (external, software,
@@ -844,27 +861,43 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
     -- the received byte is registered before it reaches the CPU: a Ctrl-C
     -- resets the whole CPU, so that compare fans out to every state bit.
     receivedNow = uartRx (register high (register high serialRx))
-    received = register Nothing receivedNow
     emergencyReset = register False ((== Just 0x03) <$> receivedNow)
-    (serialTx, uartReady) = uartTx txRequest
-    -- Break the controller -> UART path. A queued byte reserves the idle
-    -- transmitter so the DONE emitter cannot enqueue a second byte too soon.
-    txRequest = register Nothing txRequestNow
-    txReady = (\ready pending -> ready && case pending of Nothing -> True; Just _ -> False) <$> uartReady <*> txRequest
+    -- Receive FIFO between the UART and the CPU's one-byte holding
+    -- register: a byte is offered only while the holding register is empty
+    -- and no offer is in flight. A Ctrl-C that breaks a program discards
+    -- everything unread, as the reset itself does to the holding register.
+    breaking = breakRequested <$> machineState <*> emergencyReset
+    rxWanted = (\m offered headByte -> isNothing (rxHolding m) && isNothing offered && isJust headByte)
+      <$> machineState <*> received <*> rxHead
+    rxPop = (&&) <$> rxWanted <*> (not <$> breaking)
+    received = register Nothing (mux rxPop rxHead (pure Nothing))
+    (rxHead, _rxCount) = unbundle (mealy fifoStep (initialFifo :: Fifo 32) (bundle (breaking, receivedNow, rxPop)))
+    -- Transmit FIFO: a TX store completes as soon as there is room, and the
+    -- transmitter drains the FIFO by itself. The push is registered, so
+    -- "ready" keeps one slot in reserve for a byte still on its way in.
+    (serialTx, uartReady) = uartTx txOffer
+    txPush = register Nothing txRequestNow
+    txPop = (\ready headByte -> ready && isJust headByte) <$> uartReady <*> txHead
+    txOffer = mux txPop txHead (pure Nothing)
+    (txHead, txCount) = unbundle (mealy fifoStep (initialFifo :: Fifo 16) (bundle (pure False, txPush, txPop)))
+    txReady = register False ((< 15) <$> txCount)
 
     machineInput = bundle (memoryOut, received, txReady, emergencyReset)
-    -- MISO is asynchronous: two flip-flops, then into the SPI state.
+    -- MISO is asynchronous: two flip-flops, then into the I/O complex.
     miso = register high (register high sdMiso)
     machineState = register initialMachine (fst <$> stepped)
-    stepped = withMiso <$> machineState <*> machineInput <*> miso
-    withMiso m input bit =
-      machineStepDecoded m {cpuDevices = (cpuDevices m) {devSpi = (devSpi (cpuDevices m)) {spiMiso = bit}}} input
+    stepped = withIo <$> machineState <*> machineInput <*> ioAnswer
+    withIo m input answer = machineStepDecoded m {cpuDevices = (cpuDevices m) {devIo = answer}} input
     machineOutput = snd <$> stepped
-    (sck, mosi, cs) = unbundle (spiPins . devSpi . cpuDevices <$> machineState)
+    -- The I/O complex sees the CPU's request as registered bus state and
+    -- answers a cycle later; a system reset returns it to idle.
+    (ioAnswer, ioPins, ioRam) = unbundle (mealy ioStep initialIo
+      (bundle (ioRequest <$> machineState, clearRegisters <$> machineState, miso, ramOutB)))
+    (sck, mosi, cs) = unbundle ioPins
     (memoryAddressNow, memoryWriteNow, txRequestNow) = unbundle machineOutput
     -- Real BRAM setup time is worse than the Gowin timing model. Register all
     -- commands at its boundary; issue/delay/wait stages account for latency.
-    memoryAddress = register 0 memoryAddressNow
+    memoryAddress = register (0 :: MemAddr) memoryAddressNow
     memoryWrite = register Nothing memoryWriteNow
 
     -- A synchronous 16384 x 32-bit RAM and the 512-word boot ROM, each with an
@@ -873,12 +906,194 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
     -- read. Bit 14 of the physical index selects the ROM; the select is
     -- delayed to line up with the registered outputs, so the final mux sits
     -- between flip-flops rather than after a block RAM.
-    ramOut = register 0 (blockRam1 NoClearOnReset (SNat @16384) 0
-      (resize <$> memoryAddress :: Signal dom (Unsigned 14))
-      (fmap (\(address, value) -> (resize address :: Unsigned 14, value)) <$> memoryWrite))
+    -- Port A is the CPU's; port B the I/O complex's DMA.
+    (ramOutA, ramOutB) = trueDualPortBlockRam
+      (portOp <$> memoryAddress <*> memoryWrite)
+      (dmaOp <$> ioRam)
+    ramIndex :: MemAddr -> Index 16384
+    ramIndex a = fromIntegral (resize a :: Unsigned 14)
+    portOp address write = case write of
+      Just (a, v) -> RamWrite (ramIndex a) v
+      Nothing -> RamRead (ramIndex address)
+    dmaOp command = case command of
+      Just (a, Just v) -> RamWrite (ramIndex a) v
+      Just (a, Nothing) -> RamRead (ramIndex a)
+      Nothing -> RamRead 0
+    ramOut = register 0 ramOutA
     romOut = register 0 (rom bootRomContents (resize <$> memoryAddress :: Signal dom (Unsigned 9)))
     romSelected = register False (register False ((`testBit` 14) <$> memoryAddress))
     memoryOut = mux romSelected romOut ramOut
+
+-- I/O complex ---------------------------------------------------------------------
+
+-- | A small FIFO in registers. Inputs: flush, push, pop (pop only when the
+-- head is present); outputs: the head and the count. A push to a full FIFO
+-- is dropped.
+data Fifo n = Fifo {fifoData :: Vec n Byte, fifoRead :: Index n, fifoWrite :: Index n, fifoCount :: Index (n + 1)}
+  deriving (Generic, NFDataX, Show, Eq)
+
+initialFifo :: (KnownNat n, KnownNat (n + 1), 1 <= n) => Fifo n
+initialFifo = Fifo (repeat 0) 0 0 0
+
+fifoStep :: forall n. (KnownNat n, KnownNat (n + 1), 1 <= n) => Fifo n -> (Bool, Maybe Byte, Bool) -> (Fifo n, (Maybe Byte, Index (n + 1)))
+fifoStep fifo (flush, push, pop) = (next, (headByte, fifoCount fifo))
+  where
+    headByte = if fifoCount fifo == 0 then Nothing else Just (fifoData fifo !! fifoRead fifo)
+    popped = pop && isJust headByte
+    full = fifoCount fifo == maxBound
+    pushed = case push of Just _ -> not full || popped; Nothing -> False
+    bump i = if i == maxBound then 0 else i + 1
+    next
+      | flush = initialFifo
+      | otherwise =
+          fifo
+            { fifoData = case push of Just byte | pushed -> replace (fifoWrite fifo) byte (fifoData fifo); _ -> fifoData fifo,
+              fifoWrite = if pushed then bump (fifoWrite fifo) else fifoWrite fifo,
+              fifoRead = if popped then bump (fifoRead fifo) else fifoRead fifo,
+              fifoCount = case (pushed, popped) of
+                (True, False) -> fifoCount fifo + 1
+                (False, True) -> fifoCount fifo - 1
+                _ -> fifoCount fifo
+            }
+
+-- | The CPU's request to the I/O complex: its registered bus state while
+-- the bus waits in 'BusIo'.
+ioRequest :: Machine -> Maybe BusRequest
+ioRequest machine = case busPhase (systemBus machine) of
+  BusIo -> Just (busRequest (systemBus machine))
+  _ -> Nothing
+
+-- | The SPI DMA engine: moves bytes between the SPI master and RAM through
+-- the RAM's second port while the CPU runs.
+data DmaPhase = DmaIdle | DmaToken | DmaReceive | DmaFetch | DmaFetchWait | DmaCapture | DmaSend
+  deriving (Generic, NFDataX, Show, Eq)
+
+data Dma = Dma
+  { dmaPhase :: DmaPhase,
+    dmaAddress :: Word32,
+    dmaCount :: Unsigned 16,
+    -- | The word being assembled (receive) or sent (send), little-endian.
+    dmaWord :: Word32,
+    dmaLane :: Unsigned 2,
+    -- | A byte this engine started is still shifting.
+    dmaInFlight :: Bool,
+    -- | 0xff bytes still allowed before the start token.
+    dmaPatience :: Unsigned 20,
+    dmaToken :: Byte,
+    dmaError :: Bool,
+    -- | This cycle's command to the RAM's second port (registered).
+    dmaRam :: Maybe (MemAddr, Maybe Word32)
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
+initialDma :: Dma
+initialDma = Dma DmaIdle 0 0 0 0 False 0 0 False Nothing
+
+-- | Running, or its last RAM write has not left yet.
+dmaBusy :: Dma -> Bool
+dmaBusy dma = dmaPhase dma /= DmaIdle || isJust (dmaRam dma)
+
+-- | One clock of the DMA engine. @spi@ is the SPI master's state this
+-- cycle and @ramWord@ the second RAM port's output. Returns the next state
+-- and the byte to start shifting, if any.
+stepDma :: Dma -> Spi -> Word32 -> (Dma, Maybe Byte)
+stepDma dma spi ramWord = case dmaPhase dma of
+  DmaIdle -> (cleared, Nothing)
+  -- The read leaves the state register next cycle; the block RAM answers
+  -- the cycle after.
+  DmaFetch -> (cleared {dmaPhase = DmaFetchWait, dmaRam = Just (memoryIndex (dmaAddress dma), Nothing)}, Nothing)
+  DmaFetchWait -> (cleared {dmaPhase = DmaCapture}, Nothing)
+  DmaCapture -> (cleared {dmaPhase = DmaSend, dmaWord = ramWord, dmaLane = 0}, Nothing)
+  _
+    | spiBusy spi -> (cleared, Nothing)
+    | not (dmaInFlight dma) -> (cleared {dmaInFlight = True}, Just outgoing)
+    | otherwise -> (finished, Nothing)
+  where
+    cleared = dma {dmaRam = Nothing}
+    outgoing = case dmaPhase dma of
+      DmaSend -> resize (dmaWord dma `shiftR` (8 * fromIntegral (dmaLane dma)))
+      _ -> 0xff
+    byte = spiIn spi
+    lastByte = dmaCount dma == 1
+    afterByte = cleared {dmaInFlight = False, dmaCount = dmaCount dma - 1, dmaLane = dmaLane dma + 1}
+    finished = case dmaPhase dma of
+      DmaToken
+        | byte == 0xff && dmaPatience dma /= 0 -> cleared {dmaInFlight = False, dmaPatience = dmaPatience dma - 1}
+        | byte == 0xfe -> cleared {dmaInFlight = False, dmaToken = byte, dmaPhase = DmaReceive}
+        | otherwise -> cleared {dmaInFlight = False, dmaToken = byte, dmaError = True, dmaPhase = DmaIdle}
+      DmaReceive ->
+        let word = (dmaWord dma .&. complement (0xff `shiftL` lane)) .|. (resize byte `shiftL` lane)
+            lane = 8 * fromIntegral (dmaLane dma)
+            complete = dmaLane dma == 3 || lastByte
+         in afterByte
+              { dmaWord = word,
+                dmaRam = if complete then Just (memoryIndex (dmaAddress dma), Just word) else Nothing,
+                dmaAddress = if complete then dmaAddress dma + 4 else dmaAddress dma,
+                dmaPhase = if lastByte then DmaIdle else DmaReceive
+              }
+      _ -- DmaSend
+        | lastByte -> afterByte {dmaPhase = DmaIdle}
+        | dmaLane dma == 3 -> afterByte {dmaPhase = DmaFetch, dmaAddress = dmaAddress dma + 4}
+        | otherwise -> afterByte
+
+-- | Devices outside the CPU. A request is taken once (while no answer is
+-- pending) and answered from a register the next cycle, so the CPU's bus
+-- and the devices meet only at flip-flops.
+data Io = Io {ioSpi :: Spi, ioDma :: Dma, ioAnswered :: Maybe Word32}
+  deriving (Generic, NFDataX, Show, Eq)
+
+initialIo :: Io
+initialIo = Io initialSpi initialDma Nothing
+
+-- | Inputs: the CPU's request, a system reset, MISO, the second RAM port's
+-- output. Outputs: the answer, the SPI pins (SCK, MOSI, CS active low) and
+-- the command to the second RAM port.
+ioStep :: Io -> (Maybe BusRequest, Bool, Bit, Word32) -> (Io, (Maybe Word32, (Bit, Bit, Bit), Maybe (MemAddr, Maybe Word32)))
+ioStep io (request, reset, miso, ramWord) = (next, (ioAnswered io, spiPins (ioSpi io), dmaRam (ioDma io)))
+  where
+    spi = (ioSpi io) {spiMiso = miso}
+    dma = ioDma io
+    (dmaStepped, dmaByte) = stepDma dma spi ramWord
+    -- A DMA is started by a CTRL write while idle; its first step is the
+    -- next cycle's.
+    dma' = case writing ioDmaControl of
+      Just c | not (dmaBusy dma) ->
+        dma
+          { dmaPhase = if testBit c 0 then DmaFetch else if testBit c 1 then DmaToken else DmaReceive,
+            dmaLane = 0, dmaWord = 0, dmaInFlight = False, dmaError = False, dmaToken = 0,
+            dmaPatience = maxBound, dmaRam = Nothing
+          }
+      _
+        | dmaBusy dma -> dmaStepped
+        | otherwise ->
+            dmaStepped
+              { dmaAddress = maybe (dmaAddress dma) P.id (writing ioDmaAddress),
+                dmaCount = maybe (dmaCount dma) resize (writing ioDmaCount)
+              }
+    taken = case ioAnswered io of Nothing -> request; Just _ -> Nothing
+    offset = maybe 0 (\q -> busAddress q .&. 0xfff) taken
+    writing at = case taken of
+      Just q | busWrite q && offset == at -> Just (busData q)
+      _ -> Nothing
+    value
+      | offset == ioSpiData = resize (spiIn spi)
+      | offset == ioSpiStatus = boolWord (spiBusy spi)
+      | offset == ioSpiControl = boolWord (spiSelect spi) .|. (resize (spiDivider spi) `shiftL` 8)
+      | offset == ioDmaAddress = dmaAddress dma
+      | offset == ioDmaCount = resize (dmaCount dma)
+      | offset == ioDmaStatus =
+          boolWord (dmaBusy dma) .|. (if dmaError dma then 2 else 0) .|. (resize (dmaToken dma) `shiftL` 8)
+      | otherwise = 0
+    -- While a DMA runs it owns the SPI master's data register.
+    spiStart = if dmaBusy dma then dmaByte else resize <$> writing ioSpiData
+    next
+      | reset = initialIo
+      | otherwise =
+          Io
+            { ioSpi = stepSpi spiStart (writing ioSpiControl) spi,
+              ioDma = dma',
+              ioAnswered = (\q -> if busWrite q then 0 else value) <$> taken
+            }
 
 -- | Result wires from the machine controller: BRAM read address, optional BRAM
 -- write, and an optional byte offered to the UART transmitter.
@@ -1460,10 +1675,18 @@ plicThreshold = 0x0c20_0000
 plicClaim = 0x0c20_0004
 uartControl = 0x1000_000c
 
-spiData, spiStatus, spiControl :: Word32
-spiData = 0x1000_1000
-spiStatus = 0x1000_1004
-spiControl = 0x1000_1008
+-- | The I/O complex's window and its registers' offsets within it.
+ioBase :: Word32
+ioBase = 0x1000_1000
+
+ioSpiData, ioSpiStatus, ioSpiControl, ioDmaAddress, ioDmaCount, ioDmaControl, ioDmaStatus :: Word32
+ioSpiData = 0x000
+ioSpiStatus = 0x004
+ioSpiControl = 0x008
+ioDmaAddress = 0x100
+ioDmaCount = 0x104
+ioDmaControl = 0x108
+ioDmaStatus = 0x10c
 
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
@@ -1486,9 +1709,7 @@ decodeMemoryTarget address
   | address == plicThreshold = PlicThresholdTarget
   | address == plicClaim = PlicClaimTarget
   | address == uartControl = UartControlTarget
-  | address == spiData = SpiDataTarget
-  | address == spiStatus = SpiStatusTarget
-  | address == spiControl = SpiControlTarget
+  | address .&. 0xffff_f000 == ioBase = IoTarget
   | address == uartTxData = UartTxTarget
   | address == uartStatus = UartStatusTarget
   | address == uartRxData = UartRxTarget

@@ -6,7 +6,7 @@
 
 #define TEST_BLOCK 0x20000u /* 64 MiB into the card */
 
-static uint8_t pattern[SD_BLOCK], readback[SD_BLOCK];
+static uint8_t pattern[SD_BLOCK] __attribute__((aligned(4))), readback[SD_BLOCK] __attribute__((aligned(4)));
 static unsigned failures;
 
 static uint32_t cycles(void) {
@@ -87,17 +87,27 @@ int main(void) {
     if (bad >= 0) { uart_put_int(bad); uart_putc('\n'); ++failures; }
   }
 
-  /* throughput at the last divider that worked: 64 reads, 16 writes */
-  uint32_t start = cycles();
-  for (uint32_t i = 0; i < 64; ++i)
-    if (sd_read(&card, block + (i & 7), readback) != 0) { fail("timed read", (int)i); break; }
-  uint32_t read_cycles = cycles() - start;
-  start = cycles();
-  for (uint32_t i = 0; i < 16; ++i)
-    if (sd_write(&card, block + 8 + (i & 7), pattern) != 0) { fail("timed write", (int)i); break; }
-  uint32_t write_cycles = cycles() - start;
-  line("cycles per block read ", read_cycles / 64);
-  line("cycles per block write ", write_cycles / 16);
+  /* throughput at the last divider, byte by byte and then by DMA: 64
+   * reads and 16 writes each; DMA and byte transfers must read the same */
+  static uint8_t pio_copy[SD_BLOCK] __attribute__((aligned(4)));
+  for (int use = 0; use < 2; ++use) {
+    sd_use_dma(use);
+    uint32_t start = cycles();
+    for (uint32_t i = 0; i < 64; ++i)
+      if (sd_read(&card, block + (i & 7), readback) != 0) { fail("timed read", (int)i); break; }
+    uint32_t read_cycles = cycles() - start;
+    start = cycles();
+    for (uint32_t i = 0; i < 16; ++i)
+      if (sd_write(&card, block + 8 + (i & 7), pattern) != 0) { fail("timed write", (int)i); break; }
+    uint32_t write_cycles = cycles() - start;
+    if (sd_read(&card, block + 8, use ? readback : pio_copy) != 0) fail("verify read", use);
+    uart_puts(use ? "dma" : "pio");
+    line(": cycles per block read ", read_cycles / 64);
+    uart_puts(use ? "dma" : "pio");
+    line(": cycles per block write ", write_cycles / 16);
+  }
+  for (uint32_t i = 0; i < SD_BLOCK; ++i) pattern[i] = pio_copy[i];
+  if (compare() >= 0) fail("dma and byte reads differ", compare());
 
   uart_puts(failures ? "SD FAIL\n" : "SD HOLD\n");
   return failures ? 1 : 0;

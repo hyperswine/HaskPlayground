@@ -5,6 +5,13 @@
  *   0x1000_1004 SPI STATUS  bit 0: a transfer is in progress
  *   0x1000_1008 SPI CTRL    bit 0: chip select asserted; bits 8-15: half an
  *                           SCK period in core clocks, minus one
+ *   0x1000_1100 DMA ADDR, 0x1000_1104 COUNT, 0x1000_1108 CTRL (start:
+ *                           bit 0 send, bit 1 wait for the 0xfe token first),
+ *                           0x1000_110c STATUS (bit 0 busy, bit 1 error,
+ *                           bits 8-15 token)
+ *
+ * Data blocks move by DMA when the buffer is word-aligned (and DMA is on):
+ * the engine moves the 512 bytes between the card and RAM by itself.
  *
  * Blocks are 512 bytes. Block numbers are always block numbers: for a
  * byte-addressed (standard-capacity) card the driver converts them.
@@ -30,4 +37,5 @@ int sd_init(sd_card_t *card, uint32_t fast_divider);
 int sd_read(const sd_card_t *card, uint32_t block, uint8_t *buf);
 int sd_write(const sd_card_t *card, uint32_t block, const uint8_t *buf);
 void sd_set_divider(uint32_t divider);
+void sd_use_dma(int on); /* default on */
 #endif

@@ -54,7 +54,7 @@ rate. Setting a non-standard speed through `tcsetattr` alone fails with
 | `0x0200_0000` | CLINT (QEMU `virt` layout): `msip` `+0x0`, `mtimecmp` `+0x4000`/`+0x4004`, `mtime` `+0xbff8`/`+0xbffc`; `mtime` counts core clocks |
 | `0x0c00_0000` | PLIC (QEMU `virt` layout) with one source, the UART as IRQ 10: priority `+0x28`, pending `+0x1000`, enable `+0x2000`, threshold `+0x20_0000`, claim/complete `+0x20_0004` |
 | `0x1000_0000`–`0x1000_000c` | UART: TXDATA, STATUS, RXDATA, CTRL (bit 0 receive interrupt, bit 1 transmit-ready interrupt) |
-| `0x1000_1000`–`0x1000_1008` | SPI master for the microSD slot: DATA, STATUS (bit 0 busy), CTRL (bit 0 chip select, bits 8-15 half SCK period in clocks minus one); `c/sd.c` is the SPI-mode card driver |
+| `0x1000_1000`–`0x1000_1fff` | The I/O complex, outside the CPU (word accesses; one registered handshake each): SPI master for the microSD slot at `+0x000` DATA, `+0x004` STATUS (bit 0 busy), `+0x008` CTRL (bit 0 chip select, bits 8-15 half SCK period in clocks minus one); SPI DMA at `+0x100` ADDR, `+0x104` COUNT, `+0x108` CTRL (start: bit 0 send, bit 1 wait for the 0xfe token), `+0x10c` STATUS (bit 0 busy, bit 1 error, bits 8-15 token). `c/sd.c` is the SPI-mode card driver |
 | `0x8000_0000`–`0x8000_ffff` | RAM, 64 KiB (8 MiB on the SDRAM image) |
 
 Every other address raises an access fault, and fetching outside the ROM and

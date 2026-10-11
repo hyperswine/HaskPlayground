@@ -62,8 +62,10 @@ import sys
 p = Path(sys.argv[1]); text = p.read_text()
 def tcl_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('[', '\\[') + '"'
+# every module Clash generated (the dual-port RAM is its own file)
+clash = Path(sys.argv[4]) / 'output/tangnano20k/clash/SimpleRisc.topEntity'
 text = text.replace('add_file ../clash/SimpleRisc.topEntity/simple_risc.v',
-    'add_file ' + tcl_quote(Path(sys.argv[4]) / 'output/tangnano20k/clash/SimpleRisc.topEntity/simple_risc.v'))
+    '\n'.join('add_file ' + tcl_quote(v) for v in sorted(clash.glob('*.v'))))
 text = text.replace('add_file ../../../boards/tangnano20k/tangnano20k.cst',
     'add_file ' + tcl_quote(Path(sys.argv[4]) / 'boards/tangnano20k/tangnano20k.cst'))
 p.write_text(text

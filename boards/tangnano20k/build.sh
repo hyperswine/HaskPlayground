@@ -45,15 +45,15 @@ root="$(cd "$here/../.." && pwd)"
 suite="${OSS_CAD_SUITE:-$HOME/Documents/Libs/oss-cad-suite}"
 bin="$suite/bin"
 out="$root/output/tangnano20k"
-core="$out/clash/SimpleRisc.topEntity/simple_risc.v"
-
 mkdir -p "$out"
 cd "$root"
 
 stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir "$out/clash"
+# every module Clash generated (the dual-port RAM is its own file)
+core="$(ls "$out"/clash/SimpleRisc.topEntity/*.v | tr '\n' ' ')"
 
 "$bin/yosys" -q -l "$out/yosys.log" -p \
-  "read_verilog $core $here/top.v; chparam -set FBDIV_SEL $fbdiv -set ODIV_SEL $odiv top; synth_gowin -top top -json $out/simple_risc.json"
+  "read_verilog ${core}$here/top.v; chparam -set FBDIV_SEL $fbdiv -set ODIV_SEL $odiv top; synth_gowin -top top -json $out/simple_risc.json"
 
 # Placement luck matters near the limit: keep the first seed that passes.
 placed=""

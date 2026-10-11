@@ -6,9 +6,29 @@
 #define SPI_DATA (*(volatile uint32_t *)0x10001000u)
 #define SPI_STATUS (*(volatile uint32_t *)0x10001004u)
 #define SPI_CTRL (*(volatile uint32_t *)0x10001008u)
+#define DMA_ADDR (*(volatile uint32_t *)0x10001100u)
+#define DMA_COUNT (*(volatile uint32_t *)0x10001104u)
+#define DMA_CTRL (*(volatile uint32_t *)0x10001108u)
+#define DMA_STATUS (*(volatile uint32_t *)0x1000110cu)
 
 static uint32_t divider = 255;
 static uint32_t selected;
+static int dma = 1;
+
+void sd_use_dma(int on) { dma = on; }
+
+static int dma_ok(const void *buf) { return dma && ((uintptr_t)buf & 3u) == 0; }
+
+/* Run one DMA transfer and wait for it; 0, or -1 on a token error. */
+static int dma_run(const void *buf, uint32_t n, uint32_t control) {
+  DMA_ADDR = (uint32_t)(uintptr_t)buf;
+  DMA_COUNT = n;
+  DMA_CTRL = control;
+  uint32_t status;
+  while ((status = DMA_STATUS) & 1u) {
+  }
+  return (status & 2u) ? -1 : 0;
+}
 
 static void spi_control(void) { SPI_CTRL = selected | (divider << 8); }
 
@@ -145,7 +165,16 @@ static uint32_t address(const sd_card_t *card, uint32_t block) {
 
 int sd_read(const sd_card_t *card, uint32_t block, uint8_t *buf) {
   select(1);
-  int result = command(17, address(card, block), 0x01) == 0x00 ? read_data(buf, SD_BLOCK) : -1;
+  int result;
+  if (command(17, address(card, block), 0x01) != 0x00) {
+    result = -1;
+  } else if (dma_ok(buf)) {
+    result = dma_run(buf, SD_BLOCK, 2); /* wait for the token, then 512 bytes */
+    xfer(0xff); /* CRC */
+    xfer(0xff);
+  } else {
+    result = read_data(buf, SD_BLOCK);
+  }
   deselect();
   return result;
 }
@@ -155,7 +184,8 @@ int sd_write(const sd_card_t *card, uint32_t block, const uint8_t *buf) {
   if (command(24, address(card, block), 0x01) != 0x00) { deselect(); return -1; }
   xfer(0xff);
   xfer(0xfe); /* start token */
-  for (uint32_t i = 0; i < SD_BLOCK; ++i) xfer(buf[i]);
+  if (dma_ok(buf)) (void)dma_run(buf, SD_BLOCK, 1);
+  else for (uint32_t i = 0; i < SD_BLOCK; ++i) xfer(buf[i]);
   xfer(0xff); /* CRC, ignored in SPI mode */
   xfer(0xff);
   uint8_t response = xfer(0xff) & 0x1f;

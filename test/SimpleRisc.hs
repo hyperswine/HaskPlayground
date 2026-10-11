@@ -984,12 +984,142 @@ prop_spi_exchanges_bytes_in_mode_0 = property $ do
   P.map P.snd sent === P.replicate 8 low
   spiIn done === incoming
   spiPins done === (low, high, low)
-  let devices = initialDevices {devSpi = done}
-  deviceRead SpiDataTarget devices === fromIntegral incoming
-  deviceRead SpiStatusTarget devices === 0
-  deviceRead SpiControlTarget devices === 1 .|. (fromIntegral divider `shiftL` 8)
-  decodeMemoryTarget spiData === SpiDataTarget
-  decodeMemoryTarget spiControl === SpiControlTarget
+  decodeMemoryTarget (ioBase + ioSpiData) === IoTarget
+  decodeMemoryTarget (ioBase + 0xffc) === IoTarget
+
+-- | The register FIFO behaves as a bounded queue: pushes to a full FIFO are
+-- dropped, pops of an empty one do nothing, flush empties it.
+prop_fifo_is_a_bounded_queue :: Property
+prop_fifo_is_a_bounded_queue = property $ do
+  ops <- forAll (Gen.list (Range.linear 0 200)
+    ((,,) <$> Gen.frequency [(1, P.pure True), (30, P.pure False)]
+          <*> Gen.maybe (Gen.integral Range.linearBounded :: Gen Byte) <*> Gen.bool))
+  let model queue (flush, push, pop)
+        | flush = []
+        | otherwise =
+            let popped = if pop then P.drop 1 queue else queue
+                room = P.length queue < 4 || (pop && not (P.null queue))
+             in case push of
+                  Just b | room -> popped P.++ [b]
+                  _ -> popped
+      go :: Fifo 4 -> [Byte] -> [(Bool, Maybe Byte, Bool)] -> PropertyT IO ()
+      go fifo queue [] = do
+        P.fst (P.snd (fifoStep fifo (False, Nothing, False))) === listToMaybe queue
+      go fifo queue (op : rest) = do
+        let (fifo', (headByte, count)) = fifoStep fifo op
+        headByte === listToMaybe queue
+        fromIntegral count === P.length queue
+        go fifo' (model queue op) rest
+      listToMaybe xs = case xs of [] -> Nothing; x : _ -> Just x
+  go (initialFifo :: Fifo 4) [] ops
+
+-- | Drive the I/O complex alone: CPU-style word requests through its
+-- handshake, an SPI slave that sends @slaveBytes@ (MSB first, changing on
+-- falling edges, 0xff when exhausted), and a RAM on the second port with one
+-- cycle of read latency. Returns the complex, the RAM, the bytes the master
+-- sent (sampled at rising edges) and the answers to the requests.
+data IoRig = IoRig {rigIo :: Io, rigRam :: IntMap.IntMap Word32, rigRamOut :: Word32,
+  rigSlave :: [Byte], rigBit :: Int, rigSent :: [Bit], rigAnswers :: [Word32]}
+
+rigStep :: Maybe BusRequest -> IoRig -> IoRig
+rigStep request rig =
+  let io = rigIo rig
+      misoBit = case rigSlave rig of
+        b : _ -> if testBit b (7 - rigBit rig) then high else low
+        [] -> high
+      (io', (answer, (sck, mosi, _), ramCommand)) = ioStep io (request, False, misoBit, rigRamOut rig)
+      sckBefore = spiSck (ioSpi io)
+      sckAfter = spiSck (ioSpi io')
+      rising = not sckBefore && sckAfter
+      falling = sckBefore && not sckAfter
+      (slave', bit') = if falling then (if rigBit rig == 7 then (P.drop 1 (rigSlave rig), 0) else (rigSlave rig, rigBit rig + 1))
+        else (rigSlave rig, rigBit rig)
+      (ram', ramOut') = case ramCommand of
+        Just (index, Just value) -> (IntMap.insert (fromIntegral index) value (rigRam rig), rigRamOut rig)
+        Just (index, Nothing) -> (rigRam rig, IntMap.findWithDefault 0 (fromIntegral index) (rigRam rig))
+        Nothing -> (rigRam rig, rigRamOut rig)
+      _ = sck
+   in rig {rigIo = io', rigRam = ram', rigRamOut = ramOut', rigSlave = slave', rigBit = bit',
+        rigSent = if rising then mosi : rigSent rig else rigSent rig,
+        rigAnswers = maybe (rigAnswers rig) (: rigAnswers rig) answer}
+
+-- | One word access: hold the request until the registered answer.
+rigAccess :: Word32 -> Bool -> Word32 -> IoRig -> IoRig
+rigAccess offset write value rig0 = go (rigStep (Just q) rig0) (40 :: Int)
+  where
+    q = BusRequest (ioBase + offset) 2 write value
+    n = P.length (rigAnswers rig0)
+    go rig fuel
+      | P.length (rigAnswers rig) > n || fuel == 0 = rigStep Nothing rig
+      | otherwise = go (rigStep (Just q) rig) (fuel - 1)
+
+rigUntilIdle :: IoRig -> IoRig
+rigUntilIdle rig0 = go rig0 (200000 :: Int)
+  where
+    go rig fuel
+      | not (dmaBusy (ioDma (rigIo rig))) || fuel == 0 = rig
+      | otherwise = go (rigStep Nothing rig) (fuel - 1)
+
+bitsToBytes :: [Bit] -> [Byte]
+bitsToBytes bits = case P.splitAt 8 bits of
+  (byte, rest) | P.length byte == 8 -> P.foldl (\acc b -> acc * 2 + (if b == high then 1 else 0)) 0 byte : bitsToBytes rest
+  _ -> []
+
+-- | The SPI DMA engine moves whole SD-style data blocks between the SPI
+-- master and RAM's second port: receive after a start token (and refuse a
+-- wrong one), and send RAM words byte by byte, little-endian.
+prop_spi_dma_moves_blocks :: Property
+prop_spi_dma_moves_blocks = property $ do
+  words' <- forAll (Gen.list (Range.linear 1 16) (Gen.integral Range.linearBounded :: Gen Word32))
+  waits <- forAll (Gen.integral (Range.linear 0 20))
+  divider <- forAll (Gen.integral (Range.linear 0 3) :: Gen Word32)
+  let bytesOf w = [resize (w `shiftR` (8 * i)) | i <- [0 .. 3]] :: [Byte]
+      payload = P.concatMap bytesOf words'
+      count = fromIntegral (4 * P.length words')
+      base = 0x40 :: Word32
+      fresh slave = IoRig initialIo IntMap.empty 0 slave 0 [] []
+      setup slave = rigAccess ioSpiControl True (1 .|. (divider `shiftL` 8)) . rigAccess ioDmaCount True count
+        . rigAccess ioDmaAddress True (ramBase + 4 * base) $ fresh slave
+      -- receive: waits x 0xff, the token, the data
+      received = rigUntilIdle (rigAccess ioDmaControl True 2 (setup (P.replicate waits 0xff P.++ [0xfe] P.++ payload)))
+      status = P.head (rigAnswers (rigAccess ioDmaStatus False 0 received))
+  [IntMap.findWithDefault 0 (fromIntegral base + i) (rigRam received) | i <- [0 .. P.length words' - 1]] === words'
+  status === 0xfe00
+  dmaCount (ioDma (rigIo received)) === 0
+  -- send: RAM words out on MOSI, lowest address byte first
+  let preload = (setup []) {rigRam = IntMap.fromList (P.zip [fromIntegral base ..] words')}
+      sent = rigUntilIdle (rigAccess ioDmaControl True 1 preload)
+  bitsToBytes (P.reverse (rigSent sent)) === payload
+  -- a wrong token is an error, and nothing is written
+  let refused = rigUntilIdle (rigAccess ioDmaControl True 2 (setup [0xff, 0x0b]))
+      refusal = P.head (rigAnswers (rigAccess ioDmaStatus False 0 refused))
+  refusal === (0x0b00 .|. 2)
+  IntMap.null (rigRam refused) === True
+
+-- | A program reaches the SPI master through the I/O complex: word stores
+-- and loads in 0x1000_1xxx wait in BusIo for the complex's registered
+-- answer. With MISO high the byte received is 0xff.
+prop_program_reaches_io_complex :: Property
+prop_program_reaches_io_complex = withTests 1 . property $ do
+  -- x1 = I/O base; CTRL = select, divider 3; DATA = 0xa5; poll STATUS;
+  -- read DATA and CTRL; ECALL (mtvec 0) returns to the ROM
+  let program = [sw 2 1 8, sw 3 1 0, lw 4 1 4, bne 4 0 (0 - 4), lw 5 1 0, lw 6 1 8, 0x00000073]
+      start = startSim (runningMachine [(1, ioBase), (2, 0x301), (3, 0xa5)]) (ramFromList program)
+      go :: Int -> Sim -> Io -> (Sim, Io)
+      go fuel sim io
+        | romAddress (cpuPc (simMachine sim)) || fuel == 0 = (sim, io)
+        | otherwise =
+            let m = simMachine sim
+                (io', (answer, _, _)) = ioStep io (ioRequest m, clearRegisters m, high, 0)
+                injected = sim {simMachine = m {cpuDevices = (cpuDevices m) {devIo = answer}}}
+             in go (fuel - 1) (stepSim injected Nothing) io'
+      (stopped, io) = go 5000 start initialIo
+      regs = cpuRegs (simMachine stopped)
+  assert (romAddress (cpuPc (simMachine stopped)))
+  regs !! (5 :: Index 32) === 0xff
+  regs !! (6 :: Index 32) === 0x301
+  regs !! (4 :: Index 32) === 0
+  spiSelect (ioSpi io) === True
 
 -- Interpret the pipelined carry in the independent test reference only.
 counterValue :: Counter64 -> Unsigned 64
@@ -1318,6 +1448,9 @@ simpleRiscGroup =
       ("UART interrupt claims through the PLIC", prop_uart_interrupt_claims_through_plic),
       ("Reset quietens interrupt sources", prop_reset_quietens_devices),
       ("SPI exchanges bytes in mode 0", prop_spi_exchanges_bytes_in_mode_0),
+      ("FIFO is a bounded queue", prop_fifo_is_a_bounded_queue),
+      ("A program reaches the I/O complex", prop_program_reaches_io_complex),
+      ("SPI DMA moves blocks", prop_spi_dma_moves_blocks),
       ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
       ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),

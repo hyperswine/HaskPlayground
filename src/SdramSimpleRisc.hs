@@ -10,6 +10,8 @@ import qualified SimpleRisc as R
 decodeTarget :: R.Word32 -> R.MemoryTarget
 decodeTarget address
   | address .&. 0xff80_0000 == 0x8000_0000 = R.RamTarget
+  -- no I/O complex on this image yet
+  | address .&. 0xffff_f000 == R.ioBase = R.UnmappedTarget
   | otherwise = R.decodeMemoryTarget address
 
 -- Normal steps the core; the others hold it while a memory word is fetched,
