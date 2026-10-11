@@ -334,8 +334,9 @@ prop_shift_stages_all_distances = withTests 1 . property $ do
           (cycles, halted) = runUntilHalt 50 (startSim machine (ramFromList [instruction]))
       cpuRegs (simMachine halted) !! (3 :: Index 32) === arithmeticResult op a n
       assert (romAddress (cpuPc (simMachine halted)))
-      -- Ten clocks for the shift, then ten to trap on the zero word after it.
-      cycles === 10 + 10
+      -- Ten clocks for the shift, then seven to trap on the zero word after
+      -- it, which the shift's Decode prefetched.
+      cycles === 10 + 7
 
 prop_split_comparisons_match_reference :: Property
 prop_split_comparisons_match_reference = property $ do
@@ -383,15 +384,16 @@ prop_registered_execution_matches_compute = property $ do
   cpuCountRetirement completed === False
   cpuPendingWrite completed === Nothing
 
-prop_simple_instructions_take_nine_cycles_each :: Property
-prop_simple_instructions_take_nine_cycles_each = property $ do
+prop_simple_instructions_take_six_cycles_with_fetch_overlap :: Property
+prop_simple_instructions_take_six_cycles_with_fetch_overlap = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine []) ram)
 
-  -- Nine clocks per instruction, then ten to fetch the zero word after the
-  -- program, decode it as illegal and trap to the boot ROM.
-  cycles === 9 * n + 10
+  -- Nine clocks for the first instruction; each Decode prefetches the next
+  -- word, so every later one takes six. The zero word after the program
+  -- (also prefetched) decodes as illegal and traps to the ROM in seven.
+  cycles === 9 + 6 * (n - 1) + 7
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
@@ -1631,7 +1633,7 @@ simpleRiscGroup =
       ("Registered CSR selection matches reference", prop_registered_csr_selection_matches_reference),
       ("Registered execution matches compute", prop_registered_execution_matches_compute),
       ("Split comparisons match signed/unsigned references", prop_split_comparisons_match_reference),
-      ("Simple instructions take nine cycles each", prop_simple_instructions_take_nine_cycles_each),
+      ("Simple instructions take six cycles with fetch overlap", prop_simple_instructions_take_six_cycles_with_fetch_overlap),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),

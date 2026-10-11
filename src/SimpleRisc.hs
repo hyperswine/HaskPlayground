@@ -655,6 +655,16 @@ data Machine = Machine
     -- | The PC being fetched is outside the ROM and RAM; registered at Fetch
     -- and raised as an instruction access fault at Decode.
     cpuFetchFault :: Bool,
+    -- | Fetch overlap: Decode reads the word at pc + 4 while the CPU's RAM
+    -- port is otherwise idle; it arrives three cycles later. A Fetch whose
+    -- pc matches a valid prefetch goes straight to Decode. Off on images
+    -- whose memory is driven by the CPU's phase (the SDRAM wrapper).
+    cpuPrefetchEnable :: Bool,
+    cpuPrefetchAddress :: Word32,
+    cpuPrefetchWord :: Word32,
+    cpuPrefetchValid :: Bool,
+    -- | Cycles until the prefetched word is on the memory bus; 0 when none.
+    cpuPrefetchCount :: Unsigned 2,
     -- | Executing boot ROM code, registered at Fetch. Ctrl-C only breaks
     -- programs: in the ROM a 0x03 byte is data, such as part of an image.
     cpuInRom :: Bool,
@@ -720,6 +730,11 @@ initialMachine =
       cpuPhase = Fetch,
       cpuInstruction = 0,
       cpuFetchFault = False,
+      cpuPrefetchEnable = True,
+      cpuPrefetchAddress = 0,
+      cpuPrefetchWord = 0,
+      cpuPrefetchValid = False,
+      cpuPrefetchCount = 0,
       cpuInRom = True,
       cpuABanks = repeat 0,
       cpuBBanks = repeat 0,
@@ -1145,7 +1160,23 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
           cpuWake = cpuInterruptEnable machine .&. pendingInterrupts (cpuDevices machine) /= 0
         }
       devices' = stepDevices (case rxHolding machine of Nothing -> False; Just _ -> True) txReady effect (cpuDevices machine)
-   in (if clearRegisters machine then counted {cpuRegs = repeat 0} else counted, output)
+      -- The prefetch arrives three cycles after Decode issued it; a RAM
+      -- write to its word (a store into the next instruction) drops it.
+      (_, memoryWrite, _) = output
+      overwritten = case memoryWrite of
+        Just (index, _) -> index == memoryIndex (cpuPrefetchAddress counted)
+        Nothing -> False
+      -- (a case, not ==: CpuPhase has a one-hot encoding)
+      decoding = case cpuPhase machine of Decode -> True; _ -> False
+      prefetched
+        | clearRegisters counted = counted {cpuPrefetchValid = False, cpuPrefetchCount = 0}
+        | cpuPrefetchCount machine == 1 =
+            counted {cpuPrefetchCount = 0, cpuPrefetchWord = memoryWord, cpuPrefetchValid = not overwritten}
+        | cpuPrefetchCount machine /= 0 && not decoding =
+            counted {cpuPrefetchCount = cpuPrefetchCount machine - 1,
+              cpuPrefetchValid = cpuPrefetchValid counted && not overwritten}
+        | otherwise = counted {cpuPrefetchValid = cpuPrefetchValid counted && not overwritten}
+   in (if clearRegisters machine then prefetched {cpuRegs = repeat 0} else prefetched, output)
 
 -- | Keep time while an external memory holds the core (the SDRAM wrapper).
 tickHeld :: Machine -> Machine
@@ -1186,6 +1217,8 @@ systemReset cause machine =
       cpuBusResponse = Nothing,
       rxHolding = Nothing,
       cpuDevices = initialDevices {devMtime = devMtime (cpuDevices machine)},
+      cpuPrefetchValid = False,
+      cpuPrefetchCount = 0,
       cpuWake = False
     }
 
@@ -1232,7 +1265,11 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                -- so a change to MIE or mie applies at the next boundary.
                Fetch -> case interruptCause machineRx of
                  Just cause -> withoutRegister (raiseException machineRx cause 0)
-                 Nothing ->
+                 Nothing
+                   | cpuPrefetchValid && cpuPrefetchAddress == cpuPc ->
+                       next machineRx {cpuPhase = Decode, cpuInstruction = cpuPrefetchWord,
+                         cpuFetchFault = not (fetchable (decodeTarget cpuPc)), cpuInRom = romAddress cpuPc}
+                   | otherwise ->
                    withoutRegister
                      ( machineRx {cpuPhase = FetchDelay, cpuFetchFault = not (fetchable (decodeTarget cpuPc)),
                          cpuInRom = romAddress cpuPc},
@@ -1244,14 +1281,19 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                Decode
                  | cpuFetchFault -> withoutRegister (raiseException machineRx 1 cpuPc)
                  | otherwise ->
-                     next
-                       machineRx
-                         { cpuPhase = OperandSelect,
-                           cpuABanks = readRegisterBanks (instructionRs1 instruction) cpuRegs,
-                           cpuBBanks = readRegisterBanks (instructionRs2 instruction) cpuRegs,
-                           cpuImm = decodeImmediate instruction,
-                           cpuIsRegOp = instruction .&. 0x7f == 0x33
-                         }
+                     withoutRegister
+                       ( machineRx
+                           { cpuPhase = OperandSelect,
+                             cpuABanks = readRegisterBanks (instructionRs1 instruction) cpuRegs,
+                             cpuBBanks = readRegisterBanks (instructionRs2 instruction) cpuRegs,
+                             cpuImm = decodeImmediate instruction,
+                             cpuIsRegOp = instruction .&. 0x7f == 0x33,
+                             cpuPrefetchAddress = cpuPc + 4,
+                             cpuPrefetchValid = False,
+                             cpuPrefetchCount = if cpuPrefetchEnable then 3 else 0
+                           },
+                         (if cpuPrefetchEnable then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
+                       )
                OperandSelect ->
                  let selectedB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
                   in next machineRx

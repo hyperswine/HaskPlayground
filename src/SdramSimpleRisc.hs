@@ -22,7 +22,8 @@ data State = State {machine :: R.Machine, phase :: MemoryPhase,
   word :: R.Word32, requestAddress :: Unsigned 21, requestData :: R.Word32,
   requestWrite :: Bool, romAddress :: Unsigned 9} deriving (Generic,NFDataX)
 initialState :: State
-initialState = State R.initialMachine Normal 0 0 0 False 0
+-- The wrapper drives memory by the CPU's phase, so no fetch overlap here.
+initialState = State R.initialMachine {R.cpuPrefetchEnable = False} Normal 0 0 0 False 0
 
 -- SDRAM data, ready, done; received byte; UART ready; Ctrl-C; boot ROM word.
 type Input = (R.Word32,Bool,Bool,Maybe R.Byte,Bool,Bool,R.Word32)
