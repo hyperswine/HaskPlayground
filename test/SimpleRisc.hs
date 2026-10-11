@@ -420,6 +420,17 @@ prop_ram_accesses_take_the_fast_path = property $ do
   where
     signExtendByte w = let b = w .&. 0xff in if testBit b 7 then b .|. 0xffff_ff00 else b
 
+-- | A taken jump's target was read at its ExecuteFinish: Fetch takes it
+-- off the bus a cycle later (2 cycles, not a 4-cycle fetch). jal over a
+-- word, then addi: 9 for the jal, 7 for the addi, 7 to trap on the zero
+-- word after it (23, against 25 without the target read).
+prop_taken_jump_fetches_its_target_early :: Property
+prop_taken_jump_fetches_its_target_early = withTests 1 . property $ do
+  let (cycles, halted) = runUntilHalt 200 (startSim (runningMachine []) (ramFromList [jType 8 0, 0xffff_ffff, addi 1 0 1]))
+  cpuRegs (simMachine halted) !! (1 :: Index 32) === 1
+  trapEpc (cpuTrapRegisters (simMachine halted)) === ramBase + 12
+  cycles === 9 + 7 + 7
+
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
   -- addi x1,x0,1; sw x5,8(x31) where x5 holds "addi x6,x0,42" and x31 the
@@ -1661,6 +1672,7 @@ simpleRiscGroup =
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("RAM accesses take the fast path", prop_ram_accesses_take_the_fast_path),
+      ("A taken jump fetches its target early", prop_taken_jump_fetches_its_target_early),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
       ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),
       ("UART TX timing and byte latch", prop_uart_tx_is_cycle_exact_and_latches_byte),
