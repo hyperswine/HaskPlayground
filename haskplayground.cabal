@@ -367,6 +367,7 @@ test-suite haskplayground-test
       NeoMusicScoreTests
       NeoMusicTests
       PsramRegs
+      Rv32Model
       SimpleRisc
       Paths_haskplayground
   hs-source-dirs:
