@@ -384,17 +384,25 @@ prop_registered_execution_matches_compute = property $ do
   cpuCountRetirement completed === False
   cpuPendingWrite completed === Nothing
 
-prop_simple_instructions_take_six_cycles_with_fetch_overlap :: Property
-prop_simple_instructions_take_six_cycles_with_fetch_overlap = property $ do
+prop_simple_instructions_overlap_unless_dependent :: Property
+prop_simple_instructions_overlap_unless_dependent = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
       (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine []) ram)
 
-  -- Nine clocks for the first instruction; each Decode prefetches the next
-  -- word, so every later one takes six. The zero word after the program
-  -- (also prefetched) decodes as illegal and traps to the ROM in seven.
-  cycles === 9 + 6 * (n - 1) + 7
+  -- Nine clocks for the first instruction. Each later one reads the
+  -- previous result (x1), so it cannot start early: Fetch takes the word
+  -- decode-ahead captured, six clocks each. The zero word after the program
+  -- reads only x0, so it starts early (Decode at the addi's Commit) and
+  -- traps in five.
+  cycles === 9 + 6 * (n - 1) + 5
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
+  -- Independent instructions overlap: each one's word is captured at the
+  -- previous one's ExecuteFinish and decoded at its Commit, skipping Fetch
+  -- and Decode: four clocks each.
+  let independent = [addi (fromIntegral (1 + k `P.mod` 8)) 0 (fromIntegral k) | k <- [0 .. n - 1]]
+      (overlapped, _) = runUntilHalt 1000 (startSim (runningMachine []) (ramFromList independent))
+  overlapped === 9 + 4 * (n - 1) + 5
 
 -- | RAM loads and stores skip the bus: the word read is issued at
 -- ExecuteFinish. As a first instruction (a full four-cycle fetch), a load
@@ -422,14 +430,15 @@ prop_ram_accesses_take_the_fast_path = property $ do
 
 -- | A taken jump's target was read at its ExecuteFinish: Fetch takes it
 -- off the bus a cycle later (2 cycles, not a 4-cycle fetch). jal over a
--- word, then addi: 9 for the jal, 7 for the addi, 7 to trap on the zero
--- word after it (23, against 25 without the target read).
+-- word, then addi: 9 for the jal, 7 for the addi, 5 to trap on the zero
+-- word after it, which decode-ahead starts early (21; 23 without the
+-- target read).
 prop_taken_jump_fetches_its_target_early :: Property
 prop_taken_jump_fetches_its_target_early = withTests 1 . property $ do
   let (cycles, halted) = runUntilHalt 200 (startSim (runningMachine []) (ramFromList [jType 8 0, 0xffff_ffff, addi 1 0 1]))
   cpuRegs (simMachine halted) !! (1 :: Index 32) === 1
   trapEpc (cpuTrapRegisters (simMachine halted)) === ramBase + 12
-  cycles === 9 + 7 + 7
+  cycles === 9 + 7 + 5
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
@@ -1668,7 +1677,7 @@ simpleRiscGroup =
       ("Registered CSR selection matches reference", prop_registered_csr_selection_matches_reference),
       ("Registered execution matches compute", prop_registered_execution_matches_compute),
       ("Split comparisons match signed/unsigned references", prop_split_comparisons_match_reference),
-      ("Simple instructions take six cycles with fetch overlap", prop_simple_instructions_take_six_cycles_with_fetch_overlap),
+      ("Simple instructions overlap unless dependent", prop_simple_instructions_overlap_unless_dependent),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
       ("RAM accesses take the fast path", prop_ram_accesses_take_the_fast_path),

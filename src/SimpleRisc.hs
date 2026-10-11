@@ -264,9 +264,10 @@ tickCounter increment write counter =
 
 -- | Where the next Fetch finds its word, decided by the instruction that
 -- set the pc: the sequential prefetch (pc + 4), the branch-target read, or
--- neither (fetch from memory). Fetch consumes it, so a trap, MRET, an
--- interrupt or a reset always fetches from memory. No address compare.
-data FetchSource = FromMemory | FromPrefetch | FromTarget
+-- the word decode-ahead already captured (FromNext), or neither (fetch from
+-- memory). Fetch consumes it, so a trap, MRET, an interrupt or a reset
+-- always fetches from memory. No address compare.
+data FetchSource = FromMemory | FromPrefetch | FromTarget | FromNext
   deriving (Generic, NFDataX, Show, Eq)
 
 -- | Interrupt-source state: the CLINT, the PLIC with its one source (the
@@ -700,6 +701,16 @@ data Machine = Machine
     -- finishes before the next Fetch.
     cpuStoreHitsPrefetch :: Bool,
     cpuStoreHitsTarget :: Bool,
+    -- | Decode-ahead: at ExecuteFinish of a plain ALU instruction the next
+    -- word is on the memory bus or in the prefetch buffer; it is kept here.
+    -- If it does not read this instruction's result (cpuAhead) and no
+    -- interrupt is due, Commit does its Decode and it continues at
+    -- OperandSelect, skipping Fetch. Otherwise Fetch takes it (FromNext).
+    cpuNextInstruction :: Word32,
+    cpuNextValid :: Bool,
+    cpuAhead :: Bool,
+    -- | A prefetch read was issued this cycle (Decode, or decode-ahead).
+    cpuPrefetchIssue :: Bool,
     -- | Executing boot ROM code, registered at Fetch. Ctrl-C only breaks
     -- programs: in the ROM a 0x03 byte is data, such as part of an image.
     cpuInRom :: Bool,
@@ -778,6 +789,10 @@ initialMachine =
       cpuFetchSource = FromMemory,
       cpuStoreHitsPrefetch = False,
       cpuStoreHitsTarget = False,
+      cpuNextInstruction = 0,
+      cpuNextValid = False,
+      cpuAhead = False,
+      cpuPrefetchIssue = False,
       cpuInRom = True,
       cpuABanks = repeat 0,
       cpuBBanks = repeat 0,
@@ -1174,7 +1189,8 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
         (True, Just byte, Nothing) -> machine {rxHolding = Just byte}
         _ -> machine
       (machine', coreOutput) = runningStepDecodedWith decodeTarget
-        receivedMachine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing, cpuBusRequest = Nothing}
+        receivedMachine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing, cpuBusRequest = Nothing,
+          cpuPrefetchIssue = False}
         memoryWord received txReady emergencyReset
       cancelled = emergencyReset
       (bus', response, busOutput, effect) = if cancelled
@@ -1206,13 +1222,12 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
       -- The prefetch arrives three cycles after Decode issued it, the
       -- branch target three after ExecuteFinish. (Stores into a buffered
       -- word drop it at Commit.)
-      -- (a case, not ==: CpuPhase has a one-hot encoding)
-      decoding = case cpuPhase machine of Decode -> True; _ -> False
       prefetched
         | clearRegisters counted = counted {cpuPrefetchValid = False, cpuPrefetchCount = 0}
+        | cpuPrefetchIssue counted = counted -- a read issued this cycle
         | cpuPrefetchCount machine == 1 =
             counted {cpuPrefetchCount = 0, cpuPrefetchWord = memoryWord, cpuPrefetchValid = True}
-        | cpuPrefetchCount machine /= 0 && not decoding =
+        | cpuPrefetchCount machine /= 0 =
             counted {cpuPrefetchCount = cpuPrefetchCount machine - 1}
         | otherwise = counted
       -- the same for the branch target (issued at ExecuteFinish)
@@ -1271,6 +1286,10 @@ systemReset cause machine =
       cpuFetchSource = FromMemory,
       cpuStoreHitsPrefetch = False,
       cpuStoreHitsTarget = False,
+      cpuNextInstruction = 0,
+      cpuNextValid = False,
+      cpuAhead = False,
+      cpuPrefetchIssue = False,
       cpuWake = False
     }
 
@@ -1308,6 +1327,12 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
        in let Machine {..} = machineRx
               instruction = cpuInstruction
               address = cAddress cpuComputed
+              -- One register-bank read, shared by Decode and decode-ahead (at
+              -- Commit, from the captured next word). Both sources are core
+              -- registers, picked by one one-hot phase bit.
+              decoding = case cpuPhase of Commit -> cpuNextInstruction; _ -> instruction
+              sharedABanks = readRegisterBanks (instructionRs1 decoding) cpuRegs
+              sharedBBanks = readRegisterBanks (instructionRs2 decoding) cpuRegs
            in case cpuPhase of
                -- Only the ROM and RAM hold instructions. The check is
                -- registered here and raised as an access fault at Decode.
@@ -1326,9 +1351,11 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                          FromPrefetch | cpuPrefetchValid -> Decode
                          FromTarget | cpuTargetValid -> Decode
                          FromTarget | cpuTargetCount /= 0 -> FetchTargetWait
+                         FromNext | cpuNextValid -> Decode
                          _ -> FetchDelay
                        word = case cpuFetchSource of
                          FromTarget -> cpuTargetWord
+                         FromNext -> cpuNextInstruction
                          _ -> cpuPrefetchWord
                     in withoutRegister
                          ( fetched {cpuPhase = phase, cpuInstruction = word},
@@ -1350,13 +1377,15 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      withoutRegister
                        ( machineRx
                            { cpuPhase = OperandSelect,
-                             cpuABanks = readRegisterBanks (instructionRs1 instruction) cpuRegs,
-                             cpuBBanks = readRegisterBanks (instructionRs2 instruction) cpuRegs,
+                             cpuABanks = sharedABanks,
+                             cpuBBanks = sharedBBanks,
                              cpuImm = decodeImmediate instruction,
                              cpuIsRegOp = instruction .&. 0x7f == 0x33,
                              cpuPrefetchAddress = cpuPc + 4,
                              cpuPrefetchValid = False,
-                             cpuPrefetchCount = if cpuLocalMemory then 3 else 0
+                             cpuPrefetchCount = if cpuLocalMemory then 3 else 0,
+                             cpuPrefetchIssue = cpuLocalMemory,
+                             cpuNextValid = False
                            },
                          (if cpuLocalMemory then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
                        )
@@ -1399,8 +1428,39 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      -- to RAM, so this is exact; memoryIndex would share the
                      -- memory-address output's mux)
                      sameWord a b = (a `xor` b) .&. complement 3 == 0
+                     -- Decode-ahead for a plain ALU instruction whose next word
+                     -- is on the bus now and in the same 2 KiB block (so just
+                     -- as fetchable). All registered conditions: the read of
+                     -- pc + 8 goes out whether or not the next one may start
+                     -- early; the hazard check only sets cpuAhead.
+                     plainAlu = (execOpcode control == 0x13 || execOpcode control == 0x33
+                         || execOpcode control == 0x37 || execOpcode control == 0x17)
+                       && not (execShift control) && not (execMulDiv control)
+                     -- the next word is on the bus now (after a Decode), or
+                     -- already in the prefetch buffer (in a chain of these)
+                     onBus = cpuPrefetchCount == 1
+                     ahead = cpuLocalMemory && plainAlu && cpuPc .&. 0x7fc /= 0x7fc
+                       && (onBus || (cpuPrefetchCount == 0 && cpuPrefetchValid))
+                     nextWord = if onBus then memoryWord else cpuPrefetchWord
+                     nextOpcode = nextWord .&. 0x7f
+                     rd = instructionRd instruction
+                     readsRs1 = nextOpcode /= 0x37 && nextOpcode /= 0x17 && nextOpcode /= 0x6f
+                     readsRs2 = nextOpcode == 0x33 || nextOpcode == 0x23 || nextOpcode == 0x63
+                     hazard = rd /= 0
+                       && ((readsRs1 && instructionRs1 nextWord == rd) || (readsRs2 && instructionRs2 nextWord == rd))
+                     decodedAhead m
+                       | ahead = m
+                           { cpuNextInstruction = nextWord,
+                             cpuNextValid = True,
+                             cpuAhead = not hazard,
+                             cpuPrefetchAddress = cpuPc + 8,
+                             cpuPrefetchValid = False,
+                             cpuPrefetchCount = 3,
+                             cpuPrefetchIssue = True
+                           }
+                       | otherwise = m {cpuAhead = False}
                   in withoutRegister
-                       ( machineRx
+                       ( decodedAhead machineRx
                            { cpuPhase = if execShift control then ShiftFinish else Commit,
                              cpuComputed = cpuComputed {cAlu = result,
                                cTaken = branchTakenPrepared (execFunct3 control) cpuBranchCompare},
@@ -1412,7 +1472,8 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                              cpuTargetCount = if jump then 3 else cpuTargetCount
                            },
                          ( if memoryOp then memoryIndex (cAddress cpuComputed)
-                             else if jump then memoryIndex (cTarget cpuComputed) else 0,
+                             else if jump then memoryIndex (cTarget cpuComputed)
+                             else if ahead then memoryIndex (cpuPc + 8) else 0,
                            Nothing, Nothing )
                        )
                ShiftFinish ->
@@ -1425,7 +1486,29 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                  case mulDivStep (instructionFunct3 instruction) cpuA cpuB cpuMulDiv of
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
-               Commit -> commitInstruction machineRx txReady
+               Commit ->
+                 let (committed, write, output) = commitInstruction machineRx txReady
+                     retired = case committed of Machine {cpuPhase = Fetch} -> True; _ -> False
+                     next' = cpuNextInstruction
+                     early = cpuAhead && retired && case interruptCause machineRx of Nothing -> True; Just _ -> False
+                     handed
+                       -- the next instruction's Decode, here, and OperandSelect next
+                       | early = committed
+                           { cpuPhase = OperandSelect,
+                             cpuInstruction = next',
+                             cpuABanks = sharedABanks,
+                             cpuBBanks = sharedBBanks,
+                             cpuImm = decodeImmediate next',
+                             cpuIsRegOp = next' .&. 0x7f == 0x33,
+                             cpuFetchFault = False,
+                             cpuFetchSource = FromMemory,
+                             cpuAhead = False,
+                             cpuNextValid = False
+                           }
+                       -- the prefetch now holds pc + 8; Fetch takes the next word
+                       | cpuNextValid && retired = committed {cpuFetchSource = FromNext, cpuAhead = False}
+                       | otherwise = committed {cpuAhead = False}
+                  in (handed, write, output)
                -- The fast path's word arrives three cycles after ExecuteFinish
                -- issued it: a load aligns it, a sub-word store merges into it.
                MemoryWait -> next machineRx {cpuPhase = MemoryCapture}
@@ -1566,7 +1649,13 @@ commitInstruction committing _txReady =
                 (Just (memoryIndex address, cpuB machine)))
           | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus True
-        0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
+        -- FENCE is a no-op in this single-master core. FENCE.I fetches the
+        -- next instruction from memory, not from a prefetch buffer. The
+        -- other MISC-MEM encodings are reserved.
+        0x0f
+          | funct3 == 0 -> noWrite nextPc
+          | funct3 == 1 -> withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromMemory} Nothing)
+          | otherwise -> invalid
         0x73
           | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
           | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
@@ -1599,7 +1688,8 @@ misalignedMemory funct3 address
 -- a memory/UART request. The next stage owns the trap register write muxes.
 raiseException :: Machine -> Word32 -> Word32 -> (Machine, StepOutput)
 raiseException machine cause value =
-  ( machine {cpuPhase = Trap, cpuExceptionCause = cause, cpuExceptionValue = value},
+  ( machine {cpuPhase = Trap, cpuExceptionCause = cause, cpuExceptionValue = value,
+      cpuFetchSource = FromMemory, cpuAhead = False},
     (0, Nothing, Nothing)
   )
 
