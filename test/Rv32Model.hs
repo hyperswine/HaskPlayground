@@ -4,8 +4,11 @@
 -- from the RISC-V specification rather than from the core.
 --
 -- It models exactly what the differential programs use: RAM at
--- 0x8000_0000 (64 KiB), the 2 KiB boot ROM at 0 (loads only), synchronous traps into a direct-mode mtvec, and the
--- machine CSRs SimpleRisc implements (counters excluded). Where the
+-- 0x8000_0000 (64 KiB), the 2 KiB boot ROM at 0 (loads only), synchronous
+-- traps into a direct-mode mtvec, the CLINT's msip and the machine software
+-- interrupt it raises (taken at the next instruction boundary when MIE and
+-- mie.MSIE are set, as SimpleRisc does), MRET, and the machine CSRs
+-- SimpleRisc implements (counters excluded). Where the
 -- specification leaves a choice, the comments say which one SimpleRisc
 -- made: mtval holds the instruction for an illegal instruction and the pc
 -- for EBREAK; a misaligned address traps before an unmapped one.
@@ -40,7 +43,9 @@ data Model = Model
     -- | Instructions retired (an instruction that traps does not retire).
     mRetired :: Int,
     -- | The boot ROM's words, readable by loads at 0x0000_0000.
-    mRom :: IM.IntMap Word32
+    mRom :: IM.IntMap Word32,
+    -- | The CLINT's msip (0x0200_0000, word accesses).
+    mMsip :: Bool
   }
   deriving (Show, Eq)
 
@@ -53,7 +58,10 @@ ramWords = 16384
 initialModel :: [(Int, Word32)] -> IM.IntMap Word32 -> [Word32] -> Model
 initialModel regs mem rom =
   Model ramBase (IM.fromList [(r, v) | (r, v) <- regs, r /= 0]) mem 0 0 0 0 0 0 False False 0
-    (IM.fromList (zip [0 ..] rom))
+    (IM.fromList (zip [0 ..] rom)) False
+
+clintMsip :: Word32
+clintMsip = 0x0200_0000
 
 reg :: Model -> Word32 -> Word32
 reg m r = if r == 0 then 0 else IM.findWithDefault 0 (fromIntegral r) (mRegs m)
@@ -90,11 +98,13 @@ runModel fuel m
   | fuel <= 0 || mPc m < ramBase = m
   | otherwise = runModel (fuel - 1) (step m)
 
--- | One instruction.
+-- | One instruction, or the software interrupt before it.
 step :: Model -> Model
-step m = case ramIndex (mPc m) of
-  Nothing -> trap 1 (mPc m) m
-  Just i -> execute (readWord m i) m
+step m
+  | mMie m && testBit (mIe m) 3 && mMsip m = trap 0x8000_0003 0 m
+  | otherwise = case ramIndex (mPc m) of
+      Nothing -> trap 1 (mPc m) m
+      Just i -> execute (readWord m i) m
 
 execute :: Word32 -> Model -> Model
 execute ins m = case opcode of
@@ -135,6 +145,7 @@ execute ins m = case opcode of
       Just i -> Just (readWord m i)
       Nothing
         | address < 0x800 -> Just (IM.findWithDefault 0 (fromIntegral (address `shiftR` 2)) (mRom m))
+        | address == clintMsip && funct3 == 2 -> Just (if mMsip m then 1 else 0)
         | otherwise -> Nothing
     signed :: Word32 -> Int32
     signed = fromIntegral
@@ -189,6 +200,7 @@ execute ins m = case opcode of
             Nothing -> illegal
             Just n
               | address .&. (n - 1) /= 0 -> trap 6 address m
+              | address == clintMsip && n == 4 -> retire next (m {mMsip = testBit b 0})
               | otherwise -> case ramIndex address of
                   Nothing -> trap 7 address m
                   Just i ->
@@ -293,7 +305,7 @@ execute ins m = case opcode of
       0x341 -> Just (mEpc m)
       0x342 -> Just (mCause m)
       0x343 -> Just (mTval m)
-      0x344 -> Just 0 -- no interrupt sources are armed in these programs
+      0x344 -> Just (if mMsip m then 8 else 0) -- only msip is ever raised here
       x | x >= 0xf11 && x <= 0xf14 -> Just 0
       _ -> Nothing
 

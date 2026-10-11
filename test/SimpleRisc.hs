@@ -1193,16 +1193,46 @@ genInstruction i n = Gen.frequency
       [ (30, (* 4) <$> Gen.integral (Range.linearFrom 0 (-128) 127)),
         (1, Gen.integral (Range.linearFrom 0 (-512) 511)) ]
 
+-- | Body items: plain instructions, software interrupts and their enables,
+-- and bounded loops (x17 counts down; a backward BNE closes the loop).
+genItem :: Int -> Int -> Gen [Word32]
+genItem i n = Gen.frequency
+  [ (40, genInstruction i n),
+    (3, P.pure [sw 12 11 0]), -- raise msip
+    (2, P.pure [csrInstruction 0x300 6 0 8]), -- csrrsi mstatus, MIE
+    (2, P.pure [csrInstruction 0x304 6 0 8]), -- csrrsi mie, MSIE
+    (3, do
+        trips <- Gen.integral (Range.linear 1 4)
+        m <- Gen.integral (Range.linear 1 6)
+        inner <- P.concat <$> P.mapM (\k -> genInstruction (i + 1 + k) n) [0 .. m - 1]
+        let loopBody = P.take m inner
+            back = 0 - 4 * fromIntegral (P.length loopBody + 1)
+        P.pure ([addi 17 0 trips] P.++ loopBody P.++ [addi 17 17 (0 - 1), bne 17 0 back])) ]
+
+-- | Prologue, body, ECALL, and the trap handler:
+--   x11 = CLINT msip, x12 = 1, mtvec = handler
+--   handler: an interrupt clears msip, counts in x10 and returns (MRET);
+--   an exception saves mepc/mcause/mtval in x14-x16, clears mtvec and ends
+--   with ECALL into the ROM.
 genProgram :: Gen [Word32]
 genProgram = do
   n <- Gen.integral (Range.linear 1 64)
   let go i acc
         | i >= n = P.pure (P.reverse acc)
         | otherwise = do
-            ws <- genInstruction i n
+            ws <- genItem i n
             go (i + P.length ws) (P.reverse ws P.++ acc)
-  body <- go 0 []
-  P.pure (P.take n body P.++ [0x0000_0073])
+  body <- P.take n <$> go 0 []
+  enabled <- Gen.bool
+  let enables = if enabled then [csrInstruction 0x300 6 0 8, csrInstruction 0x304 6 0 8] else []
+      prologue = 5 + P.length enables
+      handlerAt = prologue + P.length body + 1
+      setup = [lui 11 0x02000, addi 12 0 1, (13 `shiftL` 7) .|. 0x17,
+               addi 13 13 (fromIntegral (4 * (handlerAt - 2))), csrInstruction 0x305 1 0 13] P.++ enables
+      handler = [csrInstruction 0x342 2 13 0, bType 16 0 13 5 0, sw 0 11 0, addi 10 10 1, 0x3020_0073,
+                 csrInstruction 0x341 2 14 0, csrInstruction 0x342 2 15 0, csrInstruction 0x343 2 16 0,
+                 csrInstruction 0x305 1 0 0, 0x0000_0073]
+  P.pure (setup P.++ body P.++ [0x0000_0073] P.++ handler)
 
 -- | Random straight-line and forward-branching RV32IM+Zicsr programs run on
 -- the core and on the reference model reach the same state: registers,
@@ -1230,13 +1260,17 @@ prop_core_matches_reference_model = withTests 300 . property $ do
       coreMemory = ramWords (simRam halted)
       touched = IntMap.keys (IntMap.union coreMemory modelMemory)
   annotateShow (Model.mPc model, Model.mCause model, Model.mRetired model)
-  classify "ends in ECALL" (Model.mCause model == 11)
-  classify "ends in an illegal instruction" (Model.mCause model == 2)
-  classify "ends in a misaligned access" (Model.mCause model `P.elem` [4, 6])
-  classify "ends in an access fault" (Model.mCause model `P.elem` [5, 7])
-  classify "ends in a misaligned jump" (Model.mCause model == 0)
+  -- the handler saves the first exception's mcause in x15
+  let firstCause = IntMap.findWithDefault 0 15 (Model.mRegs model)
+  classify "ends in ECALL" (firstCause == 11)
+  classify "ends in an illegal instruction" (firstCause == 2)
+  classify "ends in a misaligned access" (firstCause `P.elem` [4, 6])
+  classify "ends in an access fault" (firstCause `P.elem` [5, 7])
+  classify "ends in a misaligned jump" (firstCause == 0 && Model.mPc model == 0)
   classify "jumps into the ROM" (Model.mPc model /= 0)
-  classify "retires 10 or more" (Model.mRetired model >= 10)
+  classify "retires 30 or more" (Model.mRetired model >= 30)
+  classify "takes a software interrupt" (IntMap.findWithDefault 0 10 (Model.mRegs model) > 0)
+  classify "runs a loop" (P.any (\word -> word .&. 0x7f == 0x63 && testBit word 31) program)
   -- a branch landing on a jalr can skip its auipc and loop: not a test
   when (Model.mPc model >= Model.ramBase) discard
   assert (romAddress (cpuPc core))
@@ -1244,6 +1278,7 @@ prop_core_matches_reference_model = withTests 300 . property $ do
   (trapEpc trapRegs, trapCause trapRegs, trapValue trapRegs) === (w (Model.mEpc model), w (Model.mCause model), w (Model.mTval model))
   (trapMie trapRegs, trapMpie trapRegs) === (Model.mMie model, Model.mMpie model)
   (cpuScratch core, cpuInterruptEnable core) === (w (Model.mScratch model), w (Model.mIe model))
+  devMsip (cpuDevices core) === Model.mMsip model
   [IntMap.findWithDefault 0 k coreMemory | k <- touched] === [IntMap.findWithDefault 0 k modelMemory | k <- touched]
   counterValue (cpuInstret (simMachine drained)) === fromIntegral (Model.mRetired model)
 
