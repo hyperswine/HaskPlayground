@@ -23,6 +23,8 @@ import qualified Hedgehog.Range as Range
 import "haskplayground" SimpleRisc
 import qualified Prelude as P
 import qualified "haskplayground" SdramSimpleRisc as S
+import qualified Rv32Model as Model
+import Control.Monad (when)
 
 -- | The 64 KiB RAM as a sparse map: copying a 16384-entry vector on every
 -- write would make the simulations far too slow.  Unwritten words read as
@@ -1121,6 +1123,130 @@ prop_program_reaches_io_complex = withTests 1 . property $ do
   regs !! (4 :: Index 32) === 0
   spiSelect (ioSpi io) === True
 
+-- Differential testing against the reference model --------------------------
+
+rType, iType, sType, bType :: Word32 -> Word32 -> Word32 -> Word32 -> Word32 -> Word32
+rType f7 rs2 rs1 f3 rd = (f7 `shiftL` 25) .|. (rs2 `shiftL` 20) .|. (rs1 `shiftL` 15) .|. (f3 `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x33
+iType imm rs1 f3 rd op = ((imm .&. 0xfff) `shiftL` 20) .|. (rs1 `shiftL` 15) .|. (f3 `shiftL` 12) .|. (rd `shiftL` 7) .|. op
+sType imm rs2 rs1 f3 op = (((imm `shiftR` 5) .&. 0x7f) `shiftL` 25) .|. (rs2 `shiftL` 20) .|. (rs1 `shiftL` 15)
+  .|. (f3 `shiftL` 12) .|. ((imm .&. 0x1f) `shiftL` 7) .|. op
+bType imm rs2 rs1 f3 _ = (((imm `shiftR` 12) .&. 1) `shiftL` 31) .|. (((imm `shiftR` 5) .&. 0x3f) `shiftL` 25)
+  .|. (rs2 `shiftL` 20) .|. (rs1 `shiftL` 15) .|. (f3 `shiftL` 12) .|. (((imm `shiftR` 1) .&. 0xf) `shiftL` 8)
+  .|. (((imm `shiftR` 11) .&. 1) `shiftL` 7) .|. 0x63
+
+jType :: Word32 -> Word32 -> Word32
+jType imm rd = (((imm `shiftR` 20) .&. 1) `shiftL` 31) .|. (((imm `shiftR` 1) .&. 0x3ff) `shiftL` 21)
+  .|. (((imm `shiftR` 11) .&. 1) `shiftL` 20) .|. (((imm `shiftR` 12) .&. 0xff) `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x6f
+
+-- | The data pointer: x31 points into the middle of a 256-word data region.
+dataBase :: Word32
+dataBase = ramBase + 0x2000
+
+dataPointer :: Word32
+dataPointer = dataBase + 0x200
+
+-- | A few registers, so instructions depend on each other back to back.
+genReg :: Gen Word32
+genReg = Gen.frequency [(1, P.pure 0), (12, Gen.integral (Range.linear 1 8))]
+
+genValue :: Gen Word32
+genValue = Gen.frequency
+  [ (3, Gen.element [0, 1, 2, 0xffff_ffff, 0x8000_0000, 0x7fff_ffff, 0x8000_0001]),
+    (4, Gen.integral (Range.linear 0 64)),
+    (4, Gen.integral Range.linearBounded) ]
+
+-- | One instruction (or an auipc/jalr pair) at index i of a program whose
+-- ECALL is at index n; every control transfer goes forward.
+genInstruction :: Int -> Int -> Gen [Word32]
+genInstruction i n = Gen.frequency
+  [ (20, (\(f7, f3) rs2 rs1 rd -> [rType f7 rs2 rs1 f3 rd]) <$> Gen.element rOps <*> genReg <*> genReg <*> genReg),
+    (14, (\f3 imm rs1 rd -> [iType imm rs1 f3 rd 0x13]) <$> Gen.element [0, 2, 3, 4, 6, 7]
+          <*> Gen.integral (Range.linearFrom 0 (-2048) 2047) <*> genReg <*> genReg),
+    (5, (\(f7, f3) shamt rs1 rd -> [iType ((f7 `shiftL` 5) .|. shamt) rs1 f3 rd 0x13])
+          <$> Gen.element [(0, 1), (0, 5), (0x20, 5)] <*> Gen.integral (Range.linear 0 31) <*> genReg <*> genReg),
+    (4, (\op imm rd -> [(imm `shiftL` 12) .|. (rd `shiftL` 7) .|. op]) <$> Gen.element [0x37, 0x17]
+          <*> Gen.integral (Range.linear 0 0xfffff) <*> genReg),
+    (12, (\f3 off rd -> [iType off 31 f3 rd 0x03]) <$> Gen.element [0, 1, 2, 4, 5] <*> genOffset <*> genReg),
+    (12, (\f3 off rs2 -> [sType off rs2 31 f3 0x23]) <$> Gen.element [0, 1, 2] <*> genOffset <*> genReg),
+    (1, (\f3 rs1 rd -> [iType 0 rs1 f3 rd 0x03]) <$> Gen.element [0, 2] <*> genReg <*> genReg),
+    (8, (\f3 k odd rs1 rs2 -> [bType (4 * k + (if odd then 2 else 0)) rs2 rs1 f3 0])
+          <$> Gen.element [0, 1, 4, 5, 6, 7] <*> forward <*> Gen.frequency [(30, P.pure False), (1, P.pure True)]
+          <*> genReg <*> genReg),
+    (3, (\k rd -> [jType (4 * k) rd]) <$> forward <*> genReg),
+    (3, (\k odd rd -> [(9 `shiftL` 7) .|. 0x17, iType (4 * (k + 1) + (if odd then 2 else 0)) 9 0 rd 0x67])
+          <$> forward <*> Gen.frequency [(20, P.pure False), (1, P.pure True)] <*> genReg),
+    (6, (\csr f3 src rd -> [csrInstruction csr f3 rd src]) <$> Gen.element [0x340, 0x341, 0x342, 0x343, 0x304, 0x300]
+          <*> Gen.element [1, 2, 3, 5, 6, 7] <*> genReg <*> genReg),
+    (2, (\csr f3 rd -> [csrInstruction csr f3 rd 0]) <$> Gen.element [0x301, 0xf11, 0xf14, 0x310, 0x344]
+          <*> Gen.element [2, 3, 6, 7] <*> genReg),
+    (1, P.pure [0x0ff0_000f]),
+    -- rarer: each of these ends the program
+    (1, Gen.frequency
+      [ (1, (\csr rd -> [csrInstruction csr 1 rd 1]) <$> Gen.element [0x301, 0xf12, 0x7c0] <*> genReg),
+        (1, Gen.element [[0x0000_0073], [0x0010_0073]]),
+        (1, (: []) <$> Gen.integral Range.linearBounded) ]) ]
+  where
+    rOps = [(0, f) | f <- [0 .. 7]] P.++ [(0x20, 0), (0x20, 5)] P.++ [(1, f) | f <- [0 .. 7]]
+    remaining = fromIntegral (P.max 1 (n - i)) :: Word32
+    forward = Gen.integral (Range.linear 1 remaining)
+    genOffset = Gen.frequency
+      [ (30, (* 4) <$> Gen.integral (Range.linearFrom 0 (-128) 127)),
+        (1, Gen.integral (Range.linearFrom 0 (-512) 511)) ]
+
+genProgram :: Gen [Word32]
+genProgram = do
+  n <- Gen.integral (Range.linear 1 64)
+  let go i acc
+        | i >= n = P.pure (P.reverse acc)
+        | otherwise = do
+            ws <- genInstruction i n
+            go (i + P.length ws) (P.reverse ws P.++ acc)
+  body <- go 0 []
+  P.pure (P.take n body P.++ [0x0000_0073])
+
+-- | Random straight-line and forward-branching RV32IM+Zicsr programs run on
+-- the core and on the reference model reach the same state: registers,
+-- trap CSRs, scratch, mie, every RAM word either touched, and the
+-- instructions retired.
+prop_core_matches_reference_model :: Property
+prop_core_matches_reference_model = withTests 300 . property $ do
+  program <- forAll genProgram
+  values <- forAll (Gen.list (Range.singleton 8) genValue)
+  dataWords <- forAll (Gen.list (Range.singleton 256) (Gen.integral Range.linearBounded))
+  let regs = P.zip [1 .. 8] values P.++ [(31, dataPointer)]
+      dataStart = fromIntegral ((dataBase - ramBase) `shiftR` 2) :: Int
+      memory = IntMap.fromList (P.zip [0 ..] program P.++ P.zip [dataStart ..] dataWords)
+      model = Model.runModel 10000 (Model.initialModel [(fromIntegral r, fromIntegral v) | (r, v) <- regs] (IntMap.map fromIntegral memory) (P.map fromIntegral (toList bootRomContents)))
+      modelMemory = IntMap.map fromIntegral (Model.mMem model) :: IntMap.IntMap Word32
+      modelReg r = fromIntegral (IntMap.findWithDefault 0 r (Model.mRegs model)) :: Word32
+      w :: (Integral a) => a -> Word32
+      w = fromIntegral
+      (_, halted) = runUntilHalt 200000 (startSim (runningMachine [(fromIntegral r, v) | (r, v) <- regs]) (Ram 0 memory))
+      -- the last register write and retirement land a cycle or two after
+      -- the pc enters the ROM; five cycles cannot commit a ROM instruction
+      drained = runInputs halted (P.replicate 5 Nothing)
+      core = simMachine drained
+      trapRegs = cpuTrapRegisters core
+      coreMemory = ramWords (simRam halted)
+      touched = IntMap.keys (IntMap.union coreMemory modelMemory)
+  annotateShow (Model.mPc model, Model.mCause model, Model.mRetired model)
+  classify "ends in ECALL" (Model.mCause model == 11)
+  classify "ends in an illegal instruction" (Model.mCause model == 2)
+  classify "ends in a misaligned access" (Model.mCause model `P.elem` [4, 6])
+  classify "ends in an access fault" (Model.mCause model `P.elem` [5, 7])
+  classify "ends in a misaligned jump" (Model.mCause model == 0)
+  classify "jumps into the ROM" (Model.mPc model /= 0)
+  classify "retires 10 or more" (Model.mRetired model >= 10)
+  -- a branch landing on a jalr can skip its auipc and loop: not a test
+  when (Model.mPc model >= Model.ramBase) discard
+  assert (romAddress (cpuPc core))
+  [cpuRegs core !! (r :: Index 32) | r <- [1 .. 31]] === [modelReg r | r <- [1 .. 31 :: Int]]
+  (trapEpc trapRegs, trapCause trapRegs, trapValue trapRegs) === (w (Model.mEpc model), w (Model.mCause model), w (Model.mTval model))
+  (trapMie trapRegs, trapMpie trapRegs) === (Model.mMie model, Model.mMpie model)
+  (cpuScratch core, cpuInterruptEnable core) === (w (Model.mScratch model), w (Model.mIe model))
+  [IntMap.findWithDefault 0 k coreMemory | k <- touched] === [IntMap.findWithDefault 0 k modelMemory | k <- touched]
+  counterValue (cpuInstret (simMachine drained)) === fromIntegral (Model.mRetired model)
+
 -- Interpret the pipelined carry in the independent test reference only.
 counterValue :: Counter64 -> Unsigned 64
 counterValue Counter64 {..} =
@@ -1451,6 +1577,7 @@ simpleRiscGroup =
       ("FIFO is a bounded queue", prop_fifo_is_a_bounded_queue),
       ("A program reaches the I/O complex", prop_program_reaches_io_complex),
       ("SPI DMA moves blocks", prop_spi_dma_moves_blocks),
+      ("Core matches the reference model on random programs", prop_core_matches_reference_model),
       ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
       ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),
