@@ -396,6 +396,30 @@ prop_simple_instructions_take_six_cycles_with_fetch_overlap = property $ do
   cycles === 9 + 6 * (n - 1) + 7
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
+-- | RAM loads and stores skip the bus: the word read is issued at
+-- ExecuteFinish. As a first instruction (a full four-cycle fetch), a load
+-- takes 11 cycles, a word store 9, a byte store 11 (read, merge, write);
+-- then seven to trap on the zero word after it.
+prop_ram_accesses_take_the_fast_path :: Property
+prop_ram_accesses_take_the_fast_path = property $ do
+  value <- forAll (Gen.integral Range.linearBounded)
+  old <- forAll (Gen.integral Range.linearBounded)
+  let dataIndex = 0x40
+      run program = runUntilHalt 200 (startSim (runningMachine [(5, value), (31, ramBase + 4 * dataIndex)])
+        (Ram 0 (IntMap.fromList (P.zip [0 ..] program P.++ [(fromIntegral dataIndex, old)]))))
+      (loadCycles, loaded) = run [iType 1 31 0 6 0x03] -- lb x6, 1(x31)
+      (wordCycles, wordStored) = run [sw 5 31 0]
+      (byteCycles, byteStored) = run [sType 2 5 31 0 0x23] -- sb x5, 2(x31)
+      stored sim = ramRead (simRam sim) (fromIntegral dataIndex)
+  loadCycles === 11 + 7
+  cpuRegs (simMachine (runInputs loaded [Nothing])) !! (6 :: Index 32) === signExtendByte (old `shiftR` 8)
+  wordCycles === 9 + 7
+  stored wordStored === value
+  byteCycles === 11 + 7
+  stored byteStored === ((old .&. complement 0xff0000) .|. ((value .&. 0xff) `shiftL` 16))
+  where
+    signExtendByte w = let b = w .&. 0xff in if testBit b 7 then b .|. 0xffff_ff00 else b
+
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
   -- addi x1,x0,1; sw x5,8(x31) where x5 holds "addi x6,x0,42" and x31 the
@@ -1636,6 +1660,7 @@ simpleRiscGroup =
       ("Simple instructions take six cycles with fetch overlap", prop_simple_instructions_take_six_cycles_with_fetch_overlap),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
+      ("RAM accesses take the fast path", prop_ram_accesses_take_the_fast_path),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),
       ("Circuit programs and runs over UART", prop_circuit_programs_and_runs_over_uart),
       ("UART TX timing and byte latch", prop_uart_tx_is_cycle_exact_and_latches_byte),

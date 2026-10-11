@@ -131,10 +131,12 @@ data CpuPhase
   | CsrWrite
   | TrapReturn
   | BusWait
+  | MemoryWait
+  | MemoryCapture
   deriving (Generic, NFDataX, Show, Eq)
 
 -- One dedicated state bit per CPU stage.
-{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 16
+{-# ANN module (DataReprAnn $(liftQ [t| CpuPhase |]) 18
   [ ConstrRepr 'Fetch 1 1 [],
     ConstrRepr 'FetchDelay 2 2 [],
     ConstrRepr 'FetchCapture 4 4 [],
@@ -150,7 +152,9 @@ data CpuPhase
     ConstrRepr 'CsrWrite 4096 4096 [],
     ConstrRepr 'TrapReturn 8192 8192 [],
     ConstrRepr 'BusWait 16384 16384 [],
-    ConstrRepr 'ExecuteFinish 32768 32768 []
+    ConstrRepr 'ExecuteFinish 32768 32768 [],
+    ConstrRepr 'MemoryWait 65536 65536 [],
+    ConstrRepr 'MemoryCapture 131072 131072 []
   ]) #-}
 
 -- | Everything an instruction needs from the adders and the ALU, computed in
@@ -655,11 +659,16 @@ data Machine = Machine
     -- | The PC being fetched is outside the ROM and RAM; registered at Fetch
     -- and raised as an instruction access fault at Decode.
     cpuFetchFault :: Bool,
-    -- | Fetch overlap: Decode reads the word at pc + 4 while the CPU's RAM
+    -- | The CPU drives a local block RAM directly (the BRAM image), which
+    -- enables both overlaps below. Off on images whose memory is driven by
+    -- the CPU's phase (the SDRAM wrapper).
+    cpuLocalMemory :: Bool,
+    -- | Fast RAM access: ExecuteFinish found an aligned load or store to
+    -- RAM and issued the word's read; Commit skips the bus.
+    cpuFastMemory :: Bool,
+    -- Fetch overlap: Decode reads the word at pc + 4 while the CPU's RAM
     -- port is otherwise idle; it arrives three cycles later. A Fetch whose
-    -- pc matches a valid prefetch goes straight to Decode. Off on images
-    -- whose memory is driven by the CPU's phase (the SDRAM wrapper).
-    cpuPrefetchEnable :: Bool,
+    -- pc matches a valid prefetch goes straight to Decode.
     cpuPrefetchAddress :: Word32,
     cpuPrefetchWord :: Word32,
     cpuPrefetchValid :: Bool,
@@ -730,7 +739,8 @@ initialMachine =
       cpuPhase = Fetch,
       cpuInstruction = 0,
       cpuFetchFault = False,
-      cpuPrefetchEnable = True,
+      cpuLocalMemory = True,
+      cpuFastMemory = False,
       cpuPrefetchAddress = 0,
       cpuPrefetchWord = 0,
       cpuPrefetchValid = False,
@@ -1290,9 +1300,9 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                              cpuIsRegOp = instruction .&. 0x7f == 0x33,
                              cpuPrefetchAddress = cpuPc + 4,
                              cpuPrefetchValid = False,
-                             cpuPrefetchCount = if cpuPrefetchEnable then 3 else 0
+                             cpuPrefetchCount = if cpuLocalMemory then 3 else 0
                            },
-                         (if cpuPrefetchEnable then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
+                         (if cpuLocalMemory then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
                        )
                OperandSelect ->
                  let selectedB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
@@ -1320,11 +1330,20 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                        0x13 -> selectedAlu control cpuAluCandidates cpuAluCompare
                        0x33 -> selectedAlu control cpuAluCandidates cpuAluCompare
                        _ -> Nothing
-                  in next machineRx
-                       { cpuPhase = if execShift control then ShiftFinish else Commit,
-                         cpuComputed = cpuComputed {cAlu = result,
-                           cTaken = branchTakenPrepared (execFunct3 control) cpuBranchCompare}
-                       }
+                     -- loads and stores: the RAM port is free (the prefetch
+                     -- read went out at Decode), so read the word now
+                     memoryOp = execOpcode control == 0x03 || execOpcode control == 0x23
+                     -- the local RAM's 16-bit compare, not the whole map
+                     fast = cpuLocalMemory && memoryOp && validMemoryAddress (cAddress cpuComputed)
+                  in withoutRegister
+                       ( machineRx
+                           { cpuPhase = if execShift control then ShiftFinish else Commit,
+                             cpuComputed = cpuComputed {cAlu = result,
+                               cTaken = branchTakenPrepared (execFunct3 control) cpuBranchCompare},
+                             cpuFastMemory = fast
+                           },
+                         (if fast then memoryIndex (cAddress cpuComputed) else 0, Nothing, Nothing)
+                       )
                ShiftFinish ->
                  let control = cpuExecuteControl
                      result = fmap (\value -> shiftResult (execFunct3 control)
@@ -1336,6 +1355,18 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                    Left unit -> next machineRx {cpuMulDiv = unit}
                    Right result -> next machineRx {cpuPhase = Commit, cpuComputed = cpuComputed {cAlu = Just result}}
                Commit -> commitInstruction machineRx txReady
+               -- The fast path's word arrives three cycles after ExecuteFinish
+               -- issued it: a load aligns it, a sub-word store merges into it.
+               MemoryWait -> next machineRx {cpuPhase = MemoryCapture}
+               MemoryCapture
+                 | testBit instruction 5 ->
+                     withoutRegister (finishInstruction machineRx {cpuPc = cLink cpuComputed}
+                       (Just (memoryIndex address,
+                         storeValue (instructionFunct3 instruction) (resize address) cpuB memoryWord)))
+                 | otherwise ->
+                     withRegister (instructionRd instruction)
+                       (loadValue (instructionFunct3 instruction) (resize address) memoryWord)
+                       (finishInstruction machineRx {cpuPc = cLink cpuComputed} Nothing)
                Trap -> withoutRegister (enterTrap machineRx)
                CsrRead -> csrReadStep machineRx
                CsrWrite -> csrWriteStep machineRx
@@ -1445,10 +1476,15 @@ commitInstruction machine _txReady =
         0x03
           | not (validLoad funct3) -> invalid
           | misalignedMemory funct3 address -> fault 4 address
+          | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus False
         0x23
           | not (validStore funct3) -> invalid
           | misalignedMemory funct3 address -> fault 6 address
+          -- a word store writes at once; a byte or halfword waits for the word
+          | cpuFastMemory machine && funct3 == 2 ->
+              withoutRegister (finishInstruction machine {cpuPc = nextPc} (Just (memoryIndex address, cpuB machine)))
+          | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus True
         0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
         0x73
