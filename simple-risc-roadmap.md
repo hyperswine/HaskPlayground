@@ -8,7 +8,8 @@ five ways, and this plan addresses them in turn:
 1. The planned machine-mode slice is implemented: CSRs, synchronous traps,
    `mret`, and cycle/retirement counters work. With `mtvec` zero a trap now
    lands in the boot ROM (step 3).
-2. No timer or interrupts.
+2. Done (2026-10-11): a CLINT timer, a minimal PLIC with the UART as its
+   source, machine software/timer/external interrupts and a waiting WFI.
 3. Done (2026-10-11): the program loader, `DONE` reply and end-of-image halt
    moved out of the CPU into a boot ROM at address 0, and RAM moved to
    `0x8000_0000`. Ctrl-C and the finisher are resets into the ROM.
@@ -59,6 +60,19 @@ than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
 (no zero alias or `H` command); loader images remain limited to 64 KiB.
 Next: recover CPU clock/throughput.
 See [the measured results](boards/tangnano20k/sdram/README.md).
+
+## Implementation status (2026-10-11): step 2 complete
+
+The core has a CLINT at `0x0200_0000` (`mtime` counts core clocks), a
+one-source PLIC at `0x0c00_0000` (the UART is IRQ 10) and a UART control
+register at `0x1000_000c`. Interrupts are taken between instructions
+(external > software > timer), `mip` shows the pending bits, and WFI waits for
+`mie & mip`. Resets and the boot ROM's `R` quieten every source; `mtime` keeps
+counting. Both images pass their full board regressions plus
+`check_interrupts.py`: BRAM at 96 MHz (Gowin 96.474 MHz, +0.051 ns, placement
+mode 1) and SDRAM at 66 MHz (72.073 MHz, +1.277 ns). All 42 SimpleRisc
+properties pass. See
+[the step 2 report](boards/tangnano20k/INTERRUPTS-2026-10-11.md).
 
 ## Implementation status (2026-10-11): step 3 complete
 
@@ -179,12 +193,10 @@ panicking.
 - **A CLINT** at `0x0200_0000` with the SiFive/QEMU `virt` layout: `msip` at
   `+0x0`, `mtimecmp` at `+0x4000`, `mtime` at `+0xBFF8`. This is the layout
   FP-RISC's `machine/virt/clint.fpr` already uses.
-- **`mtime`** ticks at a fixed 1 MHz from a clock divider, so programs don't
-  depend on `FREQ_MHZ`. (The alternative is one tick per clock; that's an open
-  decision.)
+- **`mtime`** ticks once per core clock (decided; see open decision 2).
 - **UART interrupts.** A new UART control register enables "byte received"
-  and "transmitter ready" interrupts. The UART drives `MEIP` directly (no PLIC
-  for a single source).
+  and "transmitter ready" interrupts, routed through a minimal PLIC (decided;
+  see open decision 3).
 
 **Hardware**
 - **Pending bits.** `MTIP` = `mtime >= mtimecmp`, computed as a registered
@@ -339,9 +351,11 @@ accesses trapping from step 1.
 
 1. ~~**The memory map change in step 3**~~ Decided and done: RAM is at
    `0x8000_0000`, matching QEMU `virt`.
-2. **`mtime` rate:** a fixed 1 MHz (assumed here) or one tick per clock.
-3. **UART interrupts directly on `MEIP`** (assumed), or a minimal PLIC for
-   future devices.
+2. ~~**`mtime` rate**~~ Decided: one tick per core clock, like `mcycle`
+   (programs scale by the clock frequency).
+3. ~~**UART interrupts directly on `MEIP`**~~ Decided: a minimal PLIC at
+   `0x0c00_0000` (QEMU `virt` layout) with the UART as source 10, so later
+   devices slot in without changing software.
 4. **Step 5's ambition:** the full pipeline, or the fetch-overlap step first.
 
 ## Separate RV64/Base experiment, 2026-10-06

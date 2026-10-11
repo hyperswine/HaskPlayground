@@ -29,7 +29,7 @@ type Output = (Bool,Bool,Unsigned 21,R.Word32,Maybe R.Byte,Unsigned 9)
 step :: State -> Input -> (State,Output)
 step s@State{..} (readWord,ready,done,received,txReady,emergency,romWord) =
   let wireOutput byte=(phase==AwaitReady,requestWrite,requestAddress,requestData,byte,romAddress)
-      held = machine {R.cpuCycle=R.tickCounter True Nothing (R.cpuCycle machine)}
+      held = R.tickHeld machine
       -- Ctrl-C breaks a running program; in the boot ROM it is data.
       breaking = R.breakRequested machine emergency
       -- UART continues during memory waits. At most one byte fits the existing receiver.

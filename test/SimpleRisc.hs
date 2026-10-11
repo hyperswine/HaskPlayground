@@ -824,6 +824,173 @@ prop_mret_restores_status = property $ do
   trapMpie regs === True
   write === Nothing
 
+-- Interrupts ------------------------------------------------------------------
+
+-- | @lw rd, imm(rs1)@
+lw :: Word32 -> Word32 -> Word32 -> Word32
+lw rd rs1 imm = ((imm .&. 0xfff) `shiftL` 20) .|. (rs1 `shiftL` 15) .|. (0b010 `shiftL` 12) .|. (rd `shiftL` 7) .|. 0x03
+
+wfi :: Word32
+wfi = 0x1050_0073
+
+-- | mtip follows mtime >= mtimecmp two clocks later, across the 32-bit halves.
+prop_mtip_compares_64_bits :: Property
+prop_mtip_compares_64_bits = property $ do
+  let near = Gen.choice [Gen.element [0, 1, maxBound - 1, maxBound], Gen.enumBounded]
+  timeLo <- forAll near
+  timeHi <- forAll (Gen.integral (Range.linear 0 3))
+  compareLo <- forAll near
+  compareHi <- forAll (Gen.integral (Range.linear 0 3))
+  let devices = initialDevices {devMtime = Counter64 timeLo timeHi False,
+        devMtimecmpLo = compareLo, devMtimecmpHi = compareHi}
+      settled = stepDevices False False NoEffect (stepDevices False False NoEffect devices)
+      time = (resize timeHi `shiftL` 32) .|. resize timeLo :: Unsigned 64
+      deadline = (resize compareHi `shiftL` 32) .|. resize compareLo
+  devMtip settled === (time >= deadline)
+  -- Writes to read-only pending are ignored; msip follows bit 0.
+  devPlicPending (stepDevices False False (deviceWrite PlicPendingTarget 0x400) initialDevices) === False
+  devMsip (stepDevices False False (deviceWrite ClintMsipTarget 3) initialDevices) === True
+
+-- | A timer interrupt wakes WFI and enters the handler with mepc after WFI.
+prop_timer_interrupt_wakes_wfi :: Property
+prop_timer_interrupt_wakes_wfi = property $ do
+  deadline <- forAll (Gen.integral (Range.linear 200 600))
+  let program = [csrInstruction 0x305 1 0 1, sw 0 30 4, sw 7 30 0,
+                 csrInstruction 0x304 1 0 5, csrInstruction 0x300 6 0 8, wfi, 0, 0,
+                 csrInstruction 0x342 2 6 0, csrInstruction 0x341 2 8 0,
+                 csrInstruction 0x305 1 0 0, 0x00000073]
+      registers = [(1, ramBase + 32), (30, clintCompareLo), (5, 0x80), (7, deadline)]
+      (cycles, stopped) = runUntilHalt 2000 (startSim (runningMachine registers) (ramFromList program))
+      machine = simMachine stopped
+  assert (romAddress (cpuPc machine))
+  cpuRegs machine !! (6 :: Index 32) === 0x8000_0007
+  cpuRegs machine !! (8 :: Index 32) === ramBase + 24
+  -- The handler entered no earlier than the deadline and soon after it.
+  assert (fromIntegral cycles > deadline && fromIntegral cycles < deadline + 80)
+  assert (devMtip (cpuDevices machine))
+  -- The handler cleared MIE; mip shows the timer.
+  readCsr 0x344 machine === Just (0x80, False)
+
+-- | A received byte raises the PLIC's external interrupt; claim returns
+-- IRQ 10, and once the byte is read and the claim completed nothing remains.
+prop_uart_interrupt_claims_through_plic :: Property
+prop_uart_interrupt_claims_through_plic = property $ do
+  -- 0x03 is Ctrl-C, which resets a running program instead.
+  byte <- forAll (Gen.filter (/= 3) (Gen.integral Range.linearBounded))
+  delay <- forAll (Gen.integral (Range.linear 200 400))
+  let program = [csrInstruction 0x305 1 0 1, sw 5 30 0x28, sw 9 28 0, sw 5 26 0xc,
+                 csrInstruction 0x304 1 0 10, csrInstruction 0x300 6 0 8, wfi, 0,
+                 csrInstruction 0x342 2 6 0, lw 11 27 4, lw 12 26 8, sw 11 27 4,
+                 lw 13 27 4, csrInstruction 0x305 1 0 0, 0x00000073]
+      registers = [(1, ramBase + 32), (5, 1), (9, 0x400), (10, 0x800),
+                   (26, uartTxData), (27, plicThreshold), (28, plicEnable), (30, 0x0c00_0000)]
+      start = startSim (runningMachine registers) (ramFromList program)
+      waiting = runInputs start (P.replicate delay Nothing)
+      (_, stopped) = runUntilHalt 2000 (stepSim waiting (Just byte))
+      machine = simMachine stopped
+  assert (not (romAddress (cpuPc (simMachine waiting))))
+  cpuPhase (simMachine waiting) === Commit
+  assert (romAddress (cpuPc machine))
+  cpuRegs machine !! (6 :: Index 32) === 0x8000_000b
+  cpuRegs machine !! (11 :: Index 32) === uartIrq
+  cpuRegs machine !! (12 :: Index 32) === resize byte
+  cpuRegs machine !! (13 :: Index 32) === 0
+  let devices = cpuDevices machine
+  devPlicPending devices === False
+  devPlicClaimed devices === False
+  devMeip devices === False
+
+-- | Interrupts stay masked while MIE is clear, and a reset restores quiet
+-- devices while keeping time.
+prop_reset_quietens_devices :: Property
+prop_reset_quietens_devices = withTests 1 . property $ do
+  let loud = initialDevices {devMsip = True, devMtimecmpLo = 0, devMtimecmpHi = 0, devMtip = True,
+        devMtime = Counter64 77 1 False, devPlicEnable = True, devPlicPriority = 7, devUartRxInterrupt = True}
+      machine = (runningMachine []) {cpuDevices = loud, cpuInterruptEnable = 0x888}
+  interruptCause machine === Nothing
+  interruptCause machine {cpuTrapRegisters = initialTrapRegisters {trapMie = True}} === Just 0x8000_0003
+  let reset = cpuDevices (resetCpu machine)
+  reset === initialDevices {devMtime = Counter64 77 1 False}
+
+-- | A pending interrupt is taken at the first boundary after MRET sets MIE,
+-- and not at all while mie masks it.
+prop_mret_takes_pending_interrupt_at_once :: Property
+prop_mret_takes_pending_interrupt_at_once = property $ do
+  enabled <- forAll Gen.bool
+  let pending = initialDevices {devMtip = True, devHiEqual = True, devLoAtLeast = True,
+        devMtimecmpLo = 0, devMtimecmpHi = 0}
+      m = (runningMachine []) {cpuPhase = TrapReturn, cpuDevices = pending,
+            cpuInterruptEnable = if enabled then 0x80 else 0,
+            cpuTrapRegisters = initialTrapRegisters {trapEpc = ramBase + 0x40, trapMpie = True, trapVector = ramBase + 0x100}}
+      step machine = P.fst (machineStep machine (0, Nothing, True))
+      fetching = P.head (P.dropWhile ((/= Fetch) . cpuPhase) (P.iterate step m))
+      next = step fetching
+  cpuPc fetching === ramBase + 0x40
+  if enabled
+    then do
+      cpuPhase next === Trap
+      let entered = P.head (P.dropWhile ((== Trap) . cpuPhase) (P.iterate step next))
+      cpuPc entered === ramBase + 0x100
+      trapCause (cpuTrapRegisters entered) === 0x8000_0007
+      trapEpc (cpuTrapRegisters entered) === ramBase + 0x40
+      trapMie (cpuTrapRegisters entered) === False
+      trapMpie (cpuTrapRegisters entered) === True
+    else cpuPhase next === FetchDelay
+
+-- | A program that traps back into the ROM leaves its interrupt sources
+-- armed (that is not a reset); 'R' quietens them before the next program.
+prop_boot_rom_quietens_devices_before_run :: Property
+prop_boot_rom_quietens_devices_before_run = withTests 1 . property $ do
+  let (_, halted) = runUntilHalt 100 (startSim (runningMachine []) (ramFromList [0]))
+      loud = (cpuDevices (simMachine halted)) {devMsip = True, devMtimecmpLo = 0, devMtimecmpHi = 0,
+        devPlicPriority = 5, devPlicEnable = True, devPlicThreshold = 2, devPlicPending = True,
+        devPlicClaimed = True, devUartTxInterrupt = True}
+      armed = halted {simMachine = (simMachine halted) {cpuDevices = loud}}
+      done = runUntilDone 20000 armed
+      started = go (20000 :: Int) (runInputs done (hostBytes 400 [0x52]))
+      go fuel sim
+        | not (romAddress (cpuPc (simMachine sim))) || fuel == 0 = sim
+        | otherwise = go (fuel - 1) (stepSim sim Nothing)
+      devices = cpuDevices (simMachine started)
+  simTransmitted done === doneBytes
+  cpuPc (simMachine started) === ramBase
+  devices === initialDevices {devMtime = devMtime devices}
+
+-- | The SPI master exchanges one byte in mode 0: MOSI is stable at every
+-- rising edge (MSB first), MISO is sampled there, SCK idles low and MOSI
+-- high, and the bus reads DATA/STATUS/CTRL back.
+prop_spi_exchanges_bytes_in_mode_0 :: Property
+prop_spi_exchanges_bytes_in_mode_0 = property $ do
+  divider <- forAll (Gen.integral (Range.linear 0 6))
+  out <- forAll (Gen.integral Range.linearBounded)
+  incoming <- forAll (Gen.integral Range.linearBounded)
+  let configured = stepSpi Nothing (Just (1 .|. (divider `shiftL` 8))) initialSpi
+      started = stepSpi (Just out) Nothing configured
+      run spi rises sent fuel
+        | not (spiBusy spi) || fuel == (0 :: Int) = (spi, P.reverse sent, rises)
+        | otherwise =
+            let fed = spi {spiMiso = if testBit incoming (7 - rises) then high else low}
+                next = stepSpi Nothing Nothing fed
+                rose = not (spiSck spi) && spiSck next
+                (sck, mosi, _) = spiPins spi
+             in if rose
+                  then run next (rises + 1) ((mosi, sck) : sent) (fuel - 1)
+                  else run next rises sent (fuel - 1)
+      (done, sent, rises) = run started 0 [] 10000
+  spiSelect configured === True
+  spiDivider configured === fromIntegral divider
+  rises === 8
+  P.map P.fst sent === [if testBit out i then high else low | i <- [7, 6 .. 0]]
+  P.map P.snd sent === P.replicate 8 low
+  spiIn done === incoming
+  spiPins done === (low, high, low)
+  let devices = initialDevices {devSpi = done}
+  deviceRead SpiDataTarget devices === fromIntegral incoming
+  deviceRead SpiStatusTarget devices === 0
+  deviceRead SpiControlTarget devices === 1 .|. (fromIntegral divider `shiftL` 8)
+  decodeMemoryTarget spiData === SpiDataTarget
+  decodeMemoryTarget spiControl === SpiControlTarget
+
 -- Interpret the pipelined carry in the independent test reference only.
 counterValue :: Counter64 -> Unsigned 64
 counterValue Counter64 {..} =
@@ -871,7 +1038,7 @@ prop_counter_csr_reads_wait_for_carry = property $ do
 prop_counters_retire_precisely :: Property
 prop_counters_retire_precisely = withTests 1 $ property $ do
   let program = [addi 10 0 7, sw 2 1 0, 0x0000a183, 0x02210233,
-                 csrInstruction 0x340 2 5 0, 0x10500073, 0x00000073]
+                 csrInstruction 0x340 2 5 0, addi 0 0 0, 0x00000073]
       (cycles, stopped) = runUntilHalt 1000
         (startSim (runningMachine [(1, ramBase + 0x100), (2, 5)]) (ramFromList program))
       drained = runInputs stopped (P.replicate 5 Nothing)
@@ -915,8 +1082,8 @@ prop_registered_memory_decode = property $ do
   romOffset <- forAll (Gen.integral (Range.linear 0 2047))
   P.mapM_ (\(address, target) -> do
     let q = BusRequest address 2 False 0
-        (accepted, earlyResponse, earlyOutput, earlyEffect) = busStep initialBus (Just q) 0 True Nothing 0
-        (decoded, response, output, effect) = busStep accepted Nothing 0 True Nothing 0
+        (accepted, earlyResponse, earlyOutput, earlyEffect) = busStep initialBus (Just q) 0 True Nothing 0 initialDevices
+        (decoded, response, output, effect) = busStep accepted Nothing 0 True Nothing 0 initialDevices
     busPhase accepted === BusDecode
     busRequest accepted === q
     earlyResponse === Nothing
@@ -999,8 +1166,8 @@ prop_bus_completion_and_rx_race = property $ do
   P.mapM_ (\(width, expected) -> do
     let before = initialBus {busPhase = BusDispatch, busTarget = UartRxTarget,
           busRequest = BusRequest uartRxData width False 0}
-        (after, response, output, consume) = busStep before Nothing 0 True (Just byte) 0
-        (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte) 0
+        (after, response, output, consume) = busStep before Nothing 0 True (Just byte) 0 initialDevices
+        (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte) 0 initialDevices
     response === Just (BusResponse expected False False)
     output === (0, Nothing, Nothing)
     consume === ConsumeRx
@@ -1010,8 +1177,8 @@ prop_bus_completion_and_rx_race = property $ do
     ) [(0, resize byte .|. 0xffffff00), (4, resize byte), (1, resize byte), (2, resize byte)]
   let writing = initialBus {busPhase = BusRamWrite,
         busRequest = BusRequest address 2 True value, busValue = value}
-      (idle, ack, write, consume) = busStep writing Nothing 0 True Nothing 0
-      (_, repeatedAck, repeatedWrite, _) = busStep idle Nothing 0 True Nothing 0
+      (idle, ack, write, consume) = busStep writing Nothing 0 True Nothing 0 initialDevices
+      (_, repeatedAck, repeatedWrite, _) = busStep idle Nothing 0 True Nothing 0 initialDevices
   ack === Just (BusResponse 0 False False)
   write === (0, Just (memoryIndex address, value), Nothing)
   consume === NoEffect
@@ -1146,6 +1313,13 @@ simpleRiscGroup =
       ("CSR access rules and WARL masks", prop_csr_access_rules_and_masks),
       ("Guest trap handler resumes with mret", prop_guest_handler_resumes_with_mret),
       ("MRET restores machine status", prop_mret_restores_status),
+      ("mtip compares all 64 bits", prop_mtip_compares_64_bits),
+      ("Timer interrupt wakes WFI", prop_timer_interrupt_wakes_wfi),
+      ("UART interrupt claims through the PLIC", prop_uart_interrupt_claims_through_plic),
+      ("Reset quietens interrupt sources", prop_reset_quietens_devices),
+      ("SPI exchanges bytes in mode 0", prop_spi_exchanges_bytes_in_mode_0),
+      ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
+      ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),
       ("Unhandled traps return to the boot ROM; Ctrl-C resets", prop_unhandled_trap_returns_to_boot_rom),
       ("Faulting store never writes RAM", prop_faulting_store_never_writes_ram),

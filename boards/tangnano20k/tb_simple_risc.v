@@ -21,6 +21,7 @@ module tb_simple_risc;
       .reset(reset),
       .enable(1'b1),
       .uart_rx(rx),
+      .sd_miso(1'b1),
       .uart_tx(tx)
   );
 

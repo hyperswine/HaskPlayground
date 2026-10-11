@@ -15,8 +15,17 @@ module top #(
     input  wire clk_27m,  // on-board 27 MHz oscillator
     input  wire btn_s1,   // S1, active high: resets the core
     input  wire uart_rx,  // from the BL616 USB-UART
-    output wire uart_tx   // to the BL616 USB-UART
+    output wire uart_tx,  // to the BL616 USB-UART
+    // microSD slot in SPI mode: DAT0 is MISO, CMD is MOSI, DAT3 is CS
+    output wire sd_clk,
+    output wire sd_cmd,
+    input  wire sd_dat0,
+    output wire sd_dat1,
+    output wire sd_dat2,
+    output wire sd_dat3
 );
+  assign sd_dat1 = 1'b1;  // unused in SPI mode: held high
+  assign sd_dat2 = 1'b1;
   wire clk_core;
   wire pll_lock;
 
@@ -73,6 +82,10 @@ module top #(
       .reset(reset_sync[1]),
       .enable(1'b1),
       .uart_rx(uart_rx),
-      .uart_tx(uart_tx)
+      .sd_miso(sd_dat0),
+      .uart_tx(uart_tx),
+      .sd_sck(sd_clk),
+      .sd_mosi(sd_cmd),
+      .sd_cs(sd_dat3)
   );
 endmodule

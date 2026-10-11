@@ -25,10 +25,10 @@ def main():
         for run in range(3):
             send(fd, frame_bytes(image, b''))
             output = receive(fd, 5, done=True)
-            if not output.endswith(b'TRAPS HOLD 89\nDONE') or output.count(b'trap ') != 15:
+            if not output.endswith(b'TRAPS HOLD 90\nDONE') or output.count(b'trap ') != 15:
                 raise AssertionError(f'run {run + 1}: {output!r}')
             print(output.decode(), flush=True)
-            print(f'PASS run {run + 1}: 89 guest CSR/exception/mret checks', flush=True)
+            print(f'PASS run {run + 1}: 90 guest CSR/exception/mret checks', flush=True)
     finally:
         try:
             send(fd, b'\x03')

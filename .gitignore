@@ -15,3 +15,4 @@ file.txt
 top
 
 __pycache__/
+!boards/tangnano20k/bootrom/bootrom.hex

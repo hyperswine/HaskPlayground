@@ -11,3 +11,17 @@ IO_PORT "uart_rx" IO_TYPE=LVCMOS33 PULL_MODE=UP;
 
 IO_LOC "uart_tx" 69;
 IO_PORT "uart_tx" IO_TYPE=LVCMOS33 PULL_MODE=UP DRIVE=8;
+
+// microSD slot (Sipeed's TangNano-20K-example nestang.cst), used in SPI mode
+IO_LOC "sd_clk" 83;
+IO_PORT "sd_clk" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC "sd_cmd" 82;
+IO_PORT "sd_cmd" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC "sd_dat0" 84;
+IO_PORT "sd_dat0" IO_TYPE=LVCMOS33 PULL_MODE=UP;
+IO_LOC "sd_dat1" 85;
+IO_PORT "sd_dat1" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC "sd_dat2" 80;
+IO_PORT "sd_dat2" IO_TYPE=LVCMOS33 PULL_MODE=NONE;
+IO_LOC "sd_dat3" 81;
+IO_PORT "sd_dat3" IO_TYPE=LVCMOS33 PULL_MODE=NONE;

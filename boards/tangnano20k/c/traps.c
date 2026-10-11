@@ -74,7 +74,17 @@ int main(void) {
     FAULT("", "jal t2, 1b+2", 0, expected_pc+2);
     FAULT("", "bne sp, zero, 1b+2", 0, expected_pc+2);
     FAULT("li t1, 6", "jalr t2, 0(t1)", 0, 6);
-    __asm__ volatile("wfi"); /* no-op until roadmap step 2 */
+    /* WFI wakes on a pending interrupt enabled in mie even with MIE clear,
+     * and then no trap is taken. */
+    WRITE(mstatus, 0);
+    WRITE(mie, 0x80);
+    *(volatile uint32_t *)0x02004004u = 0; /* mtimecmp = 0: the timer is due */
+    *(volatile uint32_t *)0x02004000u = 0;
+    __asm__ volatile("wfi");
+    check(READ(mip) == 0x80);
+    *(volatile uint32_t *)0x02004004u = 0xffffffffu;
+    *(volatile uint32_t *)0x02004000u = 0xffffffffu;
+    WRITE(mie, 0);
     /* Leave the handler installed: crt0 must restore host DONE termination. */
     uart_puts(failures ? "TRAPS FAIL " : "TRAPS HOLD ");
     uart_put_uint(checks); uart_putc(10);

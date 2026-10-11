@@ -51,7 +51,10 @@ rate. Setting a non-standard speed through `tcsetattr` alone fails with
 | `0x0000_0000`–`0x0000_07ff` | boot ROM, 2 KiB (the reset vector; loads only, stores fault) |
 | `0x0010_0000` | finisher (QEMU `virt` style: `0x5555` = exit 0, `code << 16 \| 0x3333` = exit `code`) |
 | `0x0010_0004` | BOOTCAUSE, read-only; a read clears it: 0 none, 1 power-on, 2 Ctrl-C, 3 finisher exit |
-| `0x1000_0000`–`0x1000_0008` | UART: TXDATA, STATUS, RXDATA |
+| `0x0200_0000` | CLINT (QEMU `virt` layout): `msip` `+0x0`, `mtimecmp` `+0x4000`/`+0x4004`, `mtime` `+0xbff8`/`+0xbffc`; `mtime` counts core clocks |
+| `0x0c00_0000` | PLIC (QEMU `virt` layout) with one source, the UART as IRQ 10: priority `+0x28`, pending `+0x1000`, enable `+0x2000`, threshold `+0x20_0000`, claim/complete `+0x20_0004` |
+| `0x1000_0000`–`0x1000_000c` | UART: TXDATA, STATUS, RXDATA, CTRL (bit 0 receive interrupt, bit 1 transmit-ready interrupt) |
+| `0x1000_1000`–`0x1000_1008` | SPI master for the microSD slot: DATA, STATUS (bit 0 busy), CTRL (bit 0 chip select, bits 8-15 half SCK period in clocks minus one); `c/sd.c` is the SPI-mode card driver |
 | `0x8000_0000`–`0x8000_ffff` | RAM, 64 KiB (8 MiB on the SDRAM image) |
 
 Every other address raises an access fault, and fetching outside the ROM and
@@ -99,7 +102,13 @@ cannot intercept the finisher. A program that ends with `ecall` and no trap
 handler also ends with "DONE", through the ROM.
 
 SimpleRisc supports the six Zicsr instructions, direct-mode machine traps,
-`mret`, and `wfi` as a no-op until interrupts are implemented. The trap/status,
+`mret`, machine software, timer and external interrupts (taken between
+instructions; external before software before timer), and a `wfi` that waits
+until `mie & mip` is nonzero. The CLINT/PLIC/UART-control registers are
+word-only. The boot ROM quietens all interrupt sources before each `R`, and
+every reset does the same, but `mtime` keeps counting. `check_interrupts.py`
+checks a WFI-driven periodic timer, priorities, the PLIC claim/complete
+protocol and an interrupt-driven UART echo. The trap/status,
 scratch and identification CSRs are available, together with writable 64-bit
 `mcycle`/`minstret` counters and their read-only `cycle`/`instret` aliases.
 Unknown CSRs and writes to read-only CSRs trap. See

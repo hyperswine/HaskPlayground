@@ -4,6 +4,8 @@
  *                       transmitter is free)
  *   0x1000_0004 STATUS  bit 0: transmitter ready, bit 1: received byte waiting
  *   0x1000_0008 RXDATA  load: the received byte, consuming it
+ *   0x1000_000C CTRL    bit 0: interrupt while a byte is waiting, bit 1: while
+ *                       the transmitter is ready (PLIC source 10)
  *
  * The receiver holds one byte; a second byte arriving before the first is read
  * is dropped.  Byte 0x03 (Ctrl-C) never reaches a program: it resets the CPU.
@@ -15,6 +17,7 @@
 #define UART_TXDATA ((volatile uint32_t *)0x10000000u)
 #define UART_STATUS ((volatile uint32_t *)0x10000004u)
 #define UART_RXDATA ((volatile uint32_t *)0x10000008u)
+#define UART_CTRL ((volatile uint32_t *)0x1000000cu)
 #define UART_TX_READY 0x1u
 #define UART_RX_READY 0x2u
 

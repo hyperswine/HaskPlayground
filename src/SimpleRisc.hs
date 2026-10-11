@@ -23,9 +23,21 @@
 --     code << 16 | 0x3333 = exit code)
 --   * 0x0010_0004: BOOTCAUSE, read-only; a read clears it (0 none, 1 power-on,
 --     2 Ctrl-C, 3 finisher exit)
+--   * 0x0200_0000: CLINT (QEMU virt layout): msip +0x0, mtimecmp +0x4000/4,
+--     mtime +0xbff8/c; mtime counts core clocks
+--   * 0x0c00_0000: PLIC (QEMU virt layout, one source: the UART, IRQ 10):
+--     priority +0x28, pending +0x1000, enable +0x2000, threshold +0x20_0000,
+--     claim/complete +0x20_0004
 --   * 0x1000_0000: UART TXDATA (write the low byte)
 --   * 0x1000_0004: UART STATUS (bit 0 = TX ready, bit 1 = RX byte ready)
 --   * 0x1000_0008: UART RXDATA (read low byte, consuming it)
+--   * 0x1000_000c: UART CTRL (bit 0 = interrupt while a byte is waiting,
+--     bit 1 = interrupt while the transmitter is ready)
+--   * 0x1000_1000: SPI DATA (write: send the low byte while receiving one;
+--     read: the last byte received)
+--   * 0x1000_1004: SPI STATUS (bit 0 = a transfer is in progress)
+--   * 0x1000_1008: SPI CTRL (bit 0 = chip select asserted; bits 8-15 = half
+--     an SCK period in clocks, minus one)
 --   * 0x8000_0000 - 0x8000_ffff: 64 KiB RAM
 --
 -- Everything else raises an access fault.  The physical UART is 8-N-1 at
@@ -43,8 +55,10 @@
 --
 -- ECALL, EBREAK, illegal instructions, misaligned and faulting accesses enter
 -- the machine trap handler.  CSR instructions and MRET support direct-mode
--- handlers and split 64-bit cycle/retirement counters.  Interrupt sources are
--- still pending.
+-- handlers and split 64-bit cycle/retirement counters.  Machine software
+-- (msip), timer (CLINT) and external (PLIC) interrupts are taken between
+-- instructions, in that priority order external > software > timer, and WFI
+-- waits for one.
 --
 -- The M extension (MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU) runs on an
 -- iterative unit: 68 unit cycles per nonzero-divisor instruction, with each
@@ -232,8 +246,104 @@ tickCounter increment write counter =
           carriedHi
           (increment && lo == maxBound)
 
+-- | Interrupt-source state: the CLINT, the PLIC with its one source (the
+-- UART, IRQ 10) and the UART's interrupt enables. Comparisons and the
+-- pending bits are registered, so no wide compare or OR feeds the CPU.
+data Devices = Devices
+  { devMsip :: Bool,
+    devMtimecmpLo :: Word32,
+    devMtimecmpHi :: Word32,
+    -- | Counts every core clock; a split counter like mcycle.
+    devMtime :: Counter64,
+    -- | mtime >= mtimecmp in two registered stages: the halves compared,
+    -- then combined.
+    devHiAbove :: Bool,
+    devHiEqual :: Bool,
+    devLoAtLeast :: Bool,
+    devMtip :: Bool,
+    devPlicPriority :: Unsigned 3,
+    devPlicEnable :: Bool,
+    devPlicThreshold :: Unsigned 3,
+    -- | The gateway forwarded a request that has not been claimed yet.
+    devPlicPending :: Bool,
+    -- | Claimed and not yet completed: the gateway holds new requests.
+    devPlicClaimed :: Bool,
+    devMeip :: Bool,
+    devUartRxInterrupt :: Bool,
+    devUartTxInterrupt :: Bool,
+    devSpi :: Spi
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
+-- | An SPI master, mode 0 (SCK idle low, sample on the rising edge, shift
+-- on the falling edge), for the microSD slot. Every pin is a register.
+data Spi = Spi
+  { spiSelect :: Bool,
+    -- | Half an SCK period in clocks, minus one.
+    spiDivider :: Unsigned 8,
+    spiCount :: Unsigned 8,
+    -- | Rising edges still to come in this byte; 0 when idle.
+    spiBits :: Unsigned 4,
+    spiSck :: Bool,
+    -- | MSB first; ones shift in, so MOSI idles high.
+    spiOut :: Byte,
+    spiIn :: Byte,
+    -- | MISO, already synchronised to the core clock.
+    spiMiso :: Bit
+  }
+  deriving (Generic, NFDataX, Show, Eq)
+
+-- | Deselected, idle, and slow enough (about 190 kHz at 96 MHz) for a card's
+-- identification phase.
+initialSpi :: Spi
+initialSpi = Spi False 255 0 0 False 0xff 0xff high
+
+spiBusy :: Spi -> Bool
+spiBusy spi = spiBits spi /= 0 || spiSck spi
+
+-- | (SCK, MOSI, chip select active low).
+spiPins :: Spi -> (Bit, Bit, Bit)
+spiPins spi = (boolToBit (spiSck spi), msb (spiOut spi), boolToBit (not (spiSelect spi)))
+
+-- | One clock of the SPI master; @start@ is a byte written to DATA.
+stepSpi :: Maybe Byte -> Maybe Word32 -> Spi -> Spi
+stepSpi start control spi
+  | Just c <- control, not (spiBusy spi) =
+      spi {spiSelect = testBit c 0, spiDivider = resize (c `shiftR` 8)}
+  | Just byte <- start, not (spiBusy spi) =
+      spi {spiOut = byte, spiBits = 8, spiCount = spiDivider spi, spiSck = False}
+  | not (spiBusy spi) = spi
+  | spiCount spi /= 0 = spi {spiCount = spiCount spi - 1}
+  | not (spiSck spi) =
+      spi {spiSck = True, spiCount = spiDivider spi, spiBits = spiBits spi - 1,
+        spiIn = (spiIn spi `shiftL` 1) .|. (if spiMiso spi == high then 1 else 0)}
+  | otherwise =
+      spi {spiSck = False, spiCount = spiDivider spi, spiOut = (spiOut spi `shiftL` 1) .|. 1}
+
+initialDevices :: Devices
+initialDevices = Devices False maxBound maxBound initialCounter False False False False
+  0 False 0 False False False False False initialSpi
+
+-- | The UART's interrupt number on the PLIC, as on QEMU virt.
+uartIrq :: Word32
+uartIrq = 10
+
+-- | The PLIC would grant a claim now.
+plicClaimable :: Devices -> Bool
+plicClaimable devices = devPlicPending devices && devPlicEnable devices
+  && devPlicPriority devices > devPlicThreshold devices
+
+-- | mip as software reads it.
+pendingInterrupts :: Devices -> Word32
+pendingInterrupts devices =
+  (if devMeip devices then 0x800 else 0) .|. (if devMtip devices then 0x80 else 0)
+    .|. (if devMsip devices then 0x8 else 0)
+
 -- Registered memory target; wide address comparisons stay out of Commit.
-data MemoryTarget = RamTarget | RomTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | BootCauseTarget | UnmappedTarget
+data MemoryTarget = RamTarget | RomTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | BootCauseTarget
+  | ClintMsipTarget | ClintCompareLoTarget | ClintCompareHiTarget | ClintTimeLoTarget | ClintTimeHiTarget
+  | PlicPriorityTarget | PlicPendingTarget | PlicEnableTarget | PlicThresholdTarget | PlicClaimTarget
+  | UartControlTarget | SpiDataTarget | SpiStatusTarget | SpiControlTarget | UnmappedTarget
   deriving (Generic, NFDataX, Show, Eq)
 
 -- Single outstanding data transaction. The CPU registers the request and
@@ -282,17 +392,21 @@ initialBus = BusState BusIdle (BusRequest 0 0 False 0) UnmappedTarget 0 0
 
 -- | The side effect of a completed device read.
 data BusEffect = NoEffect | ConsumeRx | ConsumeBootCause
+  | -- | A word written to a device register.
+    DeviceWrite MemoryTarget Word32
+  | -- | A PLIC claim that granted the UART's interrupt.
+    ClaimInterrupt
   deriving (Generic, NFDataX, Show, Eq)
 
 -- Response and effects are pulses. A stalled TX emits neither; a completed
 -- transfer emits exactly one response and, where appropriate, one side effect.
-busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 ->
+busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 -> Devices ->
   (BusState, Maybe BusResponse, StepOutput, BusEffect)
 busStep = busStepWith decodeMemoryTarget
 
-busStepWith :: (Word32 -> MemoryTarget) -> BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 ->
+busStepWith :: (Word32 -> MemoryTarget) -> BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 -> Devices ->
   (BusState, Maybe BusResponse, StepOutput, BusEffect)
-busStepWith decodeTarget state request memoryWord txReady rx bootCause =
+busStepWith decodeTarget state request memoryWord txReady rx bootCause devices =
   let q = busRequest state
       width = busWidth q
       address = busAddress q
@@ -336,6 +450,15 @@ busStepWith decodeTarget state request memoryWord txReady rx bootCause =
                 | busWrite q -> respond 0 True False NoEffect
                 | otherwise -> respond (loadValue width 0 (resize bootCause)) False False ConsumeBootCause
               UnmappedTarget -> respond 0 True False NoEffect
+              -- CLINT, PLIC and UART control registers are word-only.
+              target
+                | width /= 2 -> respond 0 True False NoEffect
+                | busWrite q -> respond 0 False False (deviceWrite target (busData q))
+                | target == PlicClaimTarget ->
+                    if plicClaimable devices
+                      then respond uartIrq False False ClaimInterrupt
+                      else respond 0 False False NoEffect
+                | otherwise -> respond (deviceRead target devices) False False NoEffect
         BusLoadIssue -> (state {busPhase = BusLoadDelay}, Nothing, (memoryIndex address, Nothing, Nothing), NoEffect)
         BusLoadDelay -> advance BusLoadCapture
         BusLoadCapture -> advance BusLoadWait
@@ -355,6 +478,78 @@ busStepWith decodeTarget state request memoryWord txReady rx bootCause =
           | txReady -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
               (0, Nothing, Just (resize (busData q))), NoEffect)
           | otherwise -> advance BusTx
+
+-- | A device register's value; only for the CLINT/PLIC/UART-control targets.
+deviceRead :: MemoryTarget -> Devices -> Word32
+deviceRead target devices = case target of
+  ClintMsipTarget -> boolWord (devMsip devices)
+  ClintCompareLoTarget -> devMtimecmpLo devices
+  ClintCompareHiTarget -> devMtimecmpHi devices
+  ClintTimeLoTarget -> counterLo (devMtime devices)
+  ClintTimeHiTarget -> counterHi (devMtime devices)
+  PlicPriorityTarget -> resize (devPlicPriority devices)
+  PlicPendingTarget -> if devPlicPending devices then 1 `shiftL` 10 else 0
+  PlicEnableTarget -> if devPlicEnable devices then 1 `shiftL` 10 else 0
+  PlicThresholdTarget -> resize (devPlicThreshold devices)
+  UartControlTarget -> (if devUartRxInterrupt devices then 1 else 0) .|. (if devUartTxInterrupt devices then 2 else 0)
+  SpiDataTarget -> resize (spiIn (devSpi devices))
+  SpiStatusTarget -> boolWord (spiBusy (devSpi devices))
+  SpiControlTarget -> boolWord (spiSelect (devSpi devices)) .|. (resize (spiDivider (devSpi devices)) `shiftL` 8)
+  _ -> 0
+
+-- | Writes to read-only device registers (PLIC pending) are ignored.
+deviceWrite :: MemoryTarget -> Word32 -> BusEffect
+deviceWrite PlicPendingTarget _ = NoEffect
+deviceWrite target value = DeviceWrite target value
+
+-- | One clock of the interrupt sources. @rxWaiting@ and @txReady@ are the
+-- UART's levels; @effect@ is this clock's completed bus access.
+stepDevices :: Bool -> Bool -> BusEffect -> Devices -> Devices
+stepDevices rxWaiting txReady effect devices =
+  let Devices {..} = devices
+      write target = case effect of
+        DeviceWrite t value | t == target -> Just value
+        _ -> Nothing
+      timeWrite = case effect of
+        DeviceWrite ClintTimeLoTarget value -> Just (False, value)
+        DeviceWrite ClintTimeHiTarget value -> Just (True, value)
+        _ -> Nothing
+      claimed = effect == ClaimInterrupt
+      completed = write PlicClaimTarget == Just uartIrq
+      level = (devUartRxInterrupt && rxWaiting) || (devUartTxInterrupt && txReady)
+      timeLo = counterLo devMtime
+      timeHi = counterHi devMtime
+   in devices
+        { devMsip = maybe devMsip (`testBit` 0) (write ClintMsipTarget),
+          devMtimecmpLo = maybe devMtimecmpLo P.id (write ClintCompareLoTarget),
+          devMtimecmpHi = maybe devMtimecmpHi P.id (write ClintCompareHiTarget),
+          devMtime = tickCounter True timeWrite devMtime,
+          devHiAbove = timeHi > devMtimecmpHi,
+          devHiEqual = timeHi == devMtimecmpHi,
+          devLoAtLeast = timeLo >= devMtimecmpLo,
+          devMtip = devHiAbove || (devHiEqual && devLoAtLeast),
+          devPlicPriority = maybe devPlicPriority resize (write PlicPriorityTarget),
+          devPlicEnable = maybe devPlicEnable (`testBit` 10) (write PlicEnableTarget),
+          devPlicThreshold = maybe devPlicThreshold resize (write PlicThresholdTarget),
+          devPlicPending = (devPlicPending || (level && not devPlicClaimed)) && not claimed,
+          devPlicClaimed = (devPlicClaimed || claimed) && not completed,
+          devMeip = plicClaimable devices,
+          devUartRxInterrupt = maybe devUartRxInterrupt (`testBit` 0) (write UartControlTarget),
+          devUartTxInterrupt = maybe devUartTxInterrupt (`testBit` 1) (write UartControlTarget),
+          devSpi = stepSpi (resize <$> write SpiDataTarget) (write SpiControlTarget) devSpi
+        }
+
+-- | The interrupt to take, highest priority first (external, software,
+-- timer), if any is pending, enabled in mie and MIE is set.
+interruptCause :: Machine -> Maybe Word32
+interruptCause machine
+  | not (trapMie (cpuTrapRegisters machine)) = Nothing
+  | testBit ready 11 = Just 0x8000_000b
+  | testBit ready 3 = Just 0x8000_0003
+  | testBit ready 7 = Just 0x8000_0007
+  | otherwise = Nothing
+  where
+    ready = cpuInterruptEnable machine .&. pendingInterrupts (cpuDevices machine)
 
 -- Decode and operand selection are registered before the ALU carry chains;
 -- the result mux runs in a separate stage after all candidates are registered.
@@ -467,7 +662,7 @@ data Machine = Machine
     cpuExceptionValue :: Word32,
     cpuScratch :: Word32,
     cpuInterruptEnable :: Word32,
-    cpuCsrSelection :: Vec 13 Bool,
+    cpuCsrSelection :: Vec 14 Bool,
     cpuCsrReadOnly :: Bool,
     cpuCsrValue :: Word32,
     cpuCsrSource :: Word32,
@@ -483,6 +678,9 @@ data Machine = Machine
     rxHolding :: Maybe Byte,
     -- | BOOTCAUSE: why the CPU last reset into the boot ROM.
     bootCause :: Unsigned 2,
+    cpuDevices :: Devices,
+    -- | mie & mip is nonzero: WFI may finish.
+    cpuWake :: Bool,
     -- | Zero all registers on the next cycle.  Commands and resets set this
     -- rather than clearing the 1024 register bits directly, so the clear is
     -- driven straight from one flip-flop.
@@ -537,6 +735,8 @@ initialMachine =
       cpuBusResponse = Nothing,
       rxHolding = Nothing,
       bootCause = causePowerOn,
+      cpuDevices = initialDevices,
+      cpuWake = False,
       clearRegisters = False
     }
 
@@ -615,8 +815,8 @@ txStep (TxStop n) _
   topEntity
   ( Synthesize
       { t_name = "simple_risc",
-        t_inputs = [PortName "clk", PortName "reset", PortName "enable", PortName "uart_rx"],
-        t_output = PortName "uart_tx"
+        t_inputs = [PortName "clk", PortName "reset", PortName "enable", PortName "uart_rx", PortName "sd_miso"],
+        t_output = PortProduct "" [PortName "uart_tx", PortName "sd_sck", PortName "sd_mosi", PortName "sd_cs"]
       }
   )
   #-}
@@ -628,11 +828,17 @@ topEntity ::
   "RESET" ::: Reset XilinxSystem ->
   "ENABLE" ::: Enable XilinxSystem ->
   "UART_RX" ::: Signal XilinxSystem Bit ->
-  "UART_TX" ::: Signal XilinxSystem Bit
-topEntity clk rst en serialRx = withClockResetEnable clk rst en (simpleRisc serialRx)
+  "SD_MISO" ::: Signal XilinxSystem Bit ->
+  Signal XilinxSystem (Bit, Bit, Bit, Bit)
+topEntity clk rst en serialRx sdMiso = withClockResetEnable clk rst en (simpleRiscSd serialRx sdMiso)
 
+-- | The core without the SD slot (tests and the iverilog testbenches).
 simpleRisc :: forall dom. (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
-simpleRisc serialRx = serialTx
+simpleRisc serialRx = (\(tx, _, _, _) -> tx) <$> simpleRiscSd serialRx (pure high)
+
+-- | The core with the SPI master's pins: (UART TX, SCK, MOSI, CS active low).
+simpleRiscSd :: forall dom. (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit -> Signal dom (Bit, Bit, Bit, Bit)
+simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
   where
     -- Two flip-flops resynchronise the asynchronous RX pin before sampling, and
     -- the received byte is registered before it reaches the CPU: a Ctrl-C
@@ -647,7 +853,14 @@ simpleRisc serialRx = serialTx
     txReady = (\ready pending -> ready && case pending of Nothing -> True; Just _ -> False) <$> uartReady <*> txRequest
 
     machineInput = bundle (memoryOut, received, txReady, emergencyReset)
-    machineOutput = mealy machineStepDecoded initialMachine machineInput
+    -- MISO is asynchronous: two flip-flops, then into the SPI state.
+    miso = register high (register high sdMiso)
+    machineState = register initialMachine (fst <$> stepped)
+    stepped = withMiso <$> machineState <*> machineInput <*> miso
+    withMiso m input bit =
+      machineStepDecoded m {cpuDevices = (cpuDevices m) {devSpi = (devSpi (cpuDevices m)) {spiMiso = bit}}} input
+    machineOutput = snd <$> stepped
+    (sck, mosi, cs) = unbundle (spiPins . devSpi . cpuDevices <$> machineState)
     (memoryAddressNow, memoryWriteNow, txRequestNow) = unbundle machineOutput
     -- Real BRAM setup time is worse than the Gowin timing model. Register all
     -- commands at its boundary; issue/delay/wait stages account for latency.
@@ -693,7 +906,7 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
       cancelled = emergencyReset
       (bus', response, busOutput, effect) = if cancelled
         then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), NoEffect)
-        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine)
+        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine) (cpuDevices machine)
       busActive = case busPhase (systemBus machine) of
         BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
         _ -> True
@@ -709,9 +922,23 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
           bootCause = if effect == ConsumeBootCause then causeNone else bootCause machine',
           cpuCycle = tickCounter True (counterWrite 0xb00 0xb80) (cpuCycle machine),
           cpuInstret = tickCounter (cpuCountRetirement machine)
-            (counterWrite 0xb02 0xb82) (cpuInstret machine)
+            (counterWrite 0xb02 0xb82) (cpuInstret machine),
+          -- Devices step from their registers; a reset this cycle quietens
+          -- them after the time and compare logic, keeping time.
+          cpuDevices = if clearRegisters machine' then initialDevices {devMtime = devMtime devices'} else devices',
+          -- From registers, a cycle behind: WFI may finish a cycle late.
+          cpuWake = cpuInterruptEnable machine .&. pendingInterrupts (cpuDevices machine) /= 0
         }
+      devices' = stepDevices (case rxHolding machine of Nothing -> False; Just _ -> True) txReady effect (cpuDevices machine)
    in (if clearRegisters machine then counted {cpuRegs = repeat 0} else counted, output)
+
+-- | Keep time while an external memory holds the core (the SDRAM wrapper).
+tickHeld :: Machine -> Machine
+tickHeld machine =
+  machine
+    { cpuCycle = tickCounter True Nothing (cpuCycle machine),
+      cpuDevices = (cpuDevices machine) {devMtime = tickCounter True Nothing (devMtime (cpuDevices machine))}
+    }
 
 -- | Ctrl-C: reset the CPU into the boot ROM with cause BREAK.
 resetCpu :: Machine -> Machine
@@ -742,7 +969,9 @@ systemReset cause machine =
       systemBus = (systemBus machine) {busPhase = BusIdle},
       cpuBusRequest = Nothing,
       cpuBusResponse = Nothing,
-      rxHolding = Nothing
+      rxHolding = Nothing,
+      cpuDevices = initialDevices {devMtime = devMtime (cpuDevices machine)},
+      cpuWake = False
     }
 
 -- CPU ------------------------------------------------------------------------
@@ -782,12 +1011,18 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
            in case cpuPhase of
                -- Only the ROM and RAM hold instructions. The check is
                -- registered here and raised as an access fault at Decode.
-               Fetch ->
-                 withoutRegister
-                   ( machineRx {cpuPhase = FetchDelay, cpuFetchFault = not (fetchable (decodeTarget cpuPc)),
-                       cpuInRom = romAddress cpuPc},
-                     (memoryIndex cpuPc, Nothing, Nothing)
-                   )
+               -- Interrupts are taken between instructions: mepc is the
+               -- instruction about to be fetched.
+               -- Every input is a register (the pending bits, mie and MIE),
+               -- so a change to MIE or mie applies at the next boundary.
+               Fetch -> case interruptCause machineRx of
+                 Just cause -> withoutRegister (raiseException machineRx cause 0)
+                 Nothing ->
+                   withoutRegister
+                     ( machineRx {cpuPhase = FetchDelay, cpuFetchFault = not (fetchable (decodeTarget cpuPc)),
+                         cpuInRom = romAddress cpuPc},
+                       (memoryIndex cpuPc, Nothing, Nothing)
+                     )
                FetchDelay -> next machineRx {cpuPhase = FetchCapture}
                FetchCapture -> next machineRx {cpuPhase = FetchWait}
                FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord}
@@ -963,7 +1198,10 @@ commitInstruction machine _txReady =
           | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
           | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
           | instruction == 0x3020_0073 -> withoutRegister (machine {cpuPhase = TrapReturn}, (0, Nothing, Nothing))
-          | instruction == 0x1050_0073 -> noWrite nextPc -- WFI is a hint until interrupts exist.
+          -- WFI waits in Commit until an interrupt is pending and enabled in
+          -- mie (whether or not MIE is set).
+          | instruction == 0x1050_0073 ->
+              if cpuWake machine then noWrite nextPc else withoutRegister (machine, (0, Nothing, Nothing))
           | funct3 == 1 || funct3 == 2 || funct3 == 3 || funct3 == 5 || funct3 == 6 || funct3 == 7 ->
               withoutRegister
                 ( machine {cpuPhase = CsrRead,
@@ -1028,7 +1266,7 @@ readCsr address machine = case address of
   0x341 -> Just (trapEpc regs, False)
   0x342 -> Just (trapCause regs, False)
   0x343 -> Just (trapValue regs, False)
-  0x344 -> Just (0, False) -- mip, no interrupt sources until step 2
+  0x344 -> Just (pendingInterrupts (cpuDevices machine), False) -- mip; writes ignored
   0xb00 -> Just (counterLo (cpuCycle machine), False)
   0xb80 -> Just (counterHi (cpuCycle machine), False)
   0xb02 -> Just (counterLo (cpuInstret machine), False)
@@ -1086,9 +1324,9 @@ csrReadStep machine =
       -- after successful completion, avoiding validity gates on the data mux.
       captured = machine {cpuCsrValue = readSelectedCsr selection machine}
       invalid = withoutRegister (raiseException captured 2 instruction)
-      busy = ((selection !! (8 :: Index 13) || selection !! (9 :: Index 13))
+      busy = ((selection !! (8 :: Index 14) || selection !! (9 :: Index 14))
                 && counterCarry (cpuCycle machine))
-          || ((selection !! (10 :: Index 13) || selection !! (11 :: Index 13))
+          || ((selection !! (10 :: Index 14) || selection !! (11 :: Index 14))
                 && counterCarry (cpuInstret machine))
    in if not (or selection) || (cpuCsrReadOnly machine && csrWriteRequested instruction)
         then invalid
@@ -1096,7 +1334,7 @@ csrReadStep machine =
           (captured {cpuPhase = if busy then CsrRead else CsrWrite}, (0, Nothing, Nothing))
 
 -- CSR address comparisons are registered at Commit, before the data mux.
-decodeCsrSelection :: Unsigned 12 -> Vec 13 Bool
+decodeCsrSelection :: Unsigned 12 -> Vec 14 Bool
 decodeCsrSelection address =
   (address == 0x300) :> (address == 0x301) :>
   (address == 0x304) :> (address == 0x305) :>
@@ -1106,17 +1344,19 @@ decodeCsrSelection address =
   (address == 0xb80 || address == 0xc80) :>
   (address == 0xb02 || address == 0xc02) :>
   (address == 0xb82 || address == 0xc82) :>
-  (address == 0x310 || address == 0x344 || address == 0xf11 ||
-   address == 0xf12 || address == 0xf13 || address == 0xf14) :> Nil
+  (address == 0x310 || address == 0xf11 ||
+   address == 0xf12 || address == 0xf13 || address == 0xf14) :>
+  (address == 0x344) :> Nil
 
-readSelectedCsr :: Vec 13 Bool -> Machine -> Word32
+readSelectedCsr :: Vec 14 Bool -> Machine -> Word32
 readSelectedCsr selection machine =
   let regs = cpuTrapRegisters machine
       values = (0x1800 .|. (if trapMie regs then 8 else 0) .|. (if trapMpie regs then 0x80 else 0)) :>
         0x4000_1100 :> cpuInterruptEnable machine :> trapVector regs :>
         cpuScratch machine :> trapEpc regs :> trapCause regs :> trapValue regs :>
         counterLo (cpuCycle machine) :> counterHi (cpuCycle machine) :>
-        counterLo (cpuInstret machine) :> counterHi (cpuInstret machine) :> 0 :> Nil
+        counterLo (cpuInstret machine) :> counterHi (cpuInstret machine) :> 0 :>
+        pendingInterrupts (cpuDevices machine) :> Nil
    in fold (.|.) (zipWith (\selected value -> if selected then value else 0) selection values)
 
 csrWriteStep :: Machine -> (Machine, RegisterWrite, StepOutput)
@@ -1204,6 +1444,27 @@ exitDevice = 0x0010_0000
 bootCauseDevice :: Word32
 bootCauseDevice = 0x0010_0004
 
+-- | CLINT and PLIC registers (QEMU virt layout) and the UART control register.
+clintMsip, clintCompareLo, clintCompareHi, clintTimeLo, clintTimeHi :: Word32
+clintMsip = 0x0200_0000
+clintCompareLo = 0x0200_4000
+clintCompareHi = 0x0200_4004
+clintTimeLo = 0x0200_bff8
+clintTimeHi = 0x0200_bffc
+
+plicPriorityUart, plicPending, plicEnable, plicThreshold, plicClaim, uartControl :: Word32
+plicPriorityUart = 0x0c00_0000 + 4 * uartIrq
+plicPending = 0x0c00_1000
+plicEnable = 0x0c00_2000
+plicThreshold = 0x0c20_0000
+plicClaim = 0x0c20_0004
+uartControl = 0x1000_000c
+
+spiData, spiStatus, spiControl :: Word32
+spiData = 0x1000_1000
+spiStatus = 0x1000_1004
+spiControl = 0x1000_1008
+
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
 uartStatus = 0x1000_0004
@@ -1214,6 +1475,20 @@ decodeMemoryTarget address
   | validMemoryAddress address = RamTarget
   | romAddress address = RomTarget
   | address == bootCauseDevice = BootCauseTarget
+  | address == clintMsip = ClintMsipTarget
+  | address == clintCompareLo = ClintCompareLoTarget
+  | address == clintCompareHi = ClintCompareHiTarget
+  | address == clintTimeLo = ClintTimeLoTarget
+  | address == clintTimeHi = ClintTimeHiTarget
+  | address == plicPriorityUart = PlicPriorityTarget
+  | address == plicPending = PlicPendingTarget
+  | address == plicEnable = PlicEnableTarget
+  | address == plicThreshold = PlicThresholdTarget
+  | address == plicClaim = PlicClaimTarget
+  | address == uartControl = UartControlTarget
+  | address == spiData = SpiDataTarget
+  | address == spiStatus = SpiStatusTarget
+  | address == spiControl = SpiControlTarget
   | address == uartTxData = UartTxTarget
   | address == uartStatus = UartStatusTarget
   | address == uartRxData = UartRxTarget
