@@ -12,6 +12,10 @@ from check_rv32m import send, receive
 from run_program import frame_bytes, open_port
 
 
+# The boot ROM loads images at the start of RAM; the data words live past them.
+RAM = 0x80000000
+
+
 def load(width):
     return (1 << 15) | (width << 12) | (5 << 7) | 0x03
 
@@ -40,10 +44,10 @@ def main():
     cases = []
     for width, name in [(1, 'lh'), (2, 'lw'), (5, 'lhu')]:
         for offset in ([1, 2, 3] if width == 2 else [1, 3]):
-            cases.append((f'{name} misaligned {offset}', 0x200 + offset, load(width), b'DONE'))
+            cases.append((f'{name} misaligned {offset}', RAM + 0x200 + offset, load(width), b'DONE'))
     for width, name in [(1, 'sh'), (2, 'sw')]:
         for offset in ([1, 2, 3] if width == 2 else [1, 3]):
-            cases.append((f'{name} misaligned {offset}', 0x200 + offset, store(width), b'DONE'))
+            cases.append((f'{name} misaligned {offset}', RAM + 0x200 + offset, store(width), b'DONE'))
     cases += [('load access fault', 0x10000, load(2), b'DONE'),
               ('store access fault', 0x10000, store(2), b'DONE'),
               ('invalid UART load encoding', 0x10000008, load(3), b'DONE'),
@@ -56,9 +60,9 @@ def main():
               ('taken branch misaligned target', 0, 0x00011163, b'DONE'),
               ('untaken misaligned branch control', 0, 0x00001163, b'!DONE')]
     for width, name in [(0, 'lb'), (1, 'lh'), (2, 'lw'), (4, 'lbu'), (5, 'lhu')]:
-        cases.append((f'{name} legal control', 0x201 if width in (0, 4) else 0x200, load(width), b'!DONE'))
+        cases.append((f'{name} legal control', RAM + (0x201 if width in (0, 4) else 0x200), load(width), b'!DONE'))
     for width, name in [(0, 'sb'), (1, 'sh'), (2, 'sw')]:
-        cases.append((f'{name} legal control', 0x201 if width == 0 else 0x200, store(width), b'!DONE'))
+        cases.append((f'{name} legal control', RAM + (0x201 if width == 0 else 0x200), store(width), b'!DONE'))
     fd = open_port(args.port, round(args.freq_mhz * 1e6 / 868))
     try:
         send(fd, b'\x03')

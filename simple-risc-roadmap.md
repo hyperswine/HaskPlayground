@@ -6,13 +6,12 @@ FP-RISC's builtin runtime both work. It is still far from a real core in
 five ways, and this plan addresses them in turn:
 
 1. The planned machine-mode slice is implemented: CSRs, synchronous traps,
-   `mret`, and cycle/retirement counters work. Traps with `mtvec` zero retain the host
-   halt convention until step 3.
+   `mret`, and cycle/retirement counters work. With `mtvec` zero a trap now
+   lands in the boot ROM (step 3).
 2. No timer or interrupts.
-3. Non-RISC-V behaviour inside the CPU: halting when the PC reaches the end of
-   the loaded image, and the program loader, `DONE` reply and Ctrl-C living in
-   the CPU's state machine. Data accesses now use a registered bus; instruction
-   fetch and the hardware host loader still access RAM directly.
+3. Done (2026-10-11): the program loader, `DONE` reply and end-of-image halt
+   moved out of the CPU into a boot ROM at address 0, and RAM moved to
+   `0x8000_0000`. Ctrl-C and the finisher are resets into the ROM.
 4. Never checked against the official architecture tests.
 5. Slow: one instruction at a time, 9 cycles each, about 75 for
    multiply/divide.
@@ -46,7 +45,7 @@ reads eleven; iterative multiply/divide bypasses ExecuteFinish. CSR selection
 is registered and host reset preserves overwritten pipeline temporaries.
 See [the experiment report](boards/tangnano20k/EXECUTE-TIMING-2026-10-06.md)
 for vendor timing and physical tests. This improves timing without completing
-step 5's instruction overlap. RAM relocation and boot ROM remain next in step 3.
+step 5's instruction overlap. Step 3 finished on 2026-10-11 (below).
 
 ## SDRAM experiment (2026-10-06)
 
@@ -56,10 +55,30 @@ The controller passes a full-capacity test and physical C/FP-RISC programs.
 The cached prototype now passes hardware checks at 66 MHz, with a 1 KiB
 unified write-through cache. A repeated-read workload is about 1.50x faster
 than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
-96 MHz completion gate. It retains the hardware loader and legacy halt rules;
-`H` selects high-address entry and loader images remain limited to 64 KiB.
-Next: recover CPU clock/throughput, then replace the loader with boot ROM.
+96 MHz completion gate. Since step 3 it shares the boot ROM and memory map
+(no zero alias or `H` command); loader images remain limited to 64 KiB.
+Next: recover CPU clock/throughput.
 See [the measured results](boards/tangnano20k/sdram/README.md).
+
+## Implementation status (2026-10-11): step 3 complete
+
+The CPU no longer contains the host controller. A 572-byte boot ROM at
+address 0 implements the unchanged `P`/`R`/`M`/`X` protocol in software,
+loads and starts programs at `0x8000_0000`, and sends `DONE` after a finisher
+exit or a trap taken with `mtvec` 0. BOOTCAUSE (`0x0010_0004`) tells the ROM
+why it was entered. The end-of-image halt, the `mtvec` = 0 halt rule,
+`cpuRunning` and `programEnd` are gone. Ctrl-C and the finisher reset the
+CPU into the ROM, and Ctrl-C only breaks running programs, so images
+containing `0x03` load intact. The SDRAM image shares the ROM and map.
+
+Both images pass their full board regressions through the ROM: BRAM at
+96 MHz (Gowin 96.480 MHz, +0.052 ns) and cached SDRAM at 66 MHz (Gowin
+72.429 MHz, +1.345 ns), including the FP-RISC harness on both, the seven FP-RISC
+stress workloads and factorial on BRAM, and the 2 MiB SDRAM fixture. All 36
+SimpleRisc properties pass. See
+[the step 3 report](boards/tangnano20k/BOOT-ROM-2026-10-11.md). Next: step 4,
+the official architecture tests, which can now use the finisher and the RAM
+map.
 
 ## Implementation status (2026-10-05)
 
@@ -318,9 +337,8 @@ accesses trapping from step 1.
 
 ## Open decisions
 
-1. **The memory map change in step 3:** RAM moves to `0x8000_0000` (matching
-   QEMU `virt`), or stays at 0 with the boot ROM elsewhere. This plan assumes
-   the move.
+1. ~~**The memory map change in step 3**~~ Decided and done: RAM is at
+   `0x8000_0000`, matching QEMU `virt`.
 2. **`mtime` rate:** a fixed 1 MHz (assumed here) or one tick per clock.
 3. **UART interrupts directly on `MEIP`** (assumed), or a minimal PLIC for
    future devices.

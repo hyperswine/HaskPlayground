@@ -1,7 +1,8 @@
 /* crt0.S -- startup for SimpleRisc (RV32IM + Zicsr).
- * The host loads the image at address 0 and runs it from
- * there with every register zero.  Set the stack and global pointers, zero
- * .bss, run main, then write the exit device: the host receives "DONE".
+ * The boot ROM loads the image at 0x80000000 and starts it there with every
+ * register zero.  Set the stack and global pointers, zero .bss, run main,
+ * then write the finisher: the CPU resets into the boot ROM, which sends
+ * "DONE" to the host.
  */
     .section .text.entry,"ax",@progbits
     .globl _start

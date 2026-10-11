@@ -11,9 +11,9 @@ A 256-entry direct-mapped cache stores one physical word per entry, using two
 block RAMs. It has synchronous lookup, a valid bit and full physical tags.
 Writes invalidate the indexed entry, go through to SDRAM and complete only
 after the backing write. Reset sweeps all entries before accepting requests.
-There are no dirty lines or separate instruction/data copies. Both RAM aliases
-and loader writes use physical word addresses, keeping code uploads and modified
-instructions coherent. Ctrl-C leaves the cache transaction to drain with the
+There are no dirty lines or separate instruction/data copies. Data stores and
+the boot ROM's loader writes use physical word addresses, keeping code uploads
+and modified instructions coherent. Ctrl-C leaves the cache transaction to drain with the
 existing wrapper. Refresh continues independently during hits.
 
 Measured repeated reads of a 512-byte array (25,600 reads, checksum 1,625,600):
@@ -29,8 +29,8 @@ uncached reference was rebuilt with `SDRAM_CACHE=0` and rechecked on the board.
 Cache alone saves 18.5% of cycles; cache plus clock gives about 1.50x throughput
 on this workload. This is a small repeated-read workload, not a general FP-RISC
 speedup claim; streaming misses and write-heavy workloads can pay lookup overhead.
-`benchmark.c` also checks stores/reads through both aliases and executes code
-modified through the low alias with `fence.i`.
+`benchmark.c` also executes code patched through data stores, with
+`fence.i`. (Until 2026-10-11 it also checked the zero-address alias.)
 
 Cached 54 MHz STA reports Fmax 70.692 MHz, +4.373 ns setup slack. The tested
 66 MHz placement reports Fmax 66.165 MHz, +0.038 ns, zero setup/hold violations.
@@ -100,19 +100,23 @@ Bitstream SHA-256:
 
 ## Memory and host contract
 
+Since 2026-10-11 this image shares the BRAM image's boot ROM and memory map
+([../README.md](../README.md)); the zero-address alias and the `H` command are
+gone.
+
 - `0x80000000..0x807fffff`: full 8 MiB SDRAM, word indices retain 21 bits.
-- `0x00000000..0x0000ffff`: compatibility alias of the first 64 KiB.
-- Finisher and UART addresses retain their existing meanings.
-- `P` still loads at physical offset zero, with the existing 16-bit count and
-  64 KiB image limit. Data/BSS/heap/stack can use the rest of SDRAM.
-- `R` runs at zero; new `H` runs at `0x80000000`. Use `--ram-base 0x80000000`
-  in the host runners for high-linked images. Byte framing is otherwise unchanged.
-- `M` clears the compatibility 64 KiB, not all SDRAM; startup code initializes
-  BSS. Ctrl-C cancels CPU work and drains an outstanding memory operation.
+- `0x00000000..0x000007ff`: the boot ROM, read from block RAM without an SDRAM
+  request. Finisher, BOOTCAUSE and UART addresses match the BRAM image.
+- The ROM's `P` loads at `0x80000000` with the existing 16-bit count and
+  64 KiB image limit; `R` runs there. Data/BSS/heap/stack can use the rest of
+  SDRAM.
+- `M` clears the first 64 KiB, not all SDRAM; startup code initializes BSS.
+  Ctrl-C cancels a running program's work and drains an outstanding memory
+  operation; inside the ROM it is an ordinary byte.
 - Cycle counters count physical memory wait clocks, including cache lookup.
 
 `SdramSimpleRisc` wraps the existing serial core. It captures full addresses
-before the old 14-bit memory index, stops controller advancement during an
+before the core's block RAM index, sends boot ROM reads to a small block RAM, stops controller advancement during an
 outstanding memory transaction, buffers received UART data and continues the
 cycle counter. One outstanding transaction and registered data keep instruction
 fetch, byte-store read/modify/write and loader accesses ordered. Refresh gets
@@ -136,8 +140,7 @@ initial reports. Build uses the licensed macOS Gowin flow and rejects internal
 timing violations. Programming is SRAM-only. Both clocks run at the selected frequency. The default remains 54 MHz.
 `SDRAM_CACHE=0` builds a comparison image that bypasses the cache.
 `SDRAM_FREQ_MHZ=66` selects the experimentally validated higher clock.
-The boot ROM, removal of legacy halt rules and larger loader frames remain
-roadmap work; this is not completion of the full system-separation step.
+Larger loader frames (images over 64 KiB) remain future work.
 
 For the faster cached image:
 

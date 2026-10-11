@@ -1,19 +1,17 @@
 #include "../c/uart.h"
 static volatile uint32_t words[128];
-// Executable buffer stays within the loader image's legacy fetch boundary.
+// An executable buffer patched through data stores: "li a0, 7; ret".
 __attribute__((section(".text.mutable"),aligned(4)))
 static const uint32_t code[2]={0x00700513,0x00008067};
+// Instruction fetch must see data stores to code through the unified cache.
 static int coherence(void) {
-  volatile uint32_t *low=(volatile uint32_t *)((uintptr_t)words & 0x7fffff);
-  words[0]=42;if(low[0]!=42) return 1;
-  low[0]=123;if(words[0]!=123) return 2;
   int (*fn)(void)=(int (*)(void))(uintptr_t)code;
   if(fn()!=7) return 3;
-  volatile uint32_t *alias=(volatile uint32_t *)((uintptr_t)code & 0x7fffff);
-  alias[0]=0x00b00513;
+  volatile uint32_t *patch=(volatile uint32_t *)(uintptr_t)code;
+  patch[0]=0x00b00513; /* li a0, 11 */
   __asm__ volatile("fence.i":::"memory");
   if(fn()!=11) return 4;
-  alias[0]=0x00700513;
+  patch[0]=0x00700513;
   __asm__ volatile("fence.i":::"memory");
   return fn()!=7;
 }

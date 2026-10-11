@@ -9,7 +9,7 @@ static void check(int ok) {
     }
 }
 int main(void) {
-    volatile uint32_t *words = (volatile uint32_t *)0x7000;
+    volatile uint32_t *words = (volatile uint32_t *)0x80007000; /* 28 KiB into RAM */
     for (unsigned i = 0; i < 256; ++i) {
         uint32_t value = 0xa5a50000u ^ (i * 0x01020304u);
         volatile uint8_t *bytes = (volatile uint8_t *)&words[i];

@@ -1,9 +1,10 @@
-/* SimpleRisc memory: 64 KiB of unified code and data at address 0.  The
- * image (.text, .rodata, .data) is what the host loads; .bss and the stack
- * are zeroed or used in place above it. */
+/* SimpleRisc memory: 64 KiB of RAM at 0x80000000, where the boot ROM loads
+ * and starts programs.  The image (.text, .rodata, .data) is what the host
+ * loads; .bss and the stack are zeroed or used in place above it.  The same
+ * script fits the SDRAM image, whose first 64 KiB is at the same address. */
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
-MEMORY { RAM (rwx) : ORIGIN = 0x00000000, LENGTH = 64K }
+MEMORY { RAM (rwx) : ORIGIN = 0x80000000, LENGTH = 64K }
 SECTIONS {
   .text : { KEEP(*(.text.entry)) *(.text .text.*) } > RAM
   .rodata : { *(.rodata .rodata.* .srodata .srodata.*) } > RAM

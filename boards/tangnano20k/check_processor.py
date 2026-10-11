@@ -60,10 +60,12 @@ def main():
         send(b'\x03')
         read_for(.05)
         check_program('Ctrl-C reset recovery', hello, expected)
+        # The boot ROM clears 64 KiB; running cleared RAM executes a zero
+        # word, traps straight back into the ROM and reports DONE.
         send(b'M')
         time.sleep(.03)
         send(b'R')
-        assert read_for(.05) == b'', 'empty memory unexpectedly ran'
+        assert read_for(.5, True) == b'DONE', 'cleared memory did not trap straight back to the ROM'
         check_program('Memory clear and reload', hello, expected)
         check_program('Byte/halfword/word stress', (root / 'output/tangnano20k/c/memory_stress.bin').read_bytes(), b'MEMORY HOLDS\nDONE')
         print('PASS: byte/halfword/word stress, 5 exact C arithmetic runs, UART RX/TX, Ctrl-C recovery, and memory clear/reload', flush=True)

@@ -94,6 +94,7 @@ library
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -144,6 +145,7 @@ executable haskplayground-exe
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -194,6 +196,7 @@ executable neo-music
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -244,6 +247,7 @@ executable screw-anime
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -294,6 +298,7 @@ executable screw-bgm
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -344,6 +349,7 @@ executable terra-bgm
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time
@@ -399,6 +405,7 @@ test-suite haskplayground-test
     , regex-tdfa
     , row-types
     , stm
+    , template-haskell
     , temporary
     , text
     , time

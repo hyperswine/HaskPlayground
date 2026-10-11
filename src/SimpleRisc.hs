@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
@@ -17,32 +18,33 @@
 --
 -- Memory map:
 --
---   * 0x0000_0000 - 0x0000_ffff: 64 KiB unified instruction/data BRAM
+--   * 0x0000_0000 - 0x0000_07ff: 2 KiB boot ROM (the reset vector)
+--   * 0x0010_0000: finisher (QEMU virt style: 0x5555 = exit 0,
+--     code << 16 | 0x3333 = exit code)
+--   * 0x0010_0004: BOOTCAUSE, read-only; a read clears it (0 none, 1 power-on,
+--     2 Ctrl-C, 3 finisher exit)
 --   * 0x1000_0000: UART TXDATA (write the low byte)
 --   * 0x1000_0004: UART STATUS (bit 0 = TX ready, bit 1 = RX byte ready)
 --   * 0x1000_0008: UART RXDATA (read low byte, consuming it)
+--   * 0x8000_0000 - 0x8000_ffff: 64 KiB RAM
 --
--- The physical UART is 8-N-1 at clock / 868 baud: 115200 at 100 MHz.  While the CPU
--- is stopped the host protocol consists of single-byte commands:
+-- Everything else raises an access fault.  The physical UART is 8-N-1 at
+-- clock / 868 baud: 115200 at 100 MHz.
 --
---   * 'P', countLo, countHi, words...  PROGRAM @count@ little-endian RV32
---     words.  Each word is also sent least-significant byte first.
---   * 'R'                              RUN from address zero.
---   * 'X'                              RESET PC and all registers.
---   * 'M'                              RESET-MEM (also resets the CPU), taking
---                                      16384 clocks to zero the BRAM.
+-- The CPU is only a CPU: it runs from reset at address 0, in the boot ROM
+-- (boards/tangnano20k/bootrom), which implements the host protocol in
+-- software -- 'P' to load words at 0x8000_0000, 'R' to run them, 'M' to clear
+-- RAM -- and sends "DONE" when a program ends.  A program ends by writing the
+-- finisher, which resets the CPU into the ROM with cause EXIT, or by taking a
+-- trap while mtvec is 0, which lands in the ROM directly.  While a program
+-- runs, received byte 0x03 (Ctrl-C) never reaches it: it resets the CPU into
+-- the ROM with cause BREAK.  In the ROM 0x03 is an ordinary byte, so images
+-- containing it load intact.  Resets keep RAM.
 --
--- PROGRAM replaces words starting at address zero and records the end of the
--- program.  When an instruction retires with its next PC at or beyond the end
--- of the program (falling off the end, or jumping past it), the CPU stops and
--- transmits the four ASCII bytes "DONE".  A backward branch in the final word
--- therefore loops as expected.  ECALL, EBREAK and an
--- illegal instruction enter the machine trap handler; with mtvec zero they
--- stop the CPU and produce DONE for host compatibility. CSR instructions and
--- MRET support direct-mode handlers and split 64-bit cycle/retirement counters.
--- Interrupt sources are still pending. While running,
--- received UART bytes are placed in the one-byte RXDATA register; byte 0x03
--- (ASCII ETX / Ctrl-C) is reserved as an emergency register reset.
+-- ECALL, EBREAK, illegal instructions, misaligned and faulting accesses enter
+-- the machine trap handler.  CSR instructions and MRET support direct-mode
+-- handlers and split 64-bit cycle/retirement counters.  Interrupt sources are
+-- still pending.
 --
 -- The M extension (MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU) runs on an
 -- iterative unit: 68 unit cycles per nonzero-divisor instruction, with each
@@ -52,13 +54,30 @@ module SimpleRisc where
 
 import Clash.Prelude
 import Clash.Annotations.BitRepresentation (DataReprAnn(..), ConstrRepr(..), liftQ)
+import Language.Haskell.TH.Syntax (addDependentFile, runIO)
+import qualified Prelude as P
 
 type Word32 = Unsigned 32
 
 type Byte = Unsigned 8
 
--- | A word address in the 64 KiB memory.
-type MemAddr = Unsigned 14
+-- | A physical word index: bit 14 selects the boot ROM (512 words), otherwise
+-- the low 14 bits index the 64 KiB RAM.
+type MemAddr = Unsigned 15
+
+-- | The boot ROM image, embedded at compile time from the output of
+-- boards/tangnano20k/bootrom/build.sh.
+bootRomContents :: Vec 512 Word32
+bootRomContents =
+  $( do
+       let path = "boards/tangnano20k/bootrom/bootrom.hex"
+       addDependentFile path
+       text <- runIO (P.readFile path)
+       let romWords = P.map (\line -> P.read ("0x" P.++ line) :: P.Integer) (P.lines text)
+       if P.length romWords P./= 512
+         then P.fail (path P.++ ": expected 512 words")
+         else listToVecTH (P.map P.fromInteger romWords :: [Unsigned 32])
+   )
 
 -- | CPU pipeline stage.  Every stage starts from flip-flops and does one kind
 -- of work, so the clock can run fast (the design targets 100 MHz on a GW2A):
@@ -162,16 +181,13 @@ data MulDivUnit = MulDivUnit
   }
   deriving (Generic, NFDataX, Show, Eq)
 
-data HostState
-  = HostIdle
-  | ProgramCountLo
-  | ProgramCountHi Byte
-  | ProgramBytes (Unsigned 15) MemAddr (Index 4) Word32
-  | ClearMemory MemAddr
-  deriving (Generic, NFDataX, Show, Eq)
-
-data ReplyState = NoReply | DoneReply (Unsigned 3)
-  deriving (Generic, NFDataX, Show, Eq)
+-- | Why the CPU last entered the boot ROM through a reset.  BOOTCAUSE reads
+-- it and clears it to 'causeNone', so the ROM can tell a reset from a trap.
+causeNone, causePowerOn, causeBreak, causeExit :: Unsigned 2
+causeNone = 0
+causePowerOn = 1
+causeBreak = 2
+causeExit = 3
 
 -- | Software-visible machine-mode trap registers. Only machine mode is used.
 data TrapRegisters = TrapRegisters
@@ -217,7 +233,7 @@ tickCounter increment write counter =
           (increment && lo == maxBound)
 
 -- Registered memory target; wide address comparisons stay out of Commit.
-data MemoryTarget = RamTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | UnmappedTarget
+data MemoryTarget = RamTarget | RomTarget | UartTxTarget | UartStatusTarget | UartRxTarget | ExitTarget | BootCauseTarget | UnmappedTarget
   deriving (Generic, NFDataX, Show, Eq)
 
 -- Single outstanding data transaction. The CPU registers the request and
@@ -264,70 +280,80 @@ data BusState = BusState
 initialBus :: BusState
 initialBus = BusState BusIdle (BusRequest 0 0 False 0) UnmappedTarget 0 0
 
--- Response and RX-consume are pulses. A stalled TX emits neither; a completed
+-- | The side effect of a completed device read.
+data BusEffect = NoEffect | ConsumeRx | ConsumeBootCause
+  deriving (Generic, NFDataX, Show, Eq)
+
+-- Response and effects are pulses. A stalled TX emits neither; a completed
 -- transfer emits exactly one response and, where appropriate, one side effect.
-busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte ->
-  (BusState, Maybe BusResponse, StepOutput, Bool)
+busStep :: BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 ->
+  (BusState, Maybe BusResponse, StepOutput, BusEffect)
 busStep = busStepWith decodeMemoryTarget
 
-busStepWith :: (Word32 -> MemoryTarget) -> BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte ->
-  (BusState, Maybe BusResponse, StepOutput, Bool)
-busStepWith decodeTarget state request memoryWord txReady rx =
+busStepWith :: (Word32 -> MemoryTarget) -> BusState -> Maybe BusRequest -> Word32 -> Bool -> Maybe Byte -> Unsigned 2 ->
+  (BusState, Maybe BusResponse, StepOutput, BusEffect)
+busStepWith decodeTarget state request memoryWord txReady rx bootCause =
   let q = busRequest state
       width = busWidth q
       address = busAddress q
-      advance phase = (state {busPhase = phase}, Nothing, (0, Nothing, Nothing), False)
-      respond value fault exiting consume =
-        (state {busPhase = BusIdle}, Just (BusResponse value fault exiting), (0, Nothing, Nothing), consume)
+      advance phase = (state {busPhase = phase}, Nothing, (0, Nothing, Nothing), NoEffect)
+      respond value fault exiting effect =
+        (state {busPhase = BusIdle}, Just (BusResponse value fault exiting), (0, Nothing, Nothing), effect)
       valid = (if busWrite q then validStore width else validLoad width)
         && not (misalignedMemory width address)
    in case busPhase state of
         BusIdle -> case request of
           Nothing -> advance BusIdle
-          Just new -> (state {busPhase = BusDecode, busRequest = new}, Nothing, (0, Nothing, Nothing), False)
-        BusDecode -> (state {busPhase = BusDispatch, busTarget = decodeTarget address}, Nothing, (0, Nothing, Nothing), False)
+          Just new -> (state {busPhase = BusDecode, busRequest = new}, Nothing, (0, Nothing, Nothing), NoEffect)
+        BusDecode -> (state {busPhase = BusDispatch, busTarget = decodeTarget address}, Nothing, (0, Nothing, Nothing), NoEffect)
         BusDispatch
-          | not valid -> respond 0 True False False
+          | not valid -> respond 0 True False NoEffect
           | otherwise -> case busTarget state of
               RamTarget
                 | not (busWrite q) -> advance BusLoadIssue
-                | width == 2 -> (state {busPhase = BusRamWrite, busValue = busData q}, Nothing, (0, Nothing, Nothing), False)
+                | width == 2 -> (state {busPhase = BusRamWrite, busValue = busData q}, Nothing, (0, Nothing, Nothing), NoEffect)
                 | otherwise -> advance BusStoreIssue
+              RomTarget
+                | busWrite q -> respond 0 True False NoEffect
+                | otherwise -> advance BusLoadIssue
               UartTxTarget
                 | busWrite q -> advance BusTx
-                | otherwise -> respond 0 False False False
+                | otherwise -> respond 0 False False NoEffect
               UartStatusTarget
-                | busWrite q -> respond 0 True False False
+                | busWrite q -> respond 0 True False NoEffect
                 | otherwise -> respond (loadValue width 0
-                    ((if txReady then 1 else 0) .|. (case rx of Nothing -> 0; Just _ -> 2))) False False False
+                    ((if txReady then 1 else 0) .|. (case rx of Nothing -> 0; Just _ -> 2))) False False NoEffect
               UartRxTarget
-                | busWrite q -> respond 0 True False False
+                | busWrite q -> respond 0 True False NoEffect
                 | otherwise -> respond (loadValue width 0 (maybe 0 resize rx)) False False
-                    (case rx of Nothing -> False; Just _ -> True)
+                    (case rx of Nothing -> NoEffect; Just _ -> ConsumeRx)
               ExitTarget
-                | width == 0 || width == 4 -> respond 0 True False False
-                | not (busWrite q) -> respond 0 False False False
+                | width == 0 || width == 4 -> respond 0 True False NoEffect
+                | not (busWrite q) -> respond 0 False False NoEffect
                 | otherwise -> let status = busData q .&. 0xffff
-                    in respond 0 False (status == 0x5555 || status == 0x3333) False
-              UnmappedTarget -> respond 0 True False False
-        BusLoadIssue -> (state {busPhase = BusLoadDelay}, Nothing, (memoryIndex address, Nothing, Nothing), False)
+                    in respond 0 False (status == 0x5555 || status == 0x3333) NoEffect
+              BootCauseTarget
+                | busWrite q -> respond 0 True False NoEffect
+                | otherwise -> respond (loadValue width 0 (resize bootCause)) False False ConsumeBootCause
+              UnmappedTarget -> respond 0 True False NoEffect
+        BusLoadIssue -> (state {busPhase = BusLoadDelay}, Nothing, (memoryIndex address, Nothing, Nothing), NoEffect)
         BusLoadDelay -> advance BusLoadCapture
         BusLoadCapture -> advance BusLoadWait
-        BusLoadWait -> (state {busPhase = BusLoadAlign, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), False)
+        BusLoadWait -> (state {busPhase = BusLoadAlign, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), NoEffect)
         BusLoadAlign -> (state {busPhase = BusReply,
-            busValue = loadValue width (resize address) (busWord state)}, Nothing, (0, Nothing, Nothing), False)
-        BusReply -> respond (busValue state) False False False
-        BusStoreIssue -> (state {busPhase = BusStoreDelay}, Nothing, (memoryIndex address, Nothing, Nothing), False)
+            busValue = loadValue width (resize address) (busWord state)}, Nothing, (0, Nothing, Nothing), NoEffect)
+        BusReply -> respond (busValue state) False False NoEffect
+        BusStoreIssue -> (state {busPhase = BusStoreDelay}, Nothing, (memoryIndex address, Nothing, Nothing), NoEffect)
         BusStoreDelay -> advance BusStoreCapture
         BusStoreCapture -> advance BusStoreWait
-        BusStoreWait -> (state {busPhase = BusStoreMerge, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), False)
+        BusStoreWait -> (state {busPhase = BusStoreMerge, busWord = memoryWord}, Nothing, (0, Nothing, Nothing), NoEffect)
         BusStoreMerge -> (state {busPhase = BusRamWrite,
-            busValue = storeValue width (resize address) (busData q) (busWord state)}, Nothing, (0, Nothing, Nothing), False)
+            busValue = storeValue width (resize address) (busData q) (busWord state)}, Nothing, (0, Nothing, Nothing), NoEffect)
         BusRamWrite -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
-            (0, Just (memoryIndex address, busValue state), Nothing), False)
+            (0, Just (memoryIndex address, busValue state), Nothing), NoEffect)
         BusTx
           | txReady -> (state {busPhase = BusIdle}, Just (BusResponse 0 False False),
-              (0, Nothing, Just (resize (busData q))), False)
+              (0, Nothing, Just (resize (busData q))), NoEffect)
           | otherwise -> advance BusTx
 
 -- Decode and operand selection are registered before the ALU carry chains;
@@ -414,7 +440,12 @@ data Machine = Machine
     cpuPc :: Word32,
     cpuPhase :: CpuPhase,
     cpuInstruction :: Word32,
-    cpuPastEnd :: Bool,
+    -- | The PC being fetched is outside the ROM and RAM; registered at Fetch
+    -- and raised as an instruction access fault at Decode.
+    cpuFetchFault :: Bool,
+    -- | Executing boot ROM code, registered at Fetch. Ctrl-C only breaks
+    -- programs: in the ROM a 0x03 byte is data, such as part of an image.
+    cpuInRom :: Bool,
     cpuABanks :: Vec 4 Word32,
     cpuBBanks :: Vec 4 Word32,
     cpuA :: Word32,
@@ -449,11 +480,9 @@ data Machine = Machine
     systemBus :: BusState,
     cpuBusRequest :: Maybe BusRequest,
     cpuBusResponse :: Maybe BusResponse,
-    cpuRunning :: Bool,
-    programEnd :: Word32,
-    hostState :: HostState,
     rxHolding :: Maybe Byte,
-    replyState :: ReplyState,
+    -- | BOOTCAUSE: why the CPU last reset into the boot ROM.
+    bootCause :: Unsigned 2,
     -- | Zero all registers on the next cycle.  Commands and resets set this
     -- rather than clearing the 1024 register bits directly, so the clear is
     -- driven straight from one flip-flop.
@@ -475,7 +504,8 @@ initialMachine =
       cpuPc = 0,
       cpuPhase = Fetch,
       cpuInstruction = 0,
-      cpuPastEnd = False,
+      cpuFetchFault = False,
+      cpuInRom = True,
       cpuABanks = repeat 0,
       cpuBBanks = repeat 0,
       cpuA = 0,
@@ -505,11 +535,8 @@ initialMachine =
       systemBus = initialBus,
       cpuBusRequest = Nothing,
       cpuBusResponse = Nothing,
-      cpuRunning = False,
-      programEnd = 0,
-      hostState = HostIdle,
       rxHolding = Nothing,
-      replyState = NoReply,
+      bootCause = causePowerOn,
       clearRegisters = False
     }
 
@@ -604,7 +631,7 @@ topEntity ::
   "UART_TX" ::: Signal XilinxSystem Bit
 topEntity clk rst en serialRx = withClockResetEnable clk rst en (simpleRisc serialRx)
 
-simpleRisc :: (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
+simpleRisc :: forall dom. (HiddenClockResetEnable dom) => Signal dom Bit -> Signal dom Bit
 simpleRisc serialRx = serialTx
   where
     -- Two flip-flops resynchronise the asynchronous RX pin before sampling, and
@@ -627,10 +654,18 @@ simpleRisc serialRx = serialTx
     memoryAddress = register 0 memoryAddressNow
     memoryWrite = register Nothing memoryWriteNow
 
-    -- A synchronous 16384 x 32-bit RAM with an output register. Reads take
-    -- two cycles after the registered command; writes are visible on a later
-    -- read. This shape maps naturally to FPGA block RAM.
-    memoryOut = register 0 (blockRam1 NoClearOnReset (SNat @16384) 0 memoryAddress memoryWrite)
+    -- A synchronous 16384 x 32-bit RAM and the 512-word boot ROM, each with an
+    -- output register. Reads take two cycles after the registered command;
+    -- writes (RAM only: the bus refuses ROM stores) are visible on a later
+    -- read. Bit 14 of the physical index selects the ROM; the select is
+    -- delayed to line up with the registered outputs, so the final mux sits
+    -- between flip-flops rather than after a block RAM.
+    ramOut = register 0 (blockRam1 NoClearOnReset (SNat @16384) 0
+      (resize <$> memoryAddress :: Signal dom (Unsigned 14))
+      (fmap (\(address, value) -> (resize address :: Unsigned 14, value)) <$> memoryWrite))
+    romOut = register 0 (rom bootRomContents (resize <$> memoryAddress :: Signal dom (Unsigned 9)))
+    romSelected = register False (register False ((`testBit` 14) <$> memoryAddress))
+    memoryOut = mux romSelected romOut ramOut
 
 -- | Result wires from the machine controller: BRAM read address, optional BRAM
 -- write, and an optional byte offered to the UART transmitter.
@@ -647,16 +682,18 @@ machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, S
 machineStepDecoded = machineStepDecodedWith decodeMemoryTarget
 
 machineStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
-machineStepDecodedWith decodeTarget machine input@(memoryWord, received, txReady, emergencyReset) =
-  let receivedMachine = case (cpuRunning machine && not emergencyReset, received, rxHolding machine) of
+machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emergencyRequest) =
+  let emergencyReset = breakRequested machine emergencyRequest
+      receivedMachine = case (not emergencyReset, received, rxHolding machine) of
         (True, Just byte, Nothing) -> machine {rxHolding = Just byte}
         _ -> machine
-      (machine', coreOutput) = machineStepCore
-        receivedMachine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing, cpuBusRequest = Nothing} input
-      cancelled = emergencyReset || not (cpuRunning machine)
-      (bus', response, busOutput, consumeRx) = if cancelled
-        then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), False)
-        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine)
+      (machine', coreOutput) = runningStepDecodedWith decodeTarget
+        receivedMachine {clearRegisters = False, cpuCountRetirement = False, cpuCounterWrite = Nothing, cpuBusRequest = Nothing}
+        memoryWord received txReady emergencyReset
+      cancelled = emergencyReset
+      (bus', response, busOutput, effect) = if cancelled
+        then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), NoEffect)
+        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine)
       busActive = case busPhase (systemBus machine) of
         BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
         _ -> True
@@ -668,98 +705,33 @@ machineStepDecodedWith decodeTarget machine input@(memoryWord, received, txReady
         _ -> Nothing
       counted = machine'
         { systemBus = bus', cpuBusResponse = response,
-          rxHolding = if consumeRx then Nothing else rxHolding machine',
+          rxHolding = if effect == ConsumeRx then Nothing else rxHolding machine',
+          bootCause = if effect == ConsumeBootCause then causeNone else bootCause machine',
           cpuCycle = tickCounter True (counterWrite 0xb00 0xb80) (cpuCycle machine),
           cpuInstret = tickCounter (cpuCountRetirement machine)
             (counterWrite 0xb02 0xb82) (cpuInstret machine)
         }
    in (if clearRegisters machine then counted {cpuRegs = repeat 0} else counted, output)
 
-machineStepCore ::
-  Machine ->
-  (Word32, Maybe Byte, Bool, Bool) ->
-  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-machineStepCore machine (memoryWord, received, txReady, emergencyReset) =
-  case hostState machine of
-    ClearMemory address -> clearStep address
-    _
-      | cpuRunning machine -> runningStepDecoded machine memoryWord received txReady emergencyReset
-      | otherwise -> stoppedStep machine received txReady
-  where
-    clearStep address =
-      let lastAddress = address == maxBound
-          machine' =
-            machine
-              { hostState = if lastAddress then HostIdle else ClearMemory (address + 1),
-                clearRegisters = True,
-                cpuPc = 0,
-                cpuPhase = Fetch,
-                cpuRunning = False,
-                programEnd = 0,
-                rxHolding = Nothing
-              }
-       in (machine', (address, Just (address, 0), Nothing))
-
--- Host controller ------------------------------------------------------------
-
--- Stopped step of the host controller: handles the case when the CPU is not running and the host is idle or programming memory.
--- Basically what runs when machineStep is called and the CPU is not running. Otherwise it should call runningStep
-stoppedStep ::
-  Machine ->
-  Maybe Byte ->
-  Bool ->
-  (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-stoppedStep machine received txReady =
-  let (machineWithReply, replyByte) = sendReply machine txReady
-   in case (hostState machineWithReply, received) of
-        (HostIdle, Just 0x50) -> idleOut machineWithReply {hostState = ProgramCountLo} replyByte
-        (HostIdle, Just 0x52) -> idleOut machineWithReply {clearRegisters = True, cpuPc = 0, cpuPhase = Fetch, cpuRunning = programEnd machineWithReply /= 0, cpuTrapRegisters = initialTrapRegisters, cpuScratch = 0, cpuInterruptEnable = 0, rxHolding = Nothing} replyByte
-        (HostIdle, Just 0x58) -> idleOut (resetCpu machineWithReply) replyByte
-        (HostIdle, Just 0x4d) -> idleOut (resetCpu machineWithReply) {hostState = ClearMemory 0, programEnd = 0, replyState = NoReply} Nothing
-        (ProgramCountLo, Just lowByte) -> idleOut machineWithReply {hostState = ProgramCountHi lowByte} replyByte
-        (ProgramCountHi lowByte, Just highByte) ->
-          -- Clamp to the 16384-word memory with bit tests rather than
-          -- comparators, which synthesise to carry chains.
-          let requested = (resize highByte `shiftL` 8) .|. resize lowByte :: Unsigned 16
-              tooMany = requested .&. 0xc000 /= 0
-              count = if tooMany then 16384 else resize requested :: Unsigned 15
-              nextHost = if requested == 0 then HostIdle else ProgramBytes count 0 0 0
-           in idleOut machineWithReply {hostState = nextHost, programEnd = 0, clearRegisters = True, cpuPc = 0, cpuPhase = Fetch} replyByte
-        (ProgramBytes wordsLeft address byteNo partial, Just byte) ->
-          -- Bytes arrive least significant first: shift each one in from the top.
-          let partial' = (resize byte `shiftL` 24) .|. (partial `shiftR` 8)
-           in if byteNo == maxBound
-                then
-                  let isLast = wordsLeft == 1
-                      machine' = machineWithReply {hostState = if isLast then HostIdle else ProgramBytes (wordsLeft - 1) (address + 1) 0 0, programEnd = if isLast then (resize address + 1) `shiftL` 2 else programEnd machineWithReply}
-                   in (machine', (address, Just (address, partial'), replyByte))
-                else idleOut machineWithReply {hostState = ProgramBytes wordsLeft address (succ byteNo) partial'} replyByte
-        _ -> idleOut machineWithReply replyByte
-  where
-    idleOut m replyByte = (m, (0, Nothing, replyByte))
-
-sendReply :: Machine -> Bool -> (Machine, Maybe Byte)
-sendReply machine False = (machine, Nothing)
-sendReply machine True = case replyState machine of
-  NoReply -> (machine, Nothing)
-  DoneReply n ->
-    let byte = case n of
-          0 -> 0x44 -- D
-          1 -> 0x4f -- O
-          2 -> 0x4e -- N
-          _ -> 0x45 -- E
-        next = if n == 3 then NoReply else DoneReply (n + 1)
-     in (machine {replyState = next}, Just byte)
-
--- Reset architectural state and cancellation tokens. Pipeline temporaries
--- are overwritten before use, so keeping them avoids host-reset data muxes.
--- Host reset cancels architectural work. Pipeline temporaries remain held:
--- each is overwritten before its next valid use, avoiding wide reset muxes.
+-- | Ctrl-C: reset the CPU into the boot ROM with cause BREAK.
 resetCpu :: Machine -> Machine
-resetCpu machine =
+resetCpu = systemReset causeBreak
+
+-- | A received Ctrl-C breaks a running program; in the boot ROM it is data.
+-- Both inputs are registers, so the reset fan-out starts from one gate.
+breakRequested :: Machine -> Bool -> Bool
+breakRequested machine requested = requested && not (cpuInRom machine)
+
+-- | Reset architectural state and cancellation tokens and restart at the boot
+-- ROM, recording why; RAM is kept. Pipeline temporaries remain held: each is
+-- overwritten before its next valid use, avoiding wide reset muxes.
+systemReset :: Unsigned 2 -> Machine -> Machine
+systemReset cause machine =
   machine
     { clearRegisters = True,
       cpuPendingWrite = Nothing,
+      bootCause = cause,
+      cpuInRom = True,
       cpuPc = 0,
       cpuPhase = Fetch,
       cpuTrapRegisters = initialTrapRegisters,
@@ -770,7 +742,6 @@ resetCpu machine =
       systemBus = (systemBus machine) {busPhase = BusIdle},
       cpuBusRequest = Nothing,
       cpuBusResponse = Nothing,
-      cpuRunning = False,
       rxHolding = Nothing
     }
 
@@ -783,11 +754,11 @@ runningStep ::
   Bool ->
   (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
 runningStep machine memoryWord received txReady =
-  runningStepDecoded machine memoryWord received txReady (received == Just 0x03)
+  runningStepDecodedWith decodeMemoryTarget machine memoryWord received txReady (received == Just 0x03)
 
-runningStepDecoded :: Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, StepOutput)
-runningStepDecoded machine memoryWord received txReady emergencyReset =
-  let (machine', registerWrite, output) = cpuStepDecoded machine memoryWord received txReady emergencyReset
+runningStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, StepOutput)
+runningStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset =
+  let (machine', registerWrite, output) = cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset
       pending = if emergencyReset then Nothing else cpuPendingWrite machine
       written = maybe machine' (\(index, value) -> writeRegister index value machine') pending
    in (written {cpuPendingWrite = registerWrite}, output)
@@ -797,10 +768,10 @@ runningStepDecoded machine memoryWord received txReady emergencyReset =
 -- instead of a full copy of all 32 registers per instruction kind.
 cpuStep :: Machine -> Word32 -> Maybe Byte -> Bool -> (Machine, RegisterWrite, StepOutput)
 cpuStep machine memoryWord received txReady
-  = cpuStepDecoded machine memoryWord received txReady (received == Just 0x03)
+  = cpuStepDecodedWith decodeMemoryTarget machine memoryWord received txReady (received == Just 0x03)
 
-cpuStepDecoded :: Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
-cpuStepDecoded machine memoryWord _received txReady emergencyReset
+cpuStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
+cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyReset
   | emergencyReset = (resetCpu machine, Nothing, (0, Nothing, Nothing))
   | otherwise =
       let machineRx = machine
@@ -809,18 +780,19 @@ cpuStepDecoded machine memoryWord _received txReady emergencyReset
               instruction = cpuInstruction
               address = cAddress cpuComputed
            in case cpuPhase of
+               -- Only the ROM and RAM hold instructions. The check is
+               -- registered here and raised as an access fault at Decode.
                Fetch ->
                  withoutRegister
-                   ( machineRx {cpuPhase = FetchDelay},
+                   ( machineRx {cpuPhase = FetchDelay, cpuFetchFault = not (fetchable (decodeTarget cpuPc)),
+                       cpuInRom = romAddress cpuPc},
                      (memoryIndex cpuPc, Nothing, Nothing)
                    )
                FetchDelay -> next machineRx {cpuPhase = FetchCapture}
                FetchCapture -> next machineRx {cpuPhase = FetchWait}
-               -- The program stops once control leaves it.  The compare is
-               -- registered here and acted on in Decode.
-               FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord, cpuPastEnd = cpuPc >= programEnd}
+               FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord}
                Decode
-                 | cpuPastEnd -> withoutRegister (haltMachine machineRx)
+                 | cpuFetchFault -> withoutRegister (raiseException machineRx 1 cpuPc)
                  | otherwise ->
                      next
                        machineRx
@@ -881,8 +853,9 @@ cpuStepDecoded machine memoryWord _received txReady emergencyReset
                  Just response
                    | responseFault response -> withoutRegister (raiseException machineRx
                        (if testBit instruction 5 then 7 else 5) address)
-                   | responseExit response -> withoutRegister (haltMachine
-                       machineRx {cpuPc = cLink cpuComputed, cpuCountRetirement = True})
+                   -- The finisher ends the program: reset into the boot ROM.
+                   | responseExit response -> withoutRegister
+                       ((systemReset causeExit machineRx) {cpuCountRetirement = True}, (0, Nothing, Nothing))
                    | testBit instruction 5 -> withoutRegister (finishInstruction
                        machineRx {cpuPc = cLink cpuComputed} Nothing)
                    | otherwise -> withRegister (instructionRd instruction) (responseValue response)
@@ -1029,10 +1002,10 @@ enterTrap machine =
           trapMpie = trapMie regs,
           trapMie = False
         }
+      -- With mtvec still 0 this is the boot ROM, which reports the end of
+      -- the program.
       trapped = machine {cpuTrapRegisters = updated, cpuPc = trapVector regs .&. complement 3, cpuPhase = Fetch}
-      -- Temporary host compatibility until roadmap step 3 introduces finisher.
-      result = if trapVector regs == 0 then halt trapped else trapped
-   in (result, (0, Nothing, Nothing))
+   in (trapped, (0, Nothing, Nothing))
 
 -- | These CSRs have no read side effects, so CSRRW rd=x0 can share the same
 -- read stage. Write suppression uses the encoded rs1/zimm, not its value.
@@ -1179,12 +1152,6 @@ finishInstructionWithTx machine request = finishWith machine Nothing request
 finishWith :: Machine -> Maybe (MemAddr, Word32) -> Maybe Byte -> (Machine, StepOutput)
 finishWith machine write request = (machine {cpuPhase = Fetch, cpuCountRetirement = True}, (0, write, request))
 
-haltMachine :: Machine -> (Machine, (MemAddr, Maybe (MemAddr, Word32), Maybe Byte))
-haltMachine machine = (halt machine, (0, Nothing, Nothing))
-
-halt :: Machine -> Machine
-halt machine = machine {cpuRunning = False, cpuPhase = Fetch, replyState = DoneReply 0}
-
 -- Split the physical 32-way mux across two clock edges. Each first-stage
 -- register sees eight candidates; the operand register then sees four banks.
 readRegisterBanks :: Index 32 -> Vec 32 Word32 -> Vec 4 Word32
@@ -1207,15 +1174,35 @@ writeRegister index value machine@Machine {..} = machine {cpuRegs = replace inde
 regIndex :: Word32 -> Index 32
 regIndex value = fromIntegral (resize value :: Unsigned 5)
 
+-- | The physical word index: bit 31 clear means the boot ROM (bit 14 set,
+-- low nine bits the ROM word), set means RAM (the low 14 bits). Only
+-- meaningful for addresses the decoder maps to ROM or RAM.
 memoryIndex :: Word32 -> MemAddr
-memoryIndex address = resize (address `shiftR` 2)
+memoryIndex address
+  | testBit address 31 = resize (address `shiftR` 2) .&. 0x3fff
+  | otherwise = 0x4000 .|. (resize (address `shiftR` 2) .&. 0x1ff)
 
+ramBase :: Word32
+ramBase = 0x8000_0000
+
+-- | 64 KiB of RAM at 0x8000_0000, as a bit test.
 validMemoryAddress :: Word32 -> Bool
-validMemoryAddress address = address .&. 0xffff_0000 == 0 -- < 64 KiB, as a bit test
+validMemoryAddress address = address .&. 0xffff_0000 == ramBase
+
+-- | The 2 KiB boot ROM at address 0, as a bit test.
+romAddress :: Word32 -> Bool
+romAddress address = address .&. 0xffff_f800 == 0
+
+fetchable :: MemoryTarget -> Bool
+fetchable target = target == RamTarget || target == RomTarget
 
 -- SiFive/QEMU-style finisher command register. DONE carries no status payload.
 exitDevice :: Word32
 exitDevice = 0x0010_0000
+
+-- | BOOTCAUSE, read-only beside the finisher.
+bootCauseDevice :: Word32
+bootCauseDevice = 0x0010_0004
 
 uartTxData, uartStatus, uartRxData :: Word32
 uartTxData = 0x1000_0000
@@ -1225,6 +1212,8 @@ uartRxData = 0x1000_0008
 decodeMemoryTarget :: Word32 -> MemoryTarget
 decodeMemoryTarget address
   | validMemoryAddress address = RamTarget
+  | romAddress address = RomTarget
+  | address == bootCauseDevice = BootCauseTarget
   | address == uartTxData = UartTxTarget
   | address == uartStatus = UartStatusTarget
   | address == uartRxData = UartRxTarget

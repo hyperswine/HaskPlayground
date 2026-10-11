@@ -44,14 +44,59 @@ rate and then calling the `IOSSIOSPEED` ioctl (`0x80085402`) with the exact
 rate. Setting a non-standard speed through `tcsetattr` alone fails with
 `EINVAL`.
 
+## Boot ROM and memory map
+
+| Address | Device |
+|---|---|
+| `0x0000_0000`–`0x0000_07ff` | boot ROM, 2 KiB (the reset vector; loads only, stores fault) |
+| `0x0010_0000` | finisher (QEMU `virt` style: `0x5555` = exit 0, `code << 16 \| 0x3333` = exit `code`) |
+| `0x0010_0004` | BOOTCAUSE, read-only; a read clears it: 0 none, 1 power-on, 2 Ctrl-C, 3 finisher exit |
+| `0x1000_0000`–`0x1000_0008` | UART: TXDATA, STATUS, RXDATA |
+| `0x8000_0000`–`0x8000_ffff` | RAM, 64 KiB (8 MiB on the SDRAM image) |
+
+Every other address raises an access fault, and fetching outside the ROM and
+RAM raises an instruction access fault.
+
+The CPU starts in the boot ROM (`bootrom/`, C plus a short `crt0.S`), which
+implements the host protocol in software. The protocol is unchanged from the
+old hardware loader:
+
+| Byte | Meaning |
+|---|---|
+| `P`, count (16-bit little endian), words | load up to 16,384 words at `0x8000_0000`, then a zero word after them |
+| `R` | run from `0x8000_0000` with every register and the trap state cleared (`mret`) |
+| `M` | clear the first 64 KiB of RAM |
+| `X` | nothing: every run already starts from zeroed registers |
+
+A program ends by writing the finisher, which resets the CPU into the ROM
+with cause EXIT, or by taking a trap while `mtvec` is 0, which jumps to the
+ROM at address 0. Either way the ROM sends "DONE" and waits for the next
+command. Because of the zero word written after each image, a program that
+runs off its end executes an illegal instruction, traps, and also ends with
+"DONE". Power-on and Ctrl-C resets are silent. Resets keep RAM.
+
+Ctrl-C (`0x03`) resets the CPU into the ROM only while a program is running.
+Inside the ROM it is an ordinary byte, so images containing `0x03` (any load
+whose destination register is even has it as its low byte) load intact.
+
+The core embeds `bootrom/bootrom.hex` at compile time. After changing the ROM
+source, rebuild it (gcc is needed only for this step) and commit the new
+`bootrom.hex`:
+
+```bash
+boards/tangnano20k/bootrom/build.sh
+```
+
 ## Running C programs
 
 `c/` holds a minimal C runtime for SimpleRisc: `crt0.S` (sets `sp` and `gp`,
-zeroes `.bss`, calls `main`, then writes the finisher at `0x00100000`,
-which stops execution and sends "DONE"), `link.ld` (64 KiB at address 0, stack at the top) and a UART driver
-(`uart.h`, `uart.c`). Programs build with `rv32im_zicsr/ilp32` support in
-`riscv64-unknown-elf-gcc`, with no libc or libgcc. Exit preserves `mtvec`; installed guest trap handlers cannot intercept the
-finisher. Older ECALL-based binaries retain temporary compatibility.
+zeroes `.bss`, calls `main`, then writes the finisher at `0x00100000`;
+the CPU resets into the boot ROM, which sends "DONE"), `link.ld` (64 KiB at
+`0x8000_0000`, stack at the top) and a UART driver (`uart.h`, `uart.c`).
+Programs build with `rv32im_zicsr/ilp32` support in `riscv64-unknown-elf-gcc`,
+with no libc or libgcc. Exit preserves `mtvec`; installed guest trap handlers
+cannot intercept the finisher. A program that ends with `ecall` and no trap
+handler also ends with "DONE", through the ROM.
 
 SimpleRisc supports the six Zicsr instructions, direct-mode machine traps,
 `mret`, and `wfi` as a no-op until interrupts are implemented. The trap/status,
@@ -97,8 +142,9 @@ iverilog -o /tmp/tb.vvp boards/tangnano20k/tb_program.v output/tangnano20k/clash
 vvp -n /tmp/tb.vvp +frame=/tmp/hello.hex
 ```
 
-Loading runs at UART speed, so a 750-byte image takes about 3 minutes to
-simulate. `build.sh` writes the Verilog; to generate only the Verilog, run
+Loading runs at UART speed, and iverilog simulates the current core at
+roughly 3,000 clocks per second, so even the 30-byte `tb_simple_risc.v`
+program takes about a minute and a 750-byte image about 40 minutes. `build.sh` writes the Verilog; to generate only the Verilog, run
 `stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir output/tangnano20k/clash`.
 
 ## Clock speed: nextpnr is optimistic
@@ -117,6 +163,7 @@ judge:
 | machine traps, Zicsr and split counters (2026-10-05) | 147.19 MHz, seed 2, route target 144 MHz | 96 MHz: counter, trap, CPU, RV32IM and FP-RISC suites | seed 1 at target 115.2 MHz loses string characters at 96 MHz despite a reported 142.90 MHz maximum |
 | finisher and registered device target (2026-10-05) | 144.61 MHz, seed 3, route target 144 MHz | 96 MHz: finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seed 2 misses the route margin target at 137.84 MHz; not loaded |
 | registered data bus (2026-10-05) | 144.61 MHz, seed 7, route target 144 MHz | 96 MHz: bus, finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seeds 3, 2, 1, 4, 5 and 6 miss the margin; not loaded |
+| boot ROM, RAM at `0x8000_0000` (2026-10-11) | Gowin 96.480 MHz (vendor flow) | 96 MHz: every CPU suite plus FP-RISC; see [the report](BOOT-ROM-2026-10-11.md) | not tested higher |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
 (`MARGIN=1.5` by default, seed 3 tried first). To test above what timing allows, build with
@@ -262,13 +309,13 @@ Ordinary instructions now take nine clocks; this is still a serial core.
 ## SDRAM main-memory experiment
 
 [The SDRAM report and build instructions](sdram/README.md) describe the
-standalone full-capacity test and the separate uncached processor image.
-All 8 MiB passed 12,582,912 word comparisons. The processor runs at 54 MHz
-with RAM at `0x80000000` and a zero-address compatibility alias; C uses a
-1 MiB working set and FP-RISC uses a 2 MiB allocation on this image.
-Use `--freq-mhz 54` with board tools and `--ram-base 0x80000000` for high-linked
-programs. The legacy loader still limits images to 64 KiB, and `M` clears
-only the compatibility 64 KiB. SRAM programming leaves flash unchanged.
+standalone full-capacity test and the separate processor image.
+All 8 MiB passed 12,582,912 word comparisons. The processor runs at 54 MHz,
+or 66 MHz with its cache, with the same boot ROM and memory map as the BRAM
+image except that RAM is all 8 MiB at `0x80000000`. C uses a 1 MiB working
+set and FP-RISC uses a 2 MiB allocation on this image. Use `--freq-mhz 54`
+(or 66) with the board tools. The boot ROM loads images of at most 64 KiB, and
+`M` clears only the first 64 KiB. SRAM programming leaves flash unchanged.
 
 ## Separate RV64IM / Base host experiment
 

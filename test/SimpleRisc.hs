@@ -24,19 +24,26 @@ import "haskplayground" SimpleRisc
 import qualified Prelude as P
 import qualified "haskplayground" SdramSimpleRisc as S
 
--- | The 64 KiB memory as a sparse map: copying a 16384-entry vector on every
+-- | The 64 KiB RAM as a sparse map: copying a 16384-entry vector on every
 -- write would make the simulations far too slow.  Unwritten words read as
--- 'ramDefault'.
+-- 'ramDefault'.  Indices are RAM word indices (address - 0x8000_0000) / 4.
 data Ram = Ram {ramDefault :: Word32, ramWords :: IntMap.IntMap Word32}
 
 blankRam :: Word32 -> Ram
 blankRam fill = Ram fill IntMap.empty
 
 ramRead :: Ram -> MemAddr -> Word32
-ramRead (Ram fill words) address = IntMap.findWithDefault fill (fromIntegral address) words
+ramRead (Ram fill contents) address = IntMap.findWithDefault fill (fromIntegral address) contents
 
 ramWrite :: MemAddr -> Word32 -> Ram -> Ram
-ramWrite address value (Ram fill words) = Ram fill (IntMap.insert (fromIntegral address) value words)
+ramWrite address value (Ram fill contents) = Ram fill (IntMap.insert (fromIntegral address) value contents)
+
+-- | Physical memory as the circuit sees it: bit 14 of the index selects the
+-- boot ROM, which the simulation runs from the same embedded image.
+memoryRead :: Ram -> MemAddr -> Word32
+memoryRead ram address
+  | testBit address 14 = bootRomContents !! (address .&. 0x1ff)
+  | otherwise = ramRead ram address
 
 -- Mirror the command registers followed by synchronous block RAM.
 data Sim = Sim
@@ -56,7 +63,7 @@ stepSimReady :: Bool -> Sim -> Maybe Byte -> Sim
 stepSimReady txReady Sim {..} received =
   let (machine', (readAddress, writeCommand, txByte)) =
         machineStep simMachine (simMemoryWord, received, txReady)
-      nextRamOutput = ramRead simRam simReadCommand
+      nextRamOutput = memoryRead simRam simReadCommand
       ram' = case simWriteCommand of
         Nothing -> simRam
         Just (writeAddress, value) -> ramWrite writeAddress value simRam
@@ -74,23 +81,38 @@ startSim machine ram = Sim machine ram 0 0 0 Nothing []
 ramFromList :: [Word32] -> Ram
 ramFromList program = Ram 0 (IntMap.fromList (P.zip [0 ..] program))
 
--- | Step with no UART input until the CPU stops, returning the cycles taken.
+-- | Step a program in RAM with no UART input until control returns to the
+-- boot ROM (a trap with mtvec 0, or a finisher reset), returning the cycles.
 runUntilHalt :: Int -> Sim -> (Int, Sim)
 runUntilHalt fuel = go 0
   where
     go cycles sim
-      | not (cpuRunning (simMachine sim)) || cycles >= fuel = (cycles, sim)
+      | romAddress (cpuPc (simMachine sim)) || cycles >= fuel = (cycles, sim)
       | otherwise = go (cycles + 1) (stepSim sim Nothing)
 
-runningMachine :: [(Index 32, Word32)] -> Word32 -> Machine
-runningMachine registers end =
+-- | Keep running (the boot ROM, after a program ends) until "DONE" has been
+-- sent.
+runUntilDone :: Int -> Sim -> Sim
+runUntilDone fuel sim
+  | doneBytes `List.isSuffixOf` simTransmitted sim || fuel <= 0 = sim
+  | otherwise = runUntilDone (fuel - 1) (stepSim sim Nothing)
+
+-- | A program at the start of RAM, entered the way the boot ROM's 'R' enters
+-- it, with the ROM having already consumed the power-on BOOTCAUSE.
+runningMachine :: [(Index 32, Word32)] -> Machine
+runningMachine registers =
   initialMachine
     { cpuRegs = P.foldr (P.uncurry replace) (repeat 0) registers,
-      cpuRunning = True,
       cpuPhase = Fetch,
-      cpuPc = 0,
-      programEnd = end
+      cpuPc = ramBase,
+      cpuInRom = False,
+      bootCause = causeNone
     }
+
+-- | Host bytes the way a UART delivers them: one at a time with gaps, so the
+-- boot ROM's polling loop has time to take each from the one-byte receiver.
+hostBytes :: Int -> [Byte] -> [Maybe Byte]
+hostBytes gap = P.concatMap (\byte -> Just byte : P.replicate gap Nothing)
 
 doneBytes :: [Byte]
 doneBytes = [0x44, 0x4f, 0x4e, 0x45]
@@ -110,7 +132,7 @@ settleBus = go (32 :: Int)
   where
     go fuel machine
       | cpuPhase machine /= BusWait || fuel == 0 = (machine, (0, Nothing, Nothing))
-      | otherwise = let (next, output) = machineStep machine {cpuRunning = True} (0, Nothing, True)
+      | otherwise = let (next, output) = machineStep machine (0, Nothing, True)
                     in if cpuPhase next == BusWait then go (fuel - 1) next else (next, output)
 
 commitSettled :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
@@ -219,39 +241,37 @@ prop_arithmetic_instruction_stores_expected_result = property $ do
   a <- forAll (Gen.integral Range.constantBounded)
   b <- forAll (Gen.integral Range.constantBounded)
 
-  let registers = replace (2 :: Index 32) b (replace (1 :: Index 32) a (repeat 0))
-      machine =
-        initialMachine
-          { cpuRegs = registers,
-            cpuRunning = True,
-            cpuPhase = Fetch,
-            cpuPc = 0,
-            programEnd = 8
-          }
-      -- op x3,x1,x2; sw x3,256(x0)
-      ram = ramFromList [encodeArithmetic operation, 0x1030_2023]
+  let machine = runningMachine [(1, a), (2, b), (31, ramBase)]
+      -- op x3,x1,x2; sw x3,256(x31) with x31 = RAM base; then off the end
+      ram = ramFromList [encodeArithmetic operation, sw 3 31 256]
       (_, halted) = runUntilHalt 200 (startSim machine ram)
-      finished = runInputs halted (P.replicate 5 Nothing)
+      finished = runUntilDone 3000 halted
       expected = arithmeticResult operation a b
 
-  cpuRegs (simMachine finished) !! (3 :: Index 32) === expected
+  -- Registers are checked on return to the ROM, which then reuses them.
+  cpuRegs (simMachine halted) !! (3 :: Index 32) === expected
   ramRead (simRam finished) 64 === expected
-  assert (not (cpuRunning (simMachine finished)))
-  simTransmitted finished === [0x44, 0x4f, 0x4e, 0x45]
+  assert (romAddress (cpuPc (simMachine halted)))
+  simTransmitted finished === doneBytes
 
-prop_program_loads_up_to_fifty_words :: Property
-prop_program_loads_up_to_fifty_words = property $ do
-  wordsToProgram <- forAll (Gen.list (Range.linear 1 50) (Gen.integral Range.constantBounded))
+prop_boot_rom_loads_programs :: Property
+prop_boot_rom_loads_programs = withTests 20 . property $ do
+  wordsToProgram <- forAll (Gen.list (Range.linear 1 20) (Gen.integral Range.constantBounded))
   let count = P.length wordsToProgram
       countLo = fromIntegral count :: Byte
       countHi = fromIntegral (count `shiftR` 8) :: Byte
-      frame = Just 0x50 : Just countLo : Just countHi : P.map Just (P.concatMap wordBytes wordsToProgram)
-      programmed = runInputs (startSim initialMachine (blankRam 0)) (frame P.++ [Nothing])
+      frame = 0x50 : countLo : countHi : P.concatMap wordBytes wordsToProgram
+      -- Power-on: the ROM starts at 0 and stays silent.
+      programmed = runInputs (startSim initialMachine (blankRam 0xdead_beef))
+        (P.replicate 500 Nothing P.++ hostBytes 600 frame P.++ P.replicate 2000 Nothing)
       actual = P.map (ramRead (simRam programmed) . fromIntegral) [0 .. count - 1]
 
   actual === wordsToProgram
-  programEnd (simMachine programmed) === fromIntegral (count * 4)
-  hostState (simMachine programmed) === HostIdle
+  -- A zero word after the image makes running off its end trap.
+  ramRead (simRam programmed) (fromIntegral count) === 0
+  ramRead (simRam programmed) (fromIntegral count + 1) === 0xdead_beef
+  simTransmitted programmed === []
+  assert (romAddress (cpuPc (simMachine programmed)))
 
 -- Control flow and fetch timing -------------------------------------------------
 
@@ -266,24 +286,32 @@ prop_backward_branch_in_final_word_loops = property $ do
   n <- forAll (Gen.integral (Range.linear 1 20))
   -- addi x1,x0,n; loop: addi x1,x1,-1; bne x1,x0,loop
   let ram = ramFromList [addi 1 0 n, addi 1 1 (0 - 1), bne 1 0 (0 - 4)]
-      (_, halted) = runUntilHalt 1000 (startSim (runningMachine [] 12) ram)
-      finished = runInputs halted (P.replicate 4 Nothing)
+      (_, halted) = runUntilHalt 1000 (startSim (runningMachine []) ram)
+      finished = runUntilDone 3000 halted
+      regs = cpuTrapRegisters (simMachine halted)
 
-  assert (not (cpuRunning (simMachine halted)))
-  cpuRegs (simMachine finished) !! (1 :: Index 32) === 0
-  cpuPc (simMachine finished) === 12
+  cpuRegs (simMachine halted) !! (1 :: Index 32) === 0
+  -- The loop exits into the word after the program, which is zero.
+  trapEpc regs === ramBase + 12
+  trapCause regs === 2
   simTransmitted finished === doneBytes
 
 -- Exercise every bank boundary and x0 through real decode/writeback stages.
 prop_register_banks_and_writeback :: Property
 prop_register_banks_and_writeback = property $ do
   salt <- forAll (Gen.integral Range.constantBounded)
+  -- x31 is the RAM base for x0..x30's stores; x31 itself goes last, through
+  -- a freshly loaded x30.
   let value i = salt + fromIntegral i * 0x1020304
-      registers = [(fromIntegral i, value i) | i <- [0..31 :: Int]]
-      program = P.concat [[addi r r 1, sw r 0 (256 + 4*r)] | r <- [0..31]]
-      (_, halted) = runUntilHalt 2000 (startSim (runningMachine registers 256) (ramFromList program))
-  assert (not (cpuRunning (simMachine halted)))
-  P.mapM_ (\i -> ramRead (simRam halted) (fromIntegral (64+i)) === if i == 0 then 0 else value i + 1) [0..31 :: Int]
+      -- Data at RAM word 256, clear of the 65-word program.
+      base = ramBase + 0x400
+      registers = (31, base) : [(fromIntegral i, value i) | i <- [0..30 :: Int]]
+      program = P.concat [[addi r r 1, sw r 31 (4*r)] | r <- [0..30]]
+        P.++ [addi 31 31 1, lui 30 0x80000, sw 31 30 (0x400 + 4*31)]
+      (_, halted) = runUntilHalt 3000 (startSim (runningMachine registers) (ramFromList program))
+  assert (romAddress (cpuPc (simMachine halted)))
+  P.mapM_ (\i -> ramRead (simRam halted) (fromIntegral (256+i)) === if i == 0 then 0 else value i + 1) [0..30 :: Int]
+  ramRead (simRam halted) (256 + 31) === base + 1
 
 -- Every barrel-shifter distance through register and immediate instructions.
 -- Include negative inputs to prove sign extension across the new boundary.
@@ -300,11 +328,12 @@ prop_shift_stages_all_distances = withTests 1 . property $ do
             then (registerInstruction .&. complement (31 `shiftL` 20) .&. complement 0x7f)
               .|. (n `shiftL` 20) .|. 0x13
             else registerInstruction
-          machine = runningMachine [(1, a), (2, n)] 4
+          machine = runningMachine [(1, a), (2, n)]
           (cycles, halted) = runUntilHalt 50 (startSim machine (ramFromList [instruction]))
       cpuRegs (simMachine halted) !! (3 :: Index 32) === arithmeticResult op a n
-      assert (not (cpuRunning (simMachine halted)))
-      cycles === 10 + 5
+      assert (romAddress (cpuPc (simMachine halted)))
+      -- Ten clocks for the shift, then ten to trap on the zero word after it.
+      cycles === 10 + 10
 
 prop_split_comparisons_match_reference :: Property
 prop_split_comparisons_match_reference = property $ do
@@ -332,7 +361,7 @@ prop_registered_execution_matches_compute = property $ do
       operandA = if instructionRs1 instruction == 0 then 0 else a
       operandB = if instructionRs2 instruction == 0 then 0 else b
       op2 = if opcode == 0x33 then operandB else immediate
-      before = initialMachine {cpuRunning = True, cpuPhase = OperandSelect,
+      before = initialMachine {cpuPhase = OperandSelect,
         cpuPc = pc, cpuInstruction = instruction, cpuABanks = repeat a, cpuBBanks = repeat b,
         cpuImm = immediate, cpuIsRegOp = opcode == 0x33}
       step m = let (m', _, _) = cpuStep m 0 Nothing True in m'
@@ -356,20 +385,22 @@ prop_simple_instructions_take_nine_cycles_each :: Property
 prop_simple_instructions_take_nine_cycles_each = property $ do
   n <- forAll (Gen.int (Range.linear 1 50))
   let ram = ramFromList (P.replicate n (addi 1 1 1))
-      (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine [] (fromIntegral (4 * n))) ram)
+      (cycles, halted) = runUntilHalt 1000 (startSim (runningMachine []) ram)
 
-  -- Registered RAM commands add FetchDelay, including the final end check.
-  cycles === 9 * n + 5
+  -- Nine clocks per instruction, then ten to fetch the zero word after the
+  -- program, decode it as illegal and trap to the boot ROM.
+  cycles === 9 * n + 10
   cpuRegs (simMachine halted) !! (1 :: Index 32) === fromIntegral n
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
-  -- addi x1,x0,1; sw x5,8(x0) where x5 holds "addi x6,x0,42"; <word 2 overwritten>
-  let ram = ramFromList [addi 1 0 1, sw 5 0 8, 0]
-      (_, halted) = runUntilHalt 1000 (startSim (runningMachine [(5, addi 6 0 42)] 12) ram)
+  -- addi x1,x0,1; sw x5,8(x31) where x5 holds "addi x6,x0,42" and x31 the
+  -- RAM base; <word 2 overwritten>
+  let ram = ramFromList [addi 1 0 1, sw 5 31 8, 0]
+      (_, halted) = runUntilHalt 1000 (startSim (runningMachine [(5, addi 6 0 42), (31, ramBase)]) ram)
 
   cpuRegs (simMachine halted) !! (6 :: Index 32) === 42
-  cpuPc (simMachine halted) === 12
+  trapEpc (cpuTrapRegisters (simMachine halted)) === ramBase + 12
 
 prop_uart_tx_store_waits_for_ready :: Property
 prop_uart_tx_store_waits_for_ready = property $ do
@@ -378,12 +409,10 @@ prop_uart_tx_store_waits_for_ready = property $ do
   let registers = (2, uartTxData) : P.zip [1, 3, 4] (P.map resize bytes)
       -- sw x1,0(x2); sw x3,0(x2); sw x4,0(x2)
       ram = ramFromList [sw 1 2 0, sw 3 2 0, sw 4 2 0]
-      waiting = P.foldl (\sim ready -> stepSimReady ready sim Nothing) (startSim (runningMachine registers 12) ram) readiness
-      (_, halted) = runUntilHalt 1000 waiting
-      finished = runInputs halted (P.replicate 5 Nothing)
+      waiting = P.foldl (\sim ready -> stepSimReady ready sim Nothing) (startSim (runningMachine registers) ram) readiness
+      finished = runUntilDone 5000 waiting
 
   simTransmitted finished === bytes P.++ doneBytes
-  assert (not (cpuRunning (simMachine finished)))
 
 -- Whole circuit ----------------------------------------------------------------
 
@@ -402,31 +431,30 @@ prop_circuit_programs_and_runs_over_uart = withTests 1 . property $ do
           addi 1 0 0x69, -- 'i' (stalls while 'H' is still being sent)
           sw 1 2 0
         ]
-      hostBytes = [0x50, fromIntegral (P.length program), 0] P.++ P.concatMap wordBytes program P.++ [0x52]
+      frame = [0x50, fromIntegral (P.length program), 0] P.++ P.concatMap wordBytes program P.++ [0x52]
       idle k = P.replicate k high
       waveform =
         idle 20
-          P.++ P.concatMap (\byte -> uartFrame byte P.++ idle 20) hostBytes
+          P.++ P.concatMap (\byte -> uartFrame byte P.++ idle 20) frame
           P.++ idle (8 * 10 * clocksPerBit)
       output = simulateN @System (P.length waveform) simpleRisc waveform
       received = [value | Just value <- rxTrace output]
 
   received === [0x48, 0x69] P.++ doneBytes
 
-prop_reset_memory_takes_exactly_16384_clear_cycles :: Property
-prop_reset_memory_takes_exactly_16384_clear_cycles = withTests 1 . property $ do
-  let dirtyRam = blankRam 0xdead_beef
-      commandAccepted = stepSim (startSim initialMachine dirtyRam) (Just 0x4d)
-      beforeLastWrite = runInputs commandAccepted (P.replicate 16383 Nothing)
-      finished = stepSim beforeLastWrite Nothing
-      drained = stepSim finished Nothing
+prop_boot_rom_clears_memory :: Property
+prop_boot_rom_clears_memory = withTests 1 . property $ do
+  let commanded = runInputs (startSim initialMachine (blankRam 0xdead_beef))
+        (P.replicate 500 Nothing P.++ [Just 0x4d])
+      -- The ROM clears words in order; the last one marks completion.
+      clearing fuel sim
+        | ramRead (simRam sim) 16383 == 0 || fuel <= (0 :: Int) = sim
+        | otherwise = clearing (fuel - 1) (stepSim sim Nothing)
+      cleared = clearing 2_000_000 commanded
 
-  hostState (simMachine commandAccepted) === ClearMemory 0
-  hostState (simMachine beforeLastWrite) === ClearMemory 16383
-  ramRead (simRam beforeLastWrite) 16383 === 0xdead_beef
-  hostState (simMachine finished) === HostIdle
-  ramRead (simRam finished) 16383 === 0xdead_beef
-  assert (P.all (\address -> ramRead (simRam drained) address == 0) [minBound .. maxBound])
+  ramRead (simRam commanded) 0 === 0xdead_beef
+  assert (P.all (\index -> ramRead (simRam cleared) index == 0) [0 .. 16383])
+  simTransmitted cleared === []
 
 -- RV32M ----------------------------------------------------------------------
 
@@ -485,12 +513,12 @@ prop_muldiv_matches_reference = withTests 400 . property $ do
   operation <- forAll Gen.enumBounded
   a <- forAll operandGen
   b <- forAll operandGen
-  -- op x3,x1,x2; sw x3,256(x0)
-  let ram = ramFromList [encodeMulDiv operation, sw 3 0 256]
-      (_, halted) = runUntilHalt 200 (startSim (runningMachine [(1, a), (2, b)] 8) ram)
+  -- op x3,x1,x2; sw x3,256(x31) with x31 = RAM base
+  let ram = ramFromList [encodeMulDiv operation, sw 3 31 256]
+      (_, halted) = runUntilHalt 200 (startSim (runningMachine [(1, a), (2, b), (31, ramBase)]) ram)
       expected = mulDivResult operation a b
 
-  assert (not (cpuRunning (simMachine halted)))
+  assert (romAddress (cpuPc (simMachine halted)))
   cpuRegs (simMachine halted) !! (3 :: Index 32) === expected
   ramRead (simRam halted) 64 === expected
 
@@ -549,7 +577,7 @@ prop_uart_rx_holding_register_is_one_byte_deep :: Property
 prop_uart_rx_holding_register_is_one_byte_deep = property $ do
   first <- forAll (Gen.filter (/= 0x03) (Gen.integral Range.constantBounded))
   second <- forAll (Gen.filter (/= 0x03) (Gen.integral Range.constantBounded))
-  let running = initialMachine {cpuRunning = True, programEnd = 64, cpuPhase = Fetch}
+  let running = initialMachine {cpuPhase = Fetch}
       (withFirst, _) = machineStep running (0, Just first, True)
       -- Keep this latch-focused property from advancing into an instruction
       -- decode between the two simulated receive cycles.
@@ -576,7 +604,7 @@ prop_precise_exception_entry = property $ do
   enabled <- forAll Gen.bool
   let faultPc = pc * 4
       base = initialMachine
-        { cpuRunning = True, cpuPhase = Commit, cpuPc = faultPc,
+        { cpuPhase = Commit, cpuPc = faultPc,
           cpuRegs = replace (1 :: Index 32) 0x12345678 (repeat 0),
           rxHolding = Just 0x5a,
           cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapMie = enabled}
@@ -617,7 +645,6 @@ prop_precise_exception_entry = property $ do
     output === (0, Nothing, Nothing)
     cpuPhase entered === Fetch
     cpuPc entered === 0x100
-    cpuRunning entered === True
     trapEpc regs === faultPc
     trapCause regs === cause
     trapValue regs === value
@@ -629,17 +656,29 @@ prop_precise_exception_entry = property $ do
     trapOutput === (0, Nothing, Nothing)
     ) cases
 
-prop_trap_compatibility_and_reset :: Property
-prop_trap_compatibility_and_reset = withTests 1 $ property $ do
-  let m = (runningMachine [] 4) {cpuInstruction = 0x00000073, cpuPhase = Commit}
+-- With mtvec 0 a trap lands in the boot ROM, which reports the end of the
+-- program; Ctrl-C resets into the ROM silently.
+prop_unhandled_trap_returns_to_boot_rom :: Property
+prop_unhandled_trap_returns_to_boot_rom = withTests 1 $ property $ do
+  let m = (runningMachine []) {cpuInstruction = 0x00000073, cpuPhase = Commit}
       (queued, _, _) = commitInstruction m True
       (stopped, _, _) = cpuStep queued 0 Nothing True
-      resumed = runInputs (startSim stopped (blankRam 0)) (P.replicate 4 Nothing)
+      resumed = runUntilDone 3000 (startSim stopped (blankRam 0))
       reset = resetCpu stopped
-  cpuRunning stopped === False
+      broken = runInputs (startSim reset (blankRam 0)) (P.replicate 3000 Nothing)
+  cpuPc stopped === 0
   trapCause (cpuTrapRegisters stopped) === 11
   simTransmitted resumed === doneBytes
   cpuTrapRegisters reset === initialTrapRegisters
+  cpuPc reset === 0
+  bootCause reset === causeBreak
+  simTransmitted broken === []
+  -- In the boot ROM, 0x03 is an ordinary received byte, not a reset.
+  let inRom = initialMachine {cpuPc = 0x40, bootCause = causeNone}
+      (received, _) = machineStep inRom (0, Just 3, True)
+  rxHolding received === Just 3
+  bootCause received === causeNone
+  cpuPc received === 0x40
   let (notTaken, write, _) = commitInstruction
         m {cpuInstruction = 0x00000063, cpuComputed = Computed Nothing 4 6 (Just False) 0} True
   cpuPhase notTaken === Fetch
@@ -648,14 +687,14 @@ prop_trap_compatibility_and_reset = withTests 1 $ property $ do
 
 prop_faulting_store_never_writes_ram :: Property
 prop_faulting_store_never_writes_ram = withTests 1 $ property $ do
-  let sim = startSim (runningMachine [(1, 0x100), (2, 0xdeadbeef)] 8)
+  let sim = startSim (runningMachine [(1, ramBase + 0x100), (2, 0xdeadbeef)])
             (ramFromList [sw 2 1 1, 0x00000073])
       (_, stopped) = runUntilHalt 100 sim
-      drained = runInputs stopped (P.replicate 5 Nothing)
-      regs = cpuTrapRegisters (simMachine drained)
+      drained = runUntilDone 3000 stopped
+      regs = cpuTrapRegisters (simMachine stopped)
   trapCause regs === 6
-  trapValue regs === 0x101
-  trapEpc regs === 0
+  trapValue regs === ramBase + 0x101
+  trapEpc regs === ramBase
   ramRead (simRam drained) 64 === 0
   simTransmitted drained === doneBytes
 
@@ -667,7 +706,7 @@ prop_registered_csr_selection_matches_reference :: Property
 prop_registered_csr_selection_matches_reference = property $ do
   value <- forAll (Gen.integral Range.constantBounded)
   address <- forAll (Gen.integral (Range.linear 0 0xfff))
-  let base = initialMachine {cpuRunning = True,
+  let base = initialMachine {
         cpuScratch = value, cpuInterruptEnable = value `xor` 0x888,
         cpuTrapRegisters = initialTrapRegisters {trapVector = value `xor` 0x305,
           trapEpc = value `xor` 0x341, trapCause = value `xor` 0x342,
@@ -700,7 +739,7 @@ prop_csr_read_modify_write = property $ do
           1 -> value
           2 -> old .|. value
           _ -> old .&. complement value
-        m = initialMachine {cpuRunning = True, cpuPhase = Commit, cpuPc = 16,
+        m = initialMachine {cpuPhase = Commit, cpuPc = 16,
               cpuInstruction = instruction, cpuA = if source == 0 then 0 else operand,
               cpuScratch = old, cpuComputed = Computed Nothing 20 0 Nothing 0}
         (reading, _, _) = commitInstruction m True
@@ -718,7 +757,7 @@ prop_csr_read_modify_write = property $ do
 prop_csr_access_rules_and_masks :: Property
 prop_csr_access_rules_and_masks = property $ do
   value <- forAll (Gen.integral Range.constantBounded)
-  let base = initialMachine {cpuPhase = CsrRead, cpuRunning = True}
+  let base = initialMachine {cpuPhase = CsrRead}
       checkAccess address kind source faults = do
         let instruction = csrInstruction address kind 0 source
             (m, write, output) = cpuStep base {cpuInstruction = instruction,
@@ -757,23 +796,25 @@ prop_csr_access_rules_and_masks = property $ do
 
 prop_guest_handler_resumes_with_mret :: Property
 prop_guest_handler_resumes_with_mret = withTests 1 $ property $ do
-  let program = [addi 1 0 32, csrInstruction 0x305 1 0 1,
+  -- mtvec = the handler at RAM offset 36; ECALL; resume; restore mtvec 0 and
+  -- ECALL again, which falls back into the boot ROM.
+  let program = [lui 1 0x80000, addi 1 1 36, csrInstruction 0x305 1 0 1,
                  0x00000073, addi 6 0 42,
                  csrInstruction 0x305 1 0 0, 0x00000073,
                  0, 0,
                  csrInstruction 0x341 2 2 0, addi 2 2 4,
                  csrInstruction 0x341 1 0 2, 0x30200073]
-      (_, stopped) = runUntilHalt 1000 (startSim (runningMachine [] 48) (ramFromList program))
+      (_, stopped) = runUntilHalt 1000 (startSim (runningMachine []) (ramFromList program))
       machine = simMachine stopped
-  cpuRunning machine === False
+  assert (romAddress (cpuPc machine))
   cpuRegs machine !! (6 :: Index 32) === 42
-  trapEpc (cpuTrapRegisters machine) === 20
+  trapEpc (cpuTrapRegisters machine) === ramBase + 24
   trapCause (cpuTrapRegisters machine) === 11
 
 prop_mret_restores_status :: Property
 prop_mret_restores_status = property $ do
   previous <- forAll Gen.bool
-  let m = initialMachine {cpuPhase = TrapReturn, cpuRunning = True,
+  let m = initialMachine {cpuPhase = TrapReturn,
             cpuTrapRegisters = initialTrapRegisters {trapEpc = 0x100, trapMpie = previous}}
       (returned, write, _) = cpuStep m 0 Nothing True
       regs = cpuTrapRegisters returned
@@ -815,7 +856,7 @@ prop_counter_csr_reads_wait_for_carry = property $ do
   highWord <- forAll (Gen.integral Range.constantBounded)
   P.mapM_ (\address -> do
     let isCycle = address == 0xb80 || address == 0xc80
-        m = initialMachine {cpuRunning = True, cpuPhase = CsrRead,
+        m = initialMachine {cpuPhase = CsrRead,
               cpuInstruction = csrInstruction address 2 1 0,
               cpuCsrSelection = decodeCsrSelection (fromIntegral address),
               cpuCycle = if isCycle then Counter64 0 highWord True else initialCounter,
@@ -832,11 +873,11 @@ prop_counters_retire_precisely = withTests 1 $ property $ do
   let program = [addi 10 0 7, sw 2 1 0, 0x0000a183, 0x02210233,
                  csrInstruction 0x340 2 5 0, 0x10500073, 0x00000073]
       (cycles, stopped) = runUntilHalt 1000
-        (startSim (runningMachine [(1, 0x100), (2, 5)] 28) (ramFromList program))
+        (startSim (runningMachine [(1, ramBase + 0x100), (2, 5)]) (ramFromList program))
       drained = runInputs stopped (P.replicate 5 Nothing)
   counterValue (cpuInstret (simMachine drained)) === 6
   counterValue (cpuCycle (simMachine drained)) === fromIntegral (cycles + 5)
-  let waiting = initialMachine {cpuPhase = BusWait, cpuRunning = True, cpuInstruction = 0x0020a023,
+  let waiting = initialMachine {cpuPhase = BusWait, cpuInstruction = 0x0020a023,
           systemBus = initialBus {busPhase = BusTx, busRequest = BusRequest uartTxData 0 True 0x21}}
       stalled = P.iterate (\m -> P.fst (machineStep m (0, Nothing, False))) waiting P.!! 20
       (offered, (_, _, byte)) = machineStep stalled (0, Nothing, True)
@@ -850,7 +891,7 @@ prop_counter_write_overrides_retirement :: Property
 prop_counter_write_overrides_retirement = withTests 1 $ property $ do
   let program = [addi 1 0 7, csrInstruction 0xb02 1 0 1,
                  csrInstruction 0xc02 2 3 0, csrInstruction 0xc02 2 4 0, 0x00000073]
-      (_, stopped) = runUntilHalt 300 (startSim (runningMachine [] 20) (ramFromList program))
+      (_, stopped) = runUntilHalt 300 (startSim (runningMachine []) (ramFromList program))
       machine = simMachine stopped
   cpuRegs machine !! (3 :: Index 32) === 7
   cpuRegs machine !! (4 :: Index 32) === 8
@@ -870,31 +911,38 @@ prop_counter_write_overrides_retirement = withTests 1 $ property $ do
 
 prop_registered_memory_decode :: Property
 prop_registered_memory_decode = property $ do
-  ramAddress <- forAll (Gen.integral (Range.linear 0 65535))
+  offset <- forAll (Gen.integral (Range.linear 0 65535))
+  romOffset <- forAll (Gen.integral (Range.linear 0 2047))
   P.mapM_ (\(address, target) -> do
     let q = BusRequest address 2 False 0
-        (accepted, earlyResponse, earlyOutput, earlyRx) = busStep initialBus (Just q) 0 True Nothing
-        (decoded, response, output, consumeRx) = busStep accepted Nothing 0 True Nothing
+        (accepted, earlyResponse, earlyOutput, earlyEffect) = busStep initialBus (Just q) 0 True Nothing 0
+        (decoded, response, output, effect) = busStep accepted Nothing 0 True Nothing 0
     busPhase accepted === BusDecode
     busRequest accepted === q
     earlyResponse === Nothing
     earlyOutput === (0, Nothing, Nothing)
-    earlyRx === False
+    earlyEffect === NoEffect
     busPhase decoded === BusDispatch
     busTarget decoded === target
     response === Nothing
     output === (0, Nothing, Nothing)
-    consumeRx === False
-    ) [(ramAddress, RamTarget), (uartTxData, UartTxTarget),
-       (uartStatus, UartStatusTarget), (uartRxData, UartRxTarget),
-       (exitDevice, ExitTarget), (exitDevice + 4, UnmappedTarget),
-       (0x10000, UnmappedTarget), (0x80000000, UnmappedTarget)]
+    effect === NoEffect
+    ) [(ramBase + offset, RamTarget), (romOffset, RomTarget),
+       (uartTxData, UartTxTarget), (uartStatus, UartStatusTarget), (uartRxData, UartRxTarget),
+       (exitDevice, ExitTarget), (bootCauseDevice, BootCauseTarget),
+       (exitDevice + 8, UnmappedTarget), (0x800, UnmappedTarget), (0x10000, UnmappedTarget),
+       (0x7fff_fffc, UnmappedTarget), (ramBase + 0x10000, UnmappedTarget)]
+  -- Physical indices: bit 14 is the ROM.
+  memoryIndex ramBase === 0
+  memoryIndex (ramBase + 0xfffc) === 0x3fff
+  memoryIndex 0 === 0x4000
+  memoryIndex 0x7fc === 0x41ff
 
 prop_finisher_commands :: Property
 prop_finisher_commands = property $ do
   code <- forAll (Gen.integral Range.constantBounded :: Gen (Unsigned 16))
   P.mapM_ (\(width, value, stops) -> do
-    let base = initialMachine {cpuRunning = True, cpuPhase = Commit,
+    let base = initialMachine {cpuPhase = Commit, bootCause = causeNone,
           cpuPc = 4, cpuInstruction = if width == 2 then 0x0020a023 else 0x00209023,
           cpuB = value, cpuComputed = Computed Nothing 8 0 Nothing exitDevice,
           cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapValue = 42}}
@@ -905,11 +953,12 @@ prop_finisher_commands = property $ do
     cpuBusRequest queued === Just (BusRequest exitDevice (if width == 2 then 2 else 1) True value)
     command === (0, Nothing, Nothing)
     response === (0, Nothing, Nothing)
-    cpuRunning completed === not stops
-    cpuPc completed === 8
-    cpuTrapRegisters completed === cpuTrapRegisters base
+    -- An exit resets into the boot ROM with cause EXIT; anything else is an
+    -- ordinary store that retires.
+    cpuPc completed === if stops then 0 else 8
+    bootCause completed === if stops then causeExit else causeNone
+    cpuTrapRegisters completed === if stops then initialTrapRegisters else cpuTrapRegisters base
     counterValue (cpuInstret counted) === 1
-    replyState completed === if stops then DoneReply 0 else NoReply
     ) [(2 :: Int, (resize code `shiftL` 16) .|. 0x3333, True),
        (2, 0x5555, True), (1, 0x5555, True), (1, 0x3333, True),
        (2, 0x7777, False), (2, 0, False)]
@@ -933,36 +982,44 @@ prop_finisher_commands = property $ do
        (0x00004083, exitDevice, Just 5), (0x00200023, exitDevice, Just 7),
        (0x00202023, exitDevice + 2, Just 6),
        (0x00202023, exitDevice + 4, Just 7)]
+  -- BOOTCAUSE reads the cause and clears it; it is read-only.
+  P.mapM_ (\cause -> do
+    let m = initialMachine {cpuPhase = Commit, bootCause = cause, cpuInstruction = 0x00002083,
+          cpuComputed = Computed Nothing 4 0 Nothing bootCauseDevice}
+        (result, write, _) = commitSettled m True
+    write === Just (1, resize cause)
+    bootCause result === causeNone
+    ) [causeNone, causePowerOn, causeBreak, causeExit]
 
 prop_bus_completion_and_rx_race :: Property
 prop_bus_completion_and_rx_race = property $ do
   byte <- forAll (Gen.integral (Range.linear 128 255))
-  address <- (* 4) <$> forAll (Gen.integral (Range.linear 0 16383))
+  address <- (\index -> ramBase + index * 4) <$> forAll (Gen.integral (Range.linear 0 16383))
   value <- forAll (Gen.integral Range.constantBounded)
   P.mapM_ (\(width, expected) -> do
     let before = initialBus {busPhase = BusDispatch, busTarget = UartRxTarget,
           busRequest = BusRequest uartRxData width False 0}
-        (after, response, output, consume) = busStep before Nothing 0 True (Just byte)
-        (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte)
+        (after, response, output, consume) = busStep before Nothing 0 True (Just byte) 0
+        (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte) 0
     response === Just (BusResponse expected False False)
     output === (0, Nothing, Nothing)
-    consume === True
+    consume === ConsumeRx
     repeated === Nothing
     repeatedOutput === (0, Nothing, Nothing)
-    repeatedConsume === False
+    repeatedConsume === NoEffect
     ) [(0, resize byte .|. 0xffffff00), (4, resize byte), (1, resize byte), (2, resize byte)]
   let writing = initialBus {busPhase = BusRamWrite,
         busRequest = BusRequest address 2 True value, busValue = value}
-      (idle, ack, write, consume) = busStep writing Nothing 0 True Nothing
-      (_, repeatedAck, repeatedWrite, _) = busStep idle Nothing 0 True Nothing
+      (idle, ack, write, consume) = busStep writing Nothing 0 True Nothing 0
+      (_, repeatedAck, repeatedWrite, _) = busStep idle Nothing 0 True Nothing 0
   ack === Just (BusResponse 0 False False)
-  write === (0, Just (fromIntegral (address `div` 4), value), Nothing)
-  consume === False
+  write === (0, Just (memoryIndex address, value), Nothing)
+  consume === NoEffect
   repeatedAck === Nothing
   repeatedWrite === (0, Nothing, Nothing)
   -- A byte arriving while an empty RX read is completed belongs to the next
   -- read; it must not be cleared by an unconditional consume pulse.
-  let reading = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+  let reading = initialMachine {cpuPhase = BusWait,
         cpuInstruction = 0x0000a083,
         systemBus = initialBus {busPhase = BusDispatch, busTarget = UartRxTarget,
           busRequest = BusRequest uartRxData 2 False 0}}
@@ -974,7 +1031,7 @@ prop_bus_wait_faults_and_cancel :: Property
 prop_bus_wait_faults_and_cancel = property $ do
   value <- forAll (Gen.integral Range.constantBounded)
   P.mapM_ (\write -> do
-    let before = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+    let before = initialMachine {cpuPhase = BusWait,
           cpuPc = 4, cpuInstruction = if write then 0x0020a023 else 0x0000a083,
           cpuComputed = Computed Nothing 8 0 Nothing 0x20000000}
         (waiting, pendingWrite, output) = cpuStep before 0 Nothing True
@@ -1000,12 +1057,13 @@ prop_bus_wait_faults_and_cancel = property $ do
     registerWrite === if write then Nothing else Just (1, value)
     ) [False, True]
   P.mapM_ (\phase -> do
-    let before = initialMachine {cpuRunning = True, cpuPhase = BusWait,
+    let before = initialMachine {cpuPhase = BusWait, cpuPc = 0x8000_0040, cpuInRom = False,
           cpuBusRequest = Just (BusRequest uartTxData 0 True 0x41),
           systemBus = initialBus {busPhase = phase, busTarget = UartTxTarget,
             busRequest = BusRequest 0x100 2 True value, busValue = value}}
         (cancelled, output) = machineStep before (0, Just 3, True)
-    cpuRunning cancelled === False
+    cpuPc cancelled === 0
+    bootCause cancelled === causeBreak
     cpuBusRequest cancelled === Nothing
     cpuBusResponse cancelled === Nothing
     busPhase (systemBus cancelled) === BusIdle
@@ -1019,12 +1077,12 @@ prop_sdram_waits_preserve_full_address = property $ do
   value <- forAll (Gen.integral Range.constantBounded)
   let address = 0x80000000 + (resize offset `shiftL` 2)
       bus = initialBus {busPhase = BusRamWrite, busRequest = BusRequest address 2 True value, busValue = value}
-      m = initialMachine {cpuRunning = True, cpuPhase = BusWait, systemBus = bus}
-      input ready done = (0, ready, done, Nothing, True, False)
+      m = initialMachine {cpuPhase = BusWait, systemBus = bus}
+      input ready done = (0, ready, done, Nothing, True, False, 0)
       (queued, _) = S.step S.initialState {S.machine = m} (input False False)
-      (held, (req, wr, actualAddress, actualValue, _)) = S.step queued (input False False)
+      (held, (req, wr, actualAddress, actualValue, _, _)) = S.step queued (input False False)
       (accepted, _) = S.step held (input True False)
-      (waiting, (secondReq, _, _, _, _)) = S.step accepted (input False False)
+      (waiting, (secondReq, _, _, _, _, _)) = S.step accepted (input False False)
       (completed, _) = S.step waiting (input False True)
   req === True
   wr === True
@@ -1035,25 +1093,38 @@ prop_sdram_waits_preserve_full_address = property $ do
   cpuPc (S.machine waiting) === cpuPc (S.machine queued)
   counterLo (cpuCycle (S.machine waiting)) === counterLo (cpuCycle (S.machine queued)) + 3
 
-prop_sdram_map_and_high_entry :: Property
-prop_sdram_map_and_high_entry = withTests 1 . property $ do
+-- All 8 MiB of SDRAM is RAM at 0x8000_0000; address 0 is the boot ROM, read
+-- from block RAM without an SDRAM request.
+prop_sdram_map_and_boot_rom_reads :: Property
+prop_sdram_map_and_boot_rom_reads = withTests 1 . property $ do
   P.mapM_ (\address -> S.decodeTarget address === RamTarget)
-    [0, 0xffff, 0x80000000, 0x807fffff]
+    [0x80000000, 0x8000ffff, 0x80010000, 0x807fffff]
+  P.mapM_ (\address -> S.decodeTarget address === RomTarget) [0, 0x7fc]
   P.mapM_ (\address -> S.decodeTarget address === UnmappedTarget)
-    [0x10000, 0x7fffffff, 0x80800000, 0xffffffff]
+    [0x800, 0xffff, 0x10000, 0x7fffffff, 0x80800000, 0xffffffff]
   S.decodeTarget exitDevice === ExitTarget
-  let (started, _) = S.step S.initialState {S.machine=initialMachine {programEnd=65536}}
-        (0,True,False,Just 0x48,True,False)
-  cpuPc (S.machine started) === 0x80000000
-  programEnd (S.machine started) === 0x80010000
-  cpuRunning (S.machine started) === True
+  S.decodeTarget bootCauseDevice === BootCauseTarget
+  -- Power-on fetch of the reset vector.
+  let input romWord = (0, False, False, Nothing, True, False, romWord)
+      (issued, (firstReq, _, _, _, _, _)) = S.step S.initialState (input 0)
+      (addressed, (secondReq, _, _, _, _, romAddressOut)) = S.step issued (input 0)
+      (captured, _) = S.step addressed (input 0x1234_5678)
+  firstReq === False
+  secondReq === False
+  S.phase issued === S.RomRead
+  S.romAddress issued === 0
+  romAddressOut === 0
+  S.phase addressed === S.RomCapture
+  S.phase captured === S.Normal
+  S.word captured === 0x1234_5678
 
 prop_sdram_reset_drains_pending_memory :: Property
 prop_sdram_reset_drains_pending_memory = withTests 1 . property $ do
-  let s=S.initialState {S.machine=initialMachine {cpuRunning=True}, S.phase=S.AwaitDone}
-      (cancelled, _) = S.step s (0,False,False,Just 3,True,True)
-      (drained, _) = S.step cancelled (123,False,True,Nothing,True,False)
-  cpuRunning (S.machine cancelled) === False
+  let s=S.initialState {S.machine=initialMachine {cpuPc = 0x8000_0100, cpuInRom = False, bootCause = causeNone}, S.phase=S.AwaitDone}
+      (cancelled, _) = S.step s (0,False,False,Just 3,True,True,0)
+      (drained, _) = S.step cancelled (123,False,True,Nothing,True,False,0)
+  cpuPc (S.machine cancelled) === 0
+  bootCause (S.machine cancelled) === causeBreak
   S.phase cancelled === S.AwaitDone
   S.phase drained === S.Normal
   cpuBusRequest (S.machine drained) === Nothing
@@ -1066,7 +1137,7 @@ simpleRiscGroup =
     [ ("Bus completes once and preserves concurrent RX", prop_bus_completion_and_rx_race),
       ("Bus waits, precise faults and cancellation", prop_bus_wait_faults_and_cancel),
       ("Registered memory target selection", prop_registered_memory_decode),
-      ("Registered finisher commands and access rules", prop_finisher_commands),
+      ("Finisher exits reset into the ROM; BOOTCAUSE reads and clears", prop_finisher_commands),
       ("Split counters match a 64-bit reference", prop_split_counter_matches_64_bit_reference),
       ("Counter CSR reads wait for carry", prop_counter_csr_reads_wait_for_carry),
       ("Precise retirement and UART stalls", prop_counters_retire_precisely),
@@ -1076,17 +1147,17 @@ simpleRiscGroup =
       ("Guest trap handler resumes with mret", prop_guest_handler_resumes_with_mret),
       ("MRET restores machine status", prop_mret_restores_status),
       ("Precise staged exception entry", prop_precise_exception_entry),
-      ("Trap DONE compatibility and reset", prop_trap_compatibility_and_reset),
+      ("Unhandled traps return to the boot ROM; Ctrl-C resets", prop_unhandled_trap_returns_to_boot_rom),
       ("Faulting store never writes RAM", prop_faulting_store_never_writes_ram),
       ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),
       ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
-      ("PROGRAM accepts up to 50 words", prop_program_loads_up_to_fifty_words),
-      ("RESET-MEM is exactly 16384 clear cycles", prop_reset_memory_takes_exactly_16384_clear_cycles),
+      ("Boot ROM loads programs with a guard word", prop_boot_rom_loads_programs),
+      ("Boot ROM clears RAM", prop_boot_rom_clears_memory),
       ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
       ("Backward branch in final word loops", prop_backward_branch_in_final_word_loops),
       ("SDRAM holds full word addresses across waits", prop_sdram_waits_preserve_full_address),
-      ("SDRAM map and high entry boundaries", prop_sdram_map_and_high_entry),
+      ("SDRAM map and boot ROM reads", prop_sdram_map_and_boot_rom_reads),
       ("SDRAM reset drains pending memory", prop_sdram_reset_drains_pending_memory),
       ("Registered CSR selection matches reference", prop_registered_csr_selection_matches_reference),
       ("Registered execution matches compute", prop_registered_execution_matches_compute),

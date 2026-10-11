@@ -5,9 +5,14 @@
   run_program.py IMAGE.bin [--input TEXT] --frame OUT.hex   (no board: write
       the host byte stream for tb_program.v instead)
 
-The host protocol is SimpleRisc's: 'P', the word count (16-bit little endian),
-the words (little endian), then 'R'.  INPUT is sent after 'R'.  Output is
-printed until the CPU halts and sends "DONE".
+The host protocol is the boot ROM's: 'P', the word count (16-bit little
+endian), the words (little endian), then 'R'.  The ROM loads the image at
+0x80000000 and runs it there.  INPUT is sent after 'R'.  Output is printed
+until the program ends and the ROM sends "DONE".
+
+--ram-base 0x80000000 sends 'H' instead of 'R'.  Only the separate RV64 core
+(rv64/), which still has a hardware loader, uses it; the RV32 images (BRAM and
+SDRAM) always run at 0x80000000 through the boot ROM's 'R'.
 
 The port is opened once and kept open: closing and reopening the BL616 bridge's
 UART while the FPGA is sending wedges it until the board is replugged (see
@@ -21,7 +26,7 @@ CLOCKS_PER_BIT = 868
 
 def frame_bytes(image: bytes, text: bytes, ram_base: int = 0) -> bytes:
     if ram_base not in (0, 0x80000000):
-        raise ValueError("RAM base must be 0 or 0x80000000")
+        raise ValueError("RAM base must be 0 or 0x80000000 (RV64 core only)")
     image += b"\0" * (-len(image) % 4)
     count = len(image) // 4
     if count > 16384:
@@ -62,7 +67,7 @@ def main() -> None:
     parser.add_argument("--input", default="", help="text sent after the program starts (\\n allowed)")
     parser.add_argument("--port", default="/dev/cu.usbserial-20250303171")
     parser.add_argument("--freq-mhz", type=float, default=96, help="core clock; baud = clock / 868")
-    parser.add_argument("--ram-base", type=lambda x: int(x, 0), default=0, choices=(0, 0x80000000), help="execution address; high base requires SDRAM image")
+    parser.add_argument("--ram-base", type=lambda x: int(x, 0), default=0, choices=(0, 0x80000000), help="0x80000000 sends 'H' for the separate RV64 core; RV32 images ignore it")
     parser.add_argument("--timeout", type=float, default=10)
     parser.add_argument("--frame", help="write the host byte stream as hex, one byte per line, and exit")
     args = parser.parse_args()

@@ -14,7 +14,9 @@ def load_constant(reg, value):
 
 
 def image(command, halfword=False, ignored=False):
-    words = [0x001000b7, 0x08000193, 0x30519073]  # x1=finisher, mtvec=128
+    # x1 = finisher; mtvec = word 32 of this image, which the boot ROM loads
+    # at 0x80000000.
+    words = [0x001000b7] + load_constant(3, 0x80000080) + [0x30519073]
     if ignored:
         words += load_constant(2, 0x7777) + [0x0020a023]
     # LW must read zero; otherwise loop at the branch. Emit E before exiting.
