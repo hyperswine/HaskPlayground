@@ -105,6 +105,8 @@ runningMachine :: [(Index 32, Word32)] -> Machine
 runningMachine registers =
   initialMachine
     { cpuRegs = P.foldr (P.uncurry replace) (repeat 0) registers,
+      -- every register but x0 holds a value (0 where none is given)
+      cpuRegValid = complement 1,
       cpuPhase = Fetch,
       cpuPc = ramBase,
       cpuInRom = False,
@@ -365,7 +367,7 @@ prop_registered_execution_matches_compute = property $ do
       operandB = if instructionRs2 instruction == 0 then 0 else b
       op2 = if opcode == 0x33 then operandB else immediate
       before = initialMachine {cpuPhase = OperandSelect,
-        cpuPc = pc, cpuInstruction = instruction, cpuABanks = repeat a, cpuBBanks = repeat b,
+        cpuPc = pc, cpuInstruction = instruction, cpuRegA = operandA, cpuRegB = operandB,
         cpuImm = immediate, cpuIsRegOp = opcode == 0x33}
       step m = let (m', _, _) = cpuStep m 0 Nothing True in m'
       prepared = step before
