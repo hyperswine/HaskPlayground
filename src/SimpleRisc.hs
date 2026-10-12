@@ -1386,7 +1386,9 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
       phasesReads = case cpuPhase machine of
         FetchWait -> (instructionRs1 memoryWord, instructionRs2 memoryWord)
         _ -> (instructionRs1 (cpuInstruction machine), instructionRs2 (cpuInstruction machine))
-   in ( if cpuFast final && cpuFast machine then final
+      -- (a pipeline cycle always reads where the pipeline chose, even as
+      -- it hands over: the phases read nothing for several cycles)
+   in ( if cpuPipelined machine && cpuFast machine then final
           else final {cpuReadIndices = if cpuPipelined machine then phasesReads else registerReads final},
         output )
 
@@ -1767,7 +1769,7 @@ pipeStep machine memoryWord =
               cpuPc = mPc m, cpuInRom = romAddress (mPc m), cpuPhase = Fetch, cpuFetchSource = FromMemory }
         Nothing -> machine
    in if handover
-        then (handed, Nothing, (0, Nothing, Nothing))
+        then (handed {cpuReadIndices = enteringReads}, Nothing, (0, Nothing, Nothing))
         else (committed {cpuPipe = pipe', cpuReadIndices = enteringReads}, registerWriteNow, (readAddress, memoryWrite, Nothing))
 
 -- CPU ------------------------------------------------------------------------
@@ -1800,7 +1802,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyRes
   | cpuPipelined machine && cpuFast machine =
       let (machine', write, (address, memoryWrite, tx)) = pipeStep machine memoryWord
        in if emergencyReset
-            then (resetCpu machine, Nothing, (address, Nothing, Nothing))
+            then ((resetCpu machine) {cpuReadIndices = cpuReadIndices machine'}, Nothing, (address, Nothing, Nothing))
             else (machine', write, (address, memoryWrite, tx))
   -- Between instructions, with nothing for the phases to do, the pipeline
   -- takes over at the pc.
