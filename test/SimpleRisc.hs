@@ -139,9 +139,14 @@ settleBus = go (32 :: Int)
       | otherwise = let (next, output) = machineStep machine (0, Nothing, True)
                     in if cpuPhase next == BusWait then go (fuel - 1) next else (next, output)
 
+-- | Commit with the stage register's decoded control filled in from the
+-- instruction word, as OperandSelect would have done.
+commitDecoded :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
+commitDecoded machine = commitInstruction machine {cpuExecuteControl = decodeExecuteControl (cpuInstruction machine)}
+
 commitSettled :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
 commitSettled machine ready =
-  let (queued, write, output) = commitInstruction machine ready
+  let (queued, write, output) = commitDecoded machine ready
    in if cpuPhase queued == BusWait
         then let (completed, response) = settleBus queued
               in (completed, cpuPendingWrite completed, response)
@@ -724,7 +729,7 @@ prop_precise_exception_entry = property $ do
 prop_unhandled_trap_returns_to_boot_rom :: Property
 prop_unhandled_trap_returns_to_boot_rom = withTests 1 $ property $ do
   let m = (runningMachine []) {cpuInstruction = 0x00000073, cpuPhase = Commit}
-      (queued, _, _) = commitInstruction m True
+      (queued, _, _) = commitDecoded m True
       (stopped, _, _) = cpuStep queued 0 Nothing True
       resumed = runUntilDone 3000 (startSim stopped (blankRam 0))
       reset = resetCpu stopped
@@ -742,7 +747,7 @@ prop_unhandled_trap_returns_to_boot_rom = withTests 1 $ property $ do
   rxHolding received === Just 3
   bootCause received === causeNone
   cpuPc received === 0x40
-  let (notTaken, write, _) = commitInstruction
+  let (notTaken, write, _) = commitDecoded
         m {cpuInstruction = 0x00000063, cpuComputed = Computed Nothing 4 6 (Just False) 0} True
   cpuPhase notTaken === Fetch
   cpuPc notTaken === 4
@@ -778,7 +783,7 @@ prop_registered_csr_selection_matches_reference = property $ do
         cpuInstret = Counter64 (value `xor` 0xb02) (value `xor` 0xb82) False}
   P.mapM_ (\csr -> do
     let m = base {cpuInstruction = csrInstruction csr 2 1 0}
-        (queued, _, _) = commitInstruction m True
+        (queued, _, _) = commitDecoded m True
         (readState, _, _) = cpuStep queued 0 Nothing True
     case readCsr (fromIntegral csr) base of
       Nothing -> cpuPhase readState === Trap
@@ -805,7 +810,7 @@ prop_csr_read_modify_write = property $ do
         m = initialMachine {cpuPhase = Commit, cpuPc = 16,
               cpuInstruction = instruction, cpuA = if source == 0 then 0 else operand,
               cpuScratch = old, cpuComputed = Computed Nothing 20 0 Nothing 0}
-        (reading, _, _) = commitInstruction m True
+        (reading, _, _) = commitDecoded m True
         (writing, _, _) = cpuStep reading 0 Nothing True
         (finished, registerWrite, _) = cpuStep writing 0 Nothing True
     cpuPhase reading === CsrRead
@@ -1465,7 +1470,7 @@ prop_finisher_commands = property $ do
           cpuPc = 4, cpuInstruction = if width == 2 then 0x0020a023 else 0x00209023,
           cpuB = value, cpuComputed = Computed Nothing 8 0 Nothing exitDevice,
           cpuTrapRegisters = initialTrapRegisters {trapVector = 0x100, trapValue = 42}}
-        (queued, _, command) = commitInstruction base True
+        (queued, _, command) = commitDecoded base True
         (completed, response) = settleBus queued
         (counted, _) = machineStep completed (0, Nothing, True)
     cpuPhase queued === BusWait

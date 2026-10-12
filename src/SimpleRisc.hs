@@ -582,19 +582,74 @@ interruptCause machine
   where
     ready = cpuInterruptEnable machine .&. pendingInterrupts (cpuDevices machine)
 
+-- | What Commit does with an instruction, decoded at OperandSelect and
+-- carried in the stage register: later stages pick their action from one
+-- flip-flop each rather than decoding the instruction word again. Encodings
+-- with a reserved funct3 decode to 'KindInvalid' here.
+data CommitKind
+  = KindAlu | KindJump | KindBranch | KindLoad | KindStore | KindFence | KindFenceI
+  | KindEcall | KindEbreak | KindMret | KindWfi | KindCsr | KindInvalid
+  deriving (Generic, NFDataX, Show, Eq)
+
+{-# ANN module (DataReprAnn $(liftQ [t| CommitKind |]) 13
+  [ ConstrRepr 'KindAlu 1 1 [],
+    ConstrRepr 'KindJump 2 2 [],
+    ConstrRepr 'KindBranch 4 4 [],
+    ConstrRepr 'KindLoad 8 8 [],
+    ConstrRepr 'KindStore 16 16 [],
+    ConstrRepr 'KindFence 32 32 [],
+    ConstrRepr 'KindFenceI 64 64 [],
+    ConstrRepr 'KindEcall 128 128 [],
+    ConstrRepr 'KindEbreak 256 256 [],
+    ConstrRepr 'KindMret 512 512 [],
+    ConstrRepr 'KindWfi 1024 1024 [],
+    ConstrRepr 'KindCsr 2048 2048 [],
+    ConstrRepr 'KindInvalid 4096 4096 []
+  ]) #-}
+
+decodeCommitKind :: Word32 -> CommitKind
+decodeCommitKind instruction = case instruction .&. 0x7f of
+  0x37 -> KindAlu
+  0x17 -> KindAlu
+  0x13 -> KindAlu
+  0x33 -> KindAlu
+  0x6f -> KindJump
+  0x67 | funct3 == 0 -> KindJump
+  0x63 | funct3 /= 2 && funct3 /= 3 -> KindBranch
+  0x03 | validLoad funct3 -> KindLoad
+  0x23 | validStore funct3 -> KindStore
+  0x0f | funct3 == 0 -> KindFence
+       | funct3 == 1 -> KindFenceI
+  0x73
+    | instruction == 0x0000_0073 -> KindEcall
+    | instruction == 0x0010_0073 -> KindEbreak
+    | instruction == 0x3020_0073 -> KindMret
+    | instruction == 0x1050_0073 -> KindWfi
+    | funct3 /= 0 && funct3 /= 4 -> KindCsr
+  _ -> KindInvalid
+  where
+    funct3 = instructionFunct3 instruction
+
 -- Decode and operand selection are registered before the ALU carry chains;
 -- the result mux runs in a separate stage after all candidates are registered.
+-- This is the decoded half of the stage register between OperandSelect and
+-- Execute; it stays with the instruction until it retires.
 data ExecuteControl = ExecuteControl
-  { execOpcode :: Word32, execFunct3 :: BitVector 3, execLegal :: Bool,
+  { execFunct3 :: BitVector 3, execLegal :: Bool,
     execSubtract :: Bool, execArithmeticShift :: Bool,
     execShift :: Bool, execMulDiv :: Bool,
     -- | A load or store; a branch or jump. Registered here so ExecuteFinish
     -- picks its memory read from flip-flops.
-    execMemory :: Bool, execJump :: Bool }
+    execMemory :: Bool, execJump :: Bool,
+    -- | ExecuteFinish's result: LUI's immediate, AUIPC's sum, or the ALU's
+    -- (OP-IMM and OP); none of them for anything else.
+    execLui :: Bool, execAuipc :: Bool, execAluOp :: Bool,
+    execStore :: Bool,
+    execKind :: CommitKind }
   deriving (Generic, NFDataX)
 
 initialExecuteControl :: ExecuteControl
-initialExecuteControl = ExecuteControl 0 0 False False False False False False False
+initialExecuteControl = ExecuteControl 0 False False False False False False False False False False False KindInvalid
 
 decodeExecuteControl :: Word32 -> ExecuteControl
 decodeExecuteControl instruction =
@@ -607,9 +662,11 @@ decodeExecuteControl instruction =
       legal = if regOperation
         then funct7 == 0 || (alternate && (funct3 == 0 || funct3 == 5))
         else not shiftOperation || funct7 == 0 || (alternate && funct3 == 5)
-   in ExecuteControl opcode funct3 legal (regOperation && alternate) alternate
+   in ExecuteControl funct3 legal (regOperation && alternate) alternate
         ((opcode == 0x13 || regOperation) && shiftOperation) (regOperation && funct7 == 1)
         (opcode == 0x03 || opcode == 0x23) (opcode == 0x63 || opcode == 0x6f || opcode == 0x67)
+        (opcode == 0x37) (opcode == 0x17) (opcode == 0x13 || regOperation) (opcode == 0x23)
+        (decodeCommitKind instruction)
 
 -- High and low comparisons run in parallel; their registered results are
 -- combined in ExecuteFinish, avoiding a full 32-bit comparison carry chain.
@@ -1440,12 +1497,11 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                    }
                ExecuteFinish ->
                  let control = cpuExecuteControl
-                     result = case execOpcode control of
-                       0x37 -> Just cpuImm
-                       0x17 -> Just (cTarget cpuComputed)
-                       0x13 -> selectedAlu control cpuAluCandidates cpuAluCompare
-                       0x33 -> selectedAlu control cpuAluCandidates cpuAluCompare
-                       _ -> Nothing
+                     result
+                       | execLui control = Just cpuImm
+                       | execAuipc control = Just (cTarget cpuComputed)
+                       | execAluOp control = selectedAlu control cpuAluCandidates cpuAluCompare
+                       | otherwise = Nothing
                      -- The RAM port is free here (the prefetch read went out at
                      -- Decode). Loads and stores read their word; branches and
                      -- jumps read their target in case it is taken. The choice
@@ -1454,7 +1510,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      memoryOp = cpuLocalMemory && execMemory control
                      jump = cpuLocalMemory && execJump control
                      fast = memoryOp && validMemoryAddress (cAddress cpuComputed)
-                     store = execMemory control && testBit (execOpcode control) 5
+                     store = execStore control
                      -- word addresses of two registers (a store that writes is
                      -- to RAM, so this is exact; memoryIndex would share the
                      -- memory-address output's mux)
@@ -1464,8 +1520,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      -- as fetchable). All registered conditions: the read of
                      -- pc + 8 goes out whether or not the next one may start
                      -- early; the hazard check only sets cpuAhead.
-                     plainAlu = (execOpcode control == 0x13 || execOpcode control == 0x33
-                         || execOpcode control == 0x37 || execOpcode control == 0x17)
+                     plainAlu = (execAluOp control || execLui control || execAuipc control)
                        && not (execShift control) && not (execMulDiv control)
                      -- the next word is on the bus now (after a Decode), or
                      -- already in the prefetch buffer (in a chain of these)
@@ -1629,7 +1684,6 @@ commitInstruction committing _txReady =
         }
       instruction = cpuInstruction machine
       Computed {..} = cpuComputed machine
-      opcode = instruction .&. 0x7f
       rd = instructionRd instruction
       funct3 = instructionFunct3 instruction
       nextPc = cLink
@@ -1647,32 +1701,25 @@ commitInstruction committing _txReady =
       requestBus write = withoutRegister
         (machine {cpuPhase = BusWait,
           cpuBusRequest = Just (BusRequest address funct3 write (cpuB machine))}, (0, Nothing, Nothing))
-   in case opcode of
-        0x37 -> normal -- LUI
-        0x17 -> normal -- AUIPC
-        0x13 -> normal -- OP-IMM
-        0x33 -> normal -- OP
-        -- JAL
-        0x6f -> jumpAndLink cTarget
-        -- JALR
-        0x67 -> if funct3 == 0 then jumpAndLink cTarget else invalid
-        -- branches
-        0x63 ->
+   in case execKind (cpuExecuteControl machine) of
+        -- LUI, AUIPC, OP-IMM, OP (an illegal OP encoding has no result)
+        KindAlu -> normal
+        -- JAL, JALR
+        KindJump -> jumpAndLink cTarget
+        KindBranch ->
           case cTaken of
             Just True | cTarget .&. 3 /= 0 -> fault 0 cTarget
             Just takeBranch -> withoutRegister (finishInstruction machine
               {cpuPc = if takeBranch then cTarget else nextPc,
                cpuFetchSource = if takeBranch then FromTarget else FromPrefetch} Nothing)
             Nothing -> invalid
-        -- Validate the encoding and alignment before touching RAM or a device.
-        -- Address misalignment takes priority over an out-of-map address.
-        0x03
-          | not (validLoad funct3) -> invalid
+        -- Validate the alignment before touching RAM or a device. Address
+        -- misalignment takes priority over an out-of-map address.
+        KindLoad
           | misalignedMemory funct3 address -> fault 4 address
           | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus False
-        0x23
-          | not (validStore funct3) -> invalid
+        KindStore
           | misalignedMemory funct3 address -> fault 6 address
           -- a word store writes at once; a byte or halfword waits for the word
           | cpuFastMemory machine && funct3 == 2 ->
@@ -1683,30 +1730,25 @@ commitInstruction committing _txReady =
         -- FENCE is a no-op in this single-master core. FENCE.I fetches the
         -- next instruction from memory, not from a prefetch buffer. The
         -- other MISC-MEM encodings are reserved.
-        0x0f
-          | funct3 == 0 -> noWrite nextPc
-          | funct3 == 1 -> withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromMemory} Nothing)
-          | otherwise -> invalid
-        0x73
-          | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
-          | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
-          | instruction == 0x3020_0073 -> withoutRegister (machine {cpuPhase = TrapReturn}, (0, Nothing, Nothing))
-          -- WFI waits in Commit until an interrupt is pending and enabled in
-          -- mie (whether or not MIE is set).
-          | instruction == 0x1050_0073 ->
-              if cpuWake machine then noWrite nextPc else withoutRegister (machine, (0, Nothing, Nothing))
-          | funct3 == 1 || funct3 == 2 || funct3 == 3 || funct3 == 5 || funct3 == 6 || funct3 == 7 ->
-              withoutRegister
-                ( machine {cpuPhase = CsrRead,
-                    cpuCsrSelection = decodeCsrSelection (csrAddress instruction),
-                    cpuCsrReadOnly = csrAddress instruction == 0x301 || csrAddress instruction .&. 0xc00 == 0xc00,
-                    cpuCsrSource = if testBit funct3 2
-                      then resize ((instruction `shiftR` 15) .&. 0x1f)
-                      else cpuA machine},
-                  (0, Nothing, Nothing)
-                )
-          | otherwise -> invalid
-        _ -> invalid
+        KindFence -> noWrite nextPc
+        KindFenceI -> withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromMemory} Nothing)
+        KindEcall -> fault 11 0 -- from M mode
+        KindEbreak -> fault 3 (cpuPc machine)
+        KindMret -> withoutRegister (machine {cpuPhase = TrapReturn}, (0, Nothing, Nothing))
+        -- WFI waits in Commit until an interrupt is pending and enabled in
+        -- mie (whether or not MIE is set).
+        KindWfi -> if cpuWake machine then noWrite nextPc else withoutRegister (machine, (0, Nothing, Nothing))
+        KindCsr ->
+          withoutRegister
+            ( machine {cpuPhase = CsrRead,
+                cpuCsrSelection = decodeCsrSelection (csrAddress instruction),
+                cpuCsrReadOnly = csrAddress instruction == 0x301 || csrAddress instruction .&. 0xc00 == 0xc00,
+                cpuCsrSource = if testBit funct3 2
+                  then resize ((instruction `shiftR` 15) .&. 0x1f)
+                  else cpuA machine},
+              (0, Nothing, Nothing)
+            )
+        KindInvalid -> invalid
 
 -- | A halfword must be 2-aligned and a word 4-aligned; byte accesses are free.
 misalignedMemory :: BitVector 3 -> Word32 -> Bool
