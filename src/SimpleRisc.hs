@@ -804,6 +804,8 @@ data Machine = Machine
     cpuScratch :: Word32,
     cpuInterruptEnable :: Word32,
     cpuCsrSelection :: Vec 14 Bool,
+    -- | The CSR instruction writes (registered with the selection at Commit).
+    cpuCsrWrite :: Bool,
     cpuCsrReadOnly :: Bool,
     cpuCsrValue :: Word32,
     cpuCsrSource :: Word32,
@@ -883,6 +885,7 @@ initialMachine =
       cpuScratch = 0,
       cpuInterruptEnable = 0,
       cpuCsrSelection = repeat False,
+      cpuCsrWrite = False,
       cpuCsrReadOnly = False,
       cpuCsrValue = 0,
       cpuCsrSource = 0,
@@ -1434,8 +1437,13 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                Fetch -> case interruptCause machineRx of
                  Just cause -> withoutRegister (raiseException machineRx {cpuFetchSource = FromMemory} cause 0)
                  Nothing ->
+                   -- The cause and value of an instruction access fault are
+                   -- written here whether or not it faults (nothing reads
+                   -- them before another exception would overwrite them),
+                   -- so Decode only chooses the phase.
                    let fetched = machineRx {cpuFetchSource = FromMemory,
-                         cpuFetchFault = not (fetchable (decodeTarget cpuPc)), cpuInRom = romAddress cpuPc}
+                         cpuFetchFault = not (fetchable (decodeTarget cpuPc)), cpuInRom = romAddress cpuPc,
+                         cpuExceptionCause = 1, cpuExceptionValue = cpuPc}
                        phase = case cpuFetchSource of
                          FromPrefetch | cpuPrefetchValid -> Decode
                          FromTarget | cpuTargetValid -> Decode
@@ -1461,7 +1469,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                FetchCapture -> next machineRx {cpuPhase = FetchWait}
                FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord}
                Decode
-                 | cpuFetchFault -> withoutRegister (raiseException machineRx 1 cpuPc)
+                 | cpuFetchFault -> withoutRegister (machineRx {cpuPhase = Trap, cpuFetchSource = FromMemory, cpuAhead = False}, (0, Nothing, Nothing))
                  | otherwise ->
                      withoutRegister
                        ( machineRx
@@ -1742,6 +1750,7 @@ commitInstruction committing _txReady =
           withoutRegister
             ( machine {cpuPhase = CsrRead,
                 cpuCsrSelection = decodeCsrSelection (csrAddress instruction),
+                cpuCsrWrite = csrWriteRequested instruction,
                 cpuCsrReadOnly = csrAddress instruction == 0x301 || csrAddress instruction .&. 0xc00 == 0xc00,
                 cpuCsrSource = if testBit funct3 2
                   then resize ((instruction `shiftR` 15) .&. 0x1f)
@@ -1864,7 +1873,7 @@ csrReadStep machine =
                 && counterCarry (cpuCycle machine))
           || ((selection !! (10 :: Index 14) || selection !! (11 :: Index 14))
                 && counterCarry (cpuInstret machine))
-   in if not (or selection) || (cpuCsrReadOnly machine && csrWriteRequested instruction)
+   in if not (or selection) || (cpuCsrReadOnly machine && cpuCsrWrite machine)
         then invalid
         else withoutRegister
           (captured {cpuPhase = if busy then CsrRead else CsrWrite}, (0, Nothing, Nothing))
@@ -1904,9 +1913,36 @@ csrWriteStep machine =
         1 -> source
         2 -> old .|. source
         _ -> old .&. complement source
-      updated = if csrWriteRequested instruction then writeCsr (csrAddress instruction) value machine else machine
+      updated = if cpuCsrWrite machine then writeSelectedCsr (cpuCsrSelection machine) value machine else machine
    in withRegister (instructionRd instruction) old
         (finishInstruction updated {cpuPc = cLink (cpuComputed machine), cpuFetchSource = FromPrefetch} Nothing)
+
+-- | 'writeCsr' by the registered one-hot selection rather than the address:
+-- the read stage has already refused read-only and unknown CSRs, so a
+-- counter selected here is the machine-mode (0xb..) one.
+writeSelectedCsr :: Vec 14 Bool -> Word32 -> Machine -> Machine
+writeSelectedCsr selection value machine =
+  let regs = cpuTrapRegisters machine
+      at i = selection !! (i :: Index 14)
+      counter
+        | at 8 = Just (0xb00, value)
+        | at 9 = Just (0xb80, value)
+        | at 10 = Just (0xb02, value)
+        | at 11 = Just (0xb82, value)
+        | otherwise = Nothing
+   in machine
+        { cpuTrapRegisters = regs
+            { trapMie = if at 0 then testBit value 3 else trapMie regs,
+              trapMpie = if at 0 then testBit value 7 else trapMpie regs,
+              trapVector = if at 3 then value .&. complement 3 else trapVector regs,
+              trapEpc = if at 5 then value .&. complement 3 else trapEpc regs,
+              trapCause = if at 6 then value else trapCause regs,
+              trapValue = if at 7 then value else trapValue regs
+            },
+          cpuInterruptEnable = if at 2 then value .&. 0x888 else cpuInterruptEnable machine,
+          cpuScratch = if at 4 then value else cpuScratch machine,
+          cpuCounterWrite = counter
+        }
 
 returnFromTrap :: Machine -> (Machine, StepOutput)
 returnFromTrap machine =

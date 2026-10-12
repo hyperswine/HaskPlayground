@@ -830,6 +830,7 @@ prop_csr_access_rules_and_masks = property $ do
         let instruction = csrInstruction address kind 0 source
             (m, write, output) = cpuStep base {cpuInstruction = instruction,
               cpuCsrSelection = decodeCsrSelection (fromIntegral address),
+              cpuCsrWrite = csrWriteRequested instruction,
               cpuCsrReadOnly = address == 0x301 || address .&. 0xc00 == 0xc00} 0 Nothing True
         cpuPhase m === if faults then Trap else CsrWrite
         write === Nothing
@@ -1427,7 +1428,8 @@ prop_counter_write_overrides_retirement = withTests 1 $ property $ do
   P.mapM_ (\address -> do
     let m = initialMachine {cpuPhase = CsrRead,
               cpuInstruction = csrInstruction address 1 0 0,
-              cpuCsrSelection = decodeCsrSelection (fromIntegral address), cpuCsrReadOnly = True}
+              cpuCsrSelection = decodeCsrSelection (fromIntegral address), cpuCsrReadOnly = True,
+              cpuCsrWrite = csrWriteRequested (csrInstruction address 1 0 0)}
         (fault, _, _) = cpuStep m 0 Nothing True
     cpuPhase fault === Trap
     cpuExceptionCause fault === 2
