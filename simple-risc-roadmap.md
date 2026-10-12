@@ -70,15 +70,17 @@ Toward a pipeline, on the BRAM image:
 - branch-target prefetch;
 - decode-ahead (independent ALU instructions overlap: 4 cycles instead of
   9);
-- the register file in RAM.
+- the register file in RAM;
+- decoded control carried in the stage register (Commit selects its action
+  from a one-hot kind instead of decoding the instruction word).
 
-CPI on four kernels fell from 12.98 to 8.82. The verified build is 93 MHz
-(10.5 million instructions per second against 7.4 for the serial core at
+CPI on four kernels fell from 12.98 to 8.82. The verified build is 99 MHz
+(11.2 million instructions per second against 7.4 for the serial core at
 96 MHz). The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
 with differential tests came first. See `boards/tangnano20k/` reports
-FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD and REGFILE
-(2026-10-12). The single phase state machine is now the timing limit; the
-next step is per-stage registers with forwarding.
+FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE and STAGES
+(2026-10-12). Next: a registered source select for the memory port, then
+real per-stage registers (several instructions in flight) with forwarding.
 
 ## Implementation status (2026-10-11): step 2 complete
 
