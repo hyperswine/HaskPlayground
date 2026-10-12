@@ -105,6 +105,8 @@ runningMachine :: [(Index 32, Word32)] -> Machine
 runningMachine registers =
   initialMachine
     { cpuRegs = P.foldr (P.uncurry replace) (repeat 0) registers,
+      -- every register but x0 holds a value (0 where none is given)
+      cpuRegValid = complement 1,
       cpuPhase = Fetch,
       cpuPc = ramBase,
       cpuInRom = False,
@@ -365,7 +367,7 @@ prop_registered_execution_matches_compute = property $ do
       operandB = if instructionRs2 instruction == 0 then 0 else b
       op2 = if opcode == 0x33 then operandB else immediate
       before = initialMachine {cpuPhase = OperandSelect,
-        cpuPc = pc, cpuInstruction = instruction, cpuABanks = repeat a, cpuBBanks = repeat b,
+        cpuPc = pc, cpuInstruction = instruction, cpuRegA = operandA, cpuRegB = operandB,
         cpuImm = immediate, cpuIsRegOp = opcode == 0x33}
       step m = let (m', _, _) = cpuStep m 0 Nothing True in m'
       prepared = step before
@@ -439,6 +441,19 @@ prop_taken_jump_fetches_its_target_early = withTests 1 . property $ do
   cpuRegs (simMachine halted) !! (1 :: Index 32) === 1
   trapEpc (cpuTrapRegisters (simMachine halted)) === ramBase + 12
   cycles === 9 + 7 + 5
+
+-- | MISC-MEM: FENCE and FENCE.I retire; reserved encodings (here funct3 5,
+-- the word the differential test found) are illegal instructions.
+prop_misc_mem_decoding :: Property
+prop_misc_mem_decoding = withTests 1 . property $ do
+  let run program = simMachine (P.snd (runUntilHalt 400 (startSim (runningMachine []) (ramFromList program))))
+      fenced = run [0x0ff0_000f, 0x0000_100f, addi 1 0 5]
+      reserved = run [0x58cf_520f]
+  cpuRegs fenced !! (1 :: Index 32) === 5
+  trapEpc (cpuTrapRegisters fenced) === ramBase + 12
+  trapCause (cpuTrapRegisters reserved) === 2
+  trapValue (cpuTrapRegisters reserved) === 0x58cf_520f
+  trapEpc (cpuTrapRegisters reserved) === ramBase
 
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
@@ -1680,6 +1695,7 @@ simpleRiscGroup =
       ("Simple instructions overlap unless dependent", prop_simple_instructions_overlap_unless_dependent),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
+      ("MISC-MEM decoding", prop_misc_mem_decoding),
       ("RAM accesses take the fast path", prop_ram_accesses_take_the_fast_path),
       ("A taken jump fetches its target early", prop_taken_jump_fetches_its_target_early),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),

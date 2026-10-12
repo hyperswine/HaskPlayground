@@ -664,7 +664,17 @@ selectedAlu control candidates parts = if execLegal control then Just value else
       _ -> candidates !! (fromIntegral (unpack (execFunct3 control) :: Unsigned 3) :: Index 8)
 
 data Machine = Machine
-  { cpuRegs :: Vec 32 Word32,
+  { -- | The register file as values: the simulation's mirror. The BRAM
+    -- circuit keeps the registers in distributed RAM instead (two read
+    -- ports, see 'registerReads'), injects their outputs as cpuRfA/cpuRfB
+    -- and leaves this constant, so synthesis removes it.
+    cpuRegs :: Vec 32 Word32,
+    -- | Which registers hold a value: a reset clears these instead of 32
+    -- words, and a register whose bit is clear reads as 0 (x0 never set).
+    cpuRegValid :: BitVector 32,
+    -- | This cycle's register-file outputs at 'registerReads', injected.
+    cpuRfA :: Word32,
+    cpuRfB :: Word32,
     -- | Registered writeback request; consumed during the next fetch.
     cpuPendingWrite :: RegisterWrite,
     cpuPc :: Word32,
@@ -714,8 +724,9 @@ data Machine = Machine
     -- | Executing boot ROM code, registered at Fetch. Ctrl-C only breaks
     -- programs: in the ROM a 0x03 byte is data, such as part of an image.
     cpuInRom :: Bool,
-    cpuABanks :: Vec 4 Word32,
-    cpuBBanks :: Vec 4 Word32,
+    -- | Decode's register reads (rs1, rs2).
+    cpuRegA :: Word32,
+    cpuRegB :: Word32,
     cpuA :: Word32,
     cpuB :: Word32,
     -- | The instruction's immediate, whichever format it uses.
@@ -771,6 +782,9 @@ initialMachine :: Machine
 initialMachine =
   Machine
     { cpuRegs = repeat 0,
+      cpuRegValid = 0,
+      cpuRfA = 0,
+      cpuRfB = 0,
       cpuPendingWrite = Nothing,
       cpuPc = 0,
       cpuPhase = Fetch,
@@ -794,8 +808,8 @@ initialMachine =
       cpuAhead = False,
       cpuPrefetchIssue = False,
       cpuInRom = True,
-      cpuABanks = repeat 0,
-      cpuBBanks = repeat 0,
+      cpuRegA = 0,
+      cpuRegB = 0,
       cpuA = 0,
       cpuB = 0,
       cpuImm = 0,
@@ -959,8 +973,16 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
     -- MISO is asynchronous: two flip-flops, then into the I/O complex.
     miso = register high (register high sdMiso)
     machineState = register initialMachine (fst <$> stepped)
-    stepped = withIo <$> machineState <*> machineInput <*> ioAnswer
-    withIo m input answer = machineStepDecoded m {cpuDevices = (cpuDevices m) {devIo = answer}} input
+    stepped = withIo <$> machineState <*> machineInput <*> ioAnswer <*> rfA <*> rfB
+    -- The register file is distributed RAM: two copies, one per read port,
+    -- written together. The mirror in the machine stays constant (removed).
+    withIo m input answer a b =
+      let (m', output) = machineStepCoreWith decodeMemoryTarget
+            m {cpuDevices = (cpuDevices m) {devIo = answer}, cpuRfA = a, cpuRfB = b} input
+       in (m' {cpuRegs = repeat 0}, output)
+    rfWrite = (\m cancel -> if cancel then Nothing else cpuPendingWrite m) <$> machineState <*> breaking
+    rfA = asyncRam (SNat @32) (fst . registerReads <$> machineState) rfWrite
+    rfB = asyncRam (SNat @32) (snd . registerReads <$> machineState) rfWrite
     machineOutput = snd <$> stepped
     -- The I/O complex sees the CPU's request as registered bus state and
     -- answers a cycle later; a system reset returns it to idle.
@@ -1182,8 +1204,16 @@ machineStep machine (memoryWord, received, txReady) =
 machineStepDecoded :: Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
 machineStepDecoded = machineStepDecodedWith decodeMemoryTarget
 
+-- | One cycle with the register file as values in the machine ('cpuRegs'):
+-- the simulation and the SDRAM image.
 machineStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
-machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emergencyRequest) =
+machineStepDecodedWith decodeTarget machine = machineStepCoreWith decodeTarget (withMirrorReads machine)
+
+-- | One cycle; the register file's outputs at 'registerReads' are already in
+-- cpuRfA/cpuRfB, and its write this cycle is the state's cpuPendingWrite
+-- (unless a break cancels it).
+machineStepCoreWith :: (Word32 -> MemoryTarget) -> Machine -> (Word32, Maybe Byte, Bool, Bool) -> (Machine, StepOutput)
+machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergencyRequest) =
   let emergencyReset = breakRequested machine emergencyRequest
       receivedMachine = case (not emergencyReset, received, rxHolding machine) of
         (True, Just byte, Nothing) -> machine {rxHolding = Just byte}
@@ -1238,7 +1268,7 @@ machineStepDecodedWith decodeTarget machine (memoryWord, received, txReady, emer
         | cpuTargetCount machine /= 0 =
             prefetched {cpuTargetCount = cpuTargetCount machine - 1}
         | otherwise = prefetched
-   in (if clearRegisters machine then targeted {cpuRegs = repeat 0} else targeted, output)
+   in (if clearRegisters machine then targeted {cpuRegs = repeat 0, cpuRegValid = 0} else targeted, output)
 
 -- | Keep time while an external memory holds the core (the SDRAM wrapper).
 tickHeld :: Machine -> Machine
@@ -1331,8 +1361,10 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
               -- Commit, from the captured next word). Both sources are core
               -- registers, picked by one one-hot phase bit.
               decoding = case cpuPhase of Commit -> cpuNextInstruction; _ -> instruction
-              sharedABanks = readRegisterBanks (instructionRs1 decoding) cpuRegs
-              sharedBBanks = readRegisterBanks (instructionRs2 decoding) cpuRegs
+              -- (the register file is read at 'registerReads', which picks
+              -- the same instruction)
+              sharedRegA = registerValue cpuRegValid (instructionRs1 decoding) cpuRfA
+              sharedRegB = registerValue cpuRegValid (instructionRs2 decoding) cpuRfB
            in case cpuPhase of
                -- Only the ROM and RAM hold instructions. The check is
                -- registered here and raised as an access fault at Decode.
@@ -1377,8 +1409,8 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      withoutRegister
                        ( machineRx
                            { cpuPhase = OperandSelect,
-                             cpuABanks = sharedABanks,
-                             cpuBBanks = sharedBBanks,
+                             cpuRegA = sharedRegA,
+                             cpuRegB = sharedRegB,
                              cpuImm = decodeImmediate instruction,
                              cpuIsRegOp = instruction .&. 0x7f == 0x33,
                              cpuPrefetchAddress = cpuPc + 4,
@@ -1390,12 +1422,11 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                          (if cpuLocalMemory then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
                        )
                OperandSelect ->
-                 let selectedB = selectRegisterBank (instructionRs2 instruction) cpuBBanks
-                  in next machineRx
+                 next machineRx
                        { cpuPhase = Execute,
-                         cpuA = selectRegisterBank (instructionRs1 instruction) cpuABanks,
-                         cpuB = selectedB,
-                         cpuOp2 = if cpuIsRegOp then selectedB else cpuImm,
+                         cpuA = cpuRegA,
+                         cpuB = cpuRegB,
+                         cpuOp2 = if cpuIsRegOp then cpuRegB else cpuImm,
                          cpuExecuteControl = decodeExecuteControl instruction
                        }
                Execute ->
@@ -1496,8 +1527,8 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                        | early = committed
                            { cpuPhase = OperandSelect,
                              cpuInstruction = next',
-                             cpuABanks = sharedABanks,
-                             cpuBBanks = sharedBBanks,
+                             cpuRegA = sharedRegA,
+                             cpuRegB = sharedRegB,
                              cpuImm = decodeImmediate next',
                              cpuIsRegOp = next' .&. 0x7f == 0x33,
                              cpuFetchFault = False,
@@ -1857,6 +1888,25 @@ finishWith machine write request = (machine {cpuPhase = Fetch, cpuCountRetiremen
 
 -- Split the physical 32-way mux across two clock edges. Each first-stage
 -- register sees eight candidates; the operand register then sees four banks.
+-- | Where the register file is read this cycle: rs1 and rs2 of the
+-- instruction being decoded, the instruction register's (Decode) or, at
+-- Commit, the captured next word's (decode-ahead).
+registerReads :: Machine -> (Index 32, Index 32)
+registerReads machine =
+  let word = case cpuPhase machine of Commit -> cpuNextInstruction machine; _ -> cpuInstruction machine
+   in (instructionRs1 word, instructionRs2 word)
+
+-- | A register file output, or 0 for a register not written since reset.
+registerValue :: BitVector 32 -> Index 32 -> Word32 -> Word32
+registerValue valid index value = if testBit valid (fromIntegral index) then value else 0
+
+-- | The simulation's register file: inject the mirror's values at
+-- 'registerReads'.
+withMirrorReads :: Machine -> Machine
+withMirrorReads machine =
+  let (a, b) = registerReads machine
+   in machine {cpuRfA = cpuRegs machine !! a, cpuRfB = cpuRegs machine !! b}
+
 readRegisterBanks :: Index 32 -> Vec 32 Word32 -> Vec 4 Word32
 readRegisterBanks index regs = map (!! bankOffset) (unconcat (SNat @8) regs)
   where
@@ -1872,7 +1922,8 @@ readRegister index Machine {..} = cpuRegs !! index
 
 writeRegister :: Index 32 -> Word32 -> Machine -> Machine
 writeRegister 0 _ machine = machine
-writeRegister index value machine@Machine {..} = machine {cpuRegs = replace index value cpuRegs}
+writeRegister index value machine@Machine {..} =
+  machine {cpuRegs = replace index value cpuRegs, cpuRegValid = setBit cpuRegValid (fromIntegral index)}
 
 regIndex :: Word32 -> Index 32
 regIndex value = fromIntegral (resize value :: Unsigned 5)
