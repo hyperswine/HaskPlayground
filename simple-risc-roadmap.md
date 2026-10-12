@@ -72,15 +72,16 @@ Toward a pipeline, on the BRAM image:
   9);
 - the register file in RAM;
 - decoded control carried in the stage register (Commit selects its action
-  from a one-hot kind instead of decoding the instruction word).
+  from a one-hot kind instead of decoding the instruction word);
+- the memory port's address and store write from registers.
 
-CPI on four kernels fell from 12.98 to 8.82. The verified build is 99 MHz
-(11.2 million instructions per second against 7.4 for the serial core at
+CPI on four kernels fell from 12.98 to 8.82. The verified build is 117 MHz
+(13.3 million instructions per second against 7.4 for the serial core at
 96 MHz). The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
 with differential tests came first. See `boards/tangnano20k/` reports
-FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE and STAGES
-(2026-10-12). Next: a registered source select for the memory port, then
-real per-stage registers (several instructions in flight) with forwarding.
+FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE, STAGES and
+MEMORY-PORT (2026-10-12). Next: real per-stage registers (several
+instructions in flight) with forwarding.
 
 ## Implementation status (2026-10-11): step 2 complete
 

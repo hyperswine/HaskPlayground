@@ -6,7 +6,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 
 | Design | Source | Build script | Clock |
 |---|---|---|---|
-| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 99 MHz (placement mode 2) |
+| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 117 MHz (placement mode 2) |
 | SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -308,16 +308,17 @@ FREQ_MHZ=108 boards/tangnano20k/build_gowin.sh
 The current verified SimpleRisc build, with fetch overlap, the RAM
 load/store fast path, branch-target prefetch, decode-ahead, the register
 file in RAM ([REGFILE-2026-10-12.md](REGFILE-2026-10-12.md)) and decoded
-control in the stage register ([STAGES-2026-10-12.md](STAGES-2026-10-12.md)),
-is:
+control in the stage register ([STAGES-2026-10-12.md](STAGES-2026-10-12.md))
+and the memory port from registers
+([MEMORY-PORT-2026-10-12.md](MEMORY-PORT-2026-10-12.md)), is:
 
 ```bash
-GOWIN_PLACE_OPTION=2 FREQ_MHZ=99 boards/tangnano20k/build_gowin.sh
+GOWIN_PLACE_OPTION=2 FREQ_MHZ=117 boards/tangnano20k/build_gowin.sh
 ```
 
-The UART then runs at 99,000,000 / 868 = 114,055 baud: pass `--freq-mhz 99`
-to the check scripts. It closes with 0.001 ns to spare, and placement modes
-give very different results with this design (84-99 MHz at a 99 MHz target), and Gowin's license server refuses
+The UART then runs at 117,000,000 / 868 = 134,793 baud: pass `--freq-mhz 117`
+to the check scripts. Placement modes give very different results with this
+design (85-108 MHz at a 108 MHz target; mode 2 reaches 117), and Gowin's license server refuses
 builds intermittently; retry those.
 
 The build checks the requested clock and rejects any internal setup or hold
