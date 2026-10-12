@@ -1371,7 +1371,8 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
         | otherwise = prefetched
       final = (if clearRegisters machine then targeted {cpuRegs = repeat 0, cpuRegValid = 0} else targeted)
         {cpuInterruptDue = isJust (interruptCause machine)}
-   in (final {cpuReadIndices = registerReads final}, output)
+      -- (the pipeline chose its own read indices)
+   in (if cpuFast final && cpuFast machine then final else final {cpuReadIndices = registerReads final}, output)
 
 -- | Keep time while an external memory holds the core (the SDRAM wrapper).
 tickHeld :: Machine -> Machine
@@ -1497,13 +1498,18 @@ data Pipe = Pipe
     -- from it directly.
     pOutstanding :: Unsigned 3,
     pD :: Maybe Fetched,
+    -- | Decode's operands: on its first cycle (pDFresh) they come from the
+    -- register file, read the cycle before at the entering word's sources;
+    -- while it waits, from here, refreshed by forwarding.
+    pDOperands :: (Word32, Word32),
+    pDFresh :: Bool,
     pE1 :: Maybe ExecuteOne,
     pE2 :: Maybe ExecuteTwo,
     pM :: Maybe MemoryStage }
   deriving (Generic, NFDataX)
 
 emptyPipe :: Pipe
-emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing Nothing Nothing Nothing
+emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing
 
 -- | Empty every stage, keeping the queue's contents (only its pointers
 -- matter), and fetch from @pc@.
@@ -1643,13 +1649,14 @@ pipeStep machine memoryWord =
             hazard = maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) (pE1 pipe)
               || maybe False (\x -> conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
               || maybe False (\m -> not (mFinal m) && conflicts (mRd m) (mWrites m)) (pM pipe)
-            operand r fromFile = case pM pipe of
+            operand r current = case pM pipe of
               Just m | mWrites m && mRd m == r -> mValue m
               _ -> case cpuPendingWrite machine of
                 Just (w, v) | w /= 0 && w == r -> v
-                _ -> registerValue (cpuRegValid machine) r fromFile
-            a = operand rs1 (cpuRfA machine)
-            b = operand rs2 (cpuRfB machine)
+                _ -> current
+            (heldA, heldB) = pDOperands pipe
+            a = operand rs1 (if pDFresh pipe then registerValue (cpuRegValid machine) rs1 (cpuRfA machine) else heldA)
+            b = operand rs2 (if pDFresh pipe then registerValue (cpuRegValid machine) rs2 (cpuRfB machine) else heldB)
             imm = decodeImmediate word
             writes = not slow && rd /= 0 && case kind of
               KindAlu -> True; KindJump -> True; KindLoad -> True; _ -> False
@@ -1657,9 +1664,9 @@ pipeStep machine memoryWord =
                 { e1Pc = pc, e1Word = word, e1Control = control,
                   e1A = a, e1B = b, e1Imm = imm, e1Op2 = if opcode == 0x33 then b else imm,
                   e1Rd = rd, e1Writes = writes, e1Slow = slow },
-              hazard )
+              hazard, (a, b) )
       dAdvance = case d of
-        Just f -> e1Free && not (P.snd (decodeOut f))
+        Just f -> e1Free && not (let (_, hazard, _) = decodeOut f in hazard)
         Nothing -> False
       dFree = isNothing d || dAdvance
       -- Fetch ------------------------------------------------------------------
@@ -1681,6 +1688,11 @@ pipeStep machine memoryWord =
         | not dFree = d
         | queued /= 0 = Just (pQueue pipe !! slot readPointer)
         | otherwise = arrival
+      -- The register file is read for the word that would enter decode
+      -- next (the queue head, else the arriving word), whether or not it
+      -- does: no stall decision reaches the read address.
+      entering = if queued /= 0 then fWord (pQueue pipe !! slot readPointer) else memoryWord
+      enteringReads = (instructionRs1 entering, instructionRs2 entering)
       leaving = (if dFree && queued /= 0 then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
       -- Words queued or in flight never exceed the queue (decided from
       -- registers); the port is free unless a store writes or a read waits.
@@ -1700,9 +1712,13 @@ pipeStep machine memoryWord =
                 pQueue = queue', pQueueRead = readPointer', pQueueWrite = writePointer',
                 pOutstanding = pOutstanding pipe + (if issue then 1 else 0) - leaving,
                 pD = nextD,
+                pDOperands = case d of
+                  Just f -> let (_, _, operands) = decodeOut f in operands
+                  Nothing -> pDOperands pipe,
+                pDFresh = dFree,
                 pE1 = case pE1 pipe of
                   Just x | not e1Advance -> Just x
-                  _ -> if dAdvance then P.fst . decodeOut <$> d else Nothing,
+                  _ -> if dAdvance then (\f -> let (stage, _, _) = decodeOut f in stage) <$> d else Nothing,
                 pE2 = case pE2 pipe of
                   Just x | not e2Advance -> Just x
                   _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
@@ -1722,7 +1738,7 @@ pipeStep machine memoryWord =
         Nothing -> machine
    in if handover
         then (handed, Nothing, (0, Nothing, Nothing))
-        else (committed {cpuPipe = pipe'}, registerWriteNow, (readAddress, memoryWrite, Nothing))
+        else (committed {cpuPipe = pipe', cpuReadIndices = enteringReads}, registerWriteNow, (readAddress, memoryWrite, Nothing))
 
 -- CPU ------------------------------------------------------------------------
 
@@ -2369,7 +2385,7 @@ registerValue valid index value = if testBit valid (fromIntegral index) then val
 -- 'registerReads'.
 withMirrorReads :: Machine -> Machine
 withMirrorReads machine =
-  let (a, b) = registerReads machine
+  let (a, b) = if cpuPipelined machine then cpuReadIndices machine else registerReads machine
    in machine {cpuRfA = cpuRegs machine !! a, cpuRfB = cpuRegs machine !! b}
 
 readRegisterBanks :: Index 32 -> Vec 32 Word32 -> Vec 4 Word32
