@@ -2,17 +2,18 @@
 module NeoMusic.Sheet (engrave, sheetEvents) where
 
 import Control.Monad (unless)
-import Data.List (intercalate, sortOn)
+import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
-import Data.Ratio (denominator)
+import Data.Ratio (denominator, numerator)
 import qualified NeoMusic.Audio as A
 import NeoMusic.Language (SheetView (..), Staff (..))
 import NeoMusic.Midi (midiPitch)
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Score hiding (chord)
 
--- | Shared pre-engraving representation: staff, onset, duration and MIDI chord.
-sheetEvents :: Performance -> SheetView -> Score -> Either String [(Staff, Rational, Rational, [Int])]
+-- | Shared pre-engraving representation: staff, onset, written duration, MIDI
+-- chord and gate (sounding length as a ratio of the written duration).
+sheetEvents :: Performance -> SheetView -> Score -> Either String [(Staff, Rational, Rational, [Int], Rational)]
 sheetEvents perf view score = do
   validate perf score
   (total, es) <- flatten score
@@ -32,7 +33,7 @@ sheetEvents perf view score = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
       unless (all (\p -> p >= 21 && p <= 108) ps) (Left "pitch outside piano range A0..C8")
       unless (dyadic (onset e) && dyadic (dur (event e))) (Left "sheet supports durations on a 32nd-note grid; tuplets are not supported")
-      pure (staff, onset e, dur (event e), ps)
+      pure (staff, onset e, dur (event e), ps, gate (event e))
 
 engrave :: Performance -> SheetView -> Score -> Either String String
 engrave perf view score = do
@@ -40,7 +41,7 @@ engrave perf view score = do
   (total, _) <- flatten score
   keyName <- maybe (Left "unsupported major key hint") Right (M.lookup (key view) keys)
   let staff name clef =
-        let voices = separate (sortOn (\(_, t, _, _) -> t) [e | e@(s, _, _, ps) <- es, s == name, not (null ps)])
+        let voices = separate (sortOn (\(_, t, _, _, _) -> t) [e | e@(s, _, _, ps, _) <- es, s == name, not (null ps)])
             content = if null voices then [emitRest 0 total] else map (emitVoice total) voices
          in "  \\new Staff { \\clef "
               ++ clef
@@ -49,16 +50,70 @@ engrave perf view score = do
               ++ "/4 \\key "
               ++ keyName
               ++ " \\major\n"
-              ++ "    "
-              ++ tempoText
-              ++ "\n    << "
+              ++ (if null marks then "    " ++ metronome (bpm perf) ++ "\n" else "")
+              ++ "    << "
               ++ intercalate " \\\\ " ["{ " ++ v ++ " }" | v <- content]
               ++ " >>\n  }\n"
-  pure ("\\version \"2.24.3\"\n\\score {\n \\new PianoStaff <<\n" ++ staff Treble "treble" ++ staff Bass "bass" ++ " >>\n \\layout { }\n}\n")
+      -- Tempo marks live on a spacer line between the staves, so they never
+      -- split the notes; LilyPond prints them above the system.
+      tempoLine = if null marks then "" else "  \\new Dynamics { " ++ spacers 0 marks ++ "}\n"
+      spacers at [] = spacer (total - at)
+      spacers at ((t, mark) : more) = spacer (t - at) ++ mark ++ " " ++ spacers t more
+      spacer d
+        | d <= 0 = ""
+        | otherwise = "s4*" ++ show (numerator d) ++ (if denominator d == 1 then "" else "/" ++ show (denominator d)) ++ " "
+  pure ("\\version \"2.24.3\"\n\\score {\n \\new PianoStaff <<\n" ++ staff Treble "treble" ++ tempoLine ++ staff Bass "bass" ++ " >>\n \\layout { }\n}\n")
   where
-    tempoText
-      | bpm perf == fromInteger (round (bpm perf)) = "\\tempo 4 = " ++ show (round (bpm perf) :: Integer)
-      | otherwise = "\\tempo \"" ++ show (bpm perf) ++ " BPM\""
+    metronome speed
+      | speed == fromInteger (round speed) = "\\tempo 4 = " ++ show (round speed :: Integer)
+      | otherwise = "\\tempo \"" ++ show speed ++ " BPM\""
+    -- Only reached after sheetEvents succeeded in the do block above.
+    events = either (const []) id (sheetEvents perf view score)
+    nodes = [node | node@(_, len, _) <- tempoNodes score, len > 0]
+    pitchedOnsets = nub (sort [t | (_, t, _, ps, _) <- events, not (null ps)])
+    -- A constant slow-down covering exactly one onset, starting on it, is a fermata.
+    isFermata (t0, len, Speed r) = r < 1 && [t | t <- pitchedOnsets, t0 <= t, t < t0 + len] == [t0]
+    isFermata _ = False
+    fermatas = [t0 | node@(t0, _, _) <- nodes, isFermata node]
+    -- Inside a tempo change that began earlier (one starting here doesn't count).
+    active x = any (\(t0, len, _) -> t0 < x && x < t0 + len) nodes
+    lastBeat = maximum (0 : [t + d | (_, t, d, _, _) <- events])
+    -- (beat, text, metronome factor), merged per beat into one \tempo each.
+    rawMarks = concat
+      [ (t0, startText shape, startFactor shape)
+          : [(t0 + len, endText shape, Just 1) | t0 + len < lastBeat, not (active (t0 + len))]
+      | node@(t0, len, shape) <- nodes, not (isFermata node) ]
+    startText (Ramp a b)
+      | b < a = Just "rit."
+      | b > a = Just "accel."
+    startText (Swing _ _) = Just "Swing"
+    startText _ = Nothing
+    startFactor (Speed r) = Just r
+    startFactor (Ramp a b) | a == b = Just a
+    startFactor _ = Nothing
+    endText (Ramp _ _) = Just "a tempo"
+    endText (Swing _ _) = Just "Straight"
+    endText _ = Nothing
+    marks
+      | null rawMarks = []
+      | otherwise =
+          [ (t, tempoMark texts factor)
+          | t <- nub (sort (0 : [u | (u, _, _) <- rawMarks]))
+          , let here = [m | m@(u, _, _) <- rawMarks, u == t]
+                texts = [x | (_, Just x, _) <- here]
+                factor = case [f | (_, _, Just f) <- here] of
+                  f : _ -> Just f
+                  [] -> if t == 0 && not (any (\(u, len, _) -> u == 0 && len > 0) nodes) then Just 1 else Nothing ]
+    -- \tempo "text" 4 = n, with exact BPM text when the speed is fractional.
+    tempoMark texts factor =
+      let speed = fmap (\f -> bpm perf * fromRational f) factor
+          whole = maybe False (\x -> x == fromInteger (round x)) speed
+          shown = texts ++ [show x ++ " BPM" | Just x <- [speed], not whole]
+          text = if null shown then "" else "\\markup \\italic \"" ++ intercalate ", " shown ++ "\" "
+          number = case speed of
+            Just x | whole -> "4 = " ++ show (round x :: Integer)
+            _ -> ""
+      in "\\tempo " ++ text ++ number
     flats = key view `elem` ["F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"]
     keys =
       M.fromList
@@ -70,13 +125,23 @@ engrave perf view score = do
     sharpNames = ["c", "cis", "d", "dis", "e", "f", "fis", "g", "gis", "a", "ais", "b"]
     flatNames = ["c", "des", "d", "ees", "e", "f", "ges", "g", "aes", "a", "bes", "b"]
     octave k = replicate (abs k) (if k >= 0 then '\'' else ',')
-    emitRest t d = emit t d []
+    emitRest t d = emit True ("", "") t d []
     emitVoice total = go 0
       where
         go at [] = emitRest at (total - at)
-        go at ((_, t, d, ps) : xs) = emitRest at (t - at) ++ emit t d ps ++ go (t + d) xs
-    emit _ 0 _ = ""
-    emit at remaining ps =
+        go at ((_, t, d, ps, g) : xs) = emitRest at (t - at) ++ emit True (articulation g t) t d ps ++ go (t + d) xs
+    -- The gate becomes an articulation on the note's first segment, or for a
+    -- note that rings past its written length, a "let ring" tie on its last.
+    articulation g t =
+      let (front, back) = gateMarks g
+       in (front ++ (if t `elem` fermatas then "\\fermata" else ""), back)
+    gateMarks g
+      | g <= 1 / 2 = ("-.", "")
+      | g < 1 = ("-_", "")
+      | g > 1 = ("", "\\laissezVibrer")
+      | otherwise = ("", "")
+    emit _ _ _ 0 _ = ""
+    emit first (front, back) at remaining ps =
       let bar = fromIntegral (meter view)
           boundary = (fromInteger (floor (at / bar)) + 1) * bar
           allowed = min remaining (boundary - at)
@@ -88,13 +153,14 @@ engrave perf view score = do
           chord = case ps of [] -> "r"; [p] -> pitch p; _ -> "<" ++ unwords (map pitch ps) ++ ">"
           tie = if not (null ps) && d < remaining then "~" else ""
           barline = if at + d == boundary then " | " else " "
-       in chord ++ spelling ++ tie ++ barline ++ emit (at + d) (remaining - d) ps
+          marked = (if first then front else "") ++ (if d == remaining then back else "")
+       in chord ++ spelling ++ (if null ps then "" else marked) ++ tie ++ barline ++ emit False (front, back) (at + d) (remaining - d) ps
 
 -- Greedy interval partition: each lane is monophonic; chord events stay intact.
-separate :: [(Staff, Rational, Rational, [Int])] -> [[(Staff, Rational, Rational, [Int])]]
+separate :: [(Staff, Rational, Rational, [Int], Rational)] -> [[(Staff, Rational, Rational, [Int], Rational)]]
 separate = foldl insert []
   where
     insert [] e = [[e]]
-    insert (lane : lanes) e@(_, t, _, _) = case reverse lane of
-      (_, a, d, _) : _ | a + d <= t -> (lane ++ [e]) : lanes
+    insert (lane : lanes) e@(_, t, _, _, _) = case reverse lane of
+      (_, a, d, _, _) : _ | a + d <= t -> (lane ++ [e]) : lanes
       _ -> lane : insert lanes e

@@ -19,12 +19,15 @@ extra-source-files:
     README.md
     CHANGELOG.md
     examples/NeoMusicLanguage.md
+    examples/neomusic/articulation.neomusic
     examples/neomusic/numeric-preview.neomusic
     examples/neomusic/scale.neomusic
+    examples/neomusic/tempo.neomusic
     examples/neomusic/ties.neomusic
     examples/neomusic/twinkle.neomusic
     examples/neomusic/voices.neomusic
     test/golden/neomusic/scale.ly
+    test/golden/neomusic/tempo.ly
     test/golden/neomusic/ties.ly
     test/golden/neomusic/twinkle.ly
     test/golden/neomusic/voices.ly

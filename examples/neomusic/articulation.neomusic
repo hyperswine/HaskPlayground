@@ -1,0 +1,14 @@
+-- Gate: how long each note sounds, as a ratio of the time it occupies.
+tempo 96
+tuning 12 at C4
+instrument right = piano staff treble
+instrument left  = piano staff bass
+
+up    = 0 4 7 12
+short = gate 1/2 [up]               -- staccato: each note sounds half its length
+long  = gate 3/2 [up]               -- legato: each note rings into the next
+
+right: short long [stretch 1/2 [up up]] 12:2
+c  = -12 -5 -8 -5                   -- broken C major
+g  = -17 -10 -13 -10                -- broken G major
+left:  pedal [c] pedal [g] pedal [c] _:2   -- each bar's notes ring until the bar ends

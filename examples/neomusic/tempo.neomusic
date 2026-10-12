@@ -1,0 +1,12 @@
+-- Tempo shapes act on the written beats; the notes stay as written.
+tempo 96
+tuning 12 at C4
+meter 4
+instrument right = piano staff treble
+instrument left  = piano staff bass
+
+line  = 0 2 4 5 7 5 4 2
+bass  = (-12 -5):4 (-17 -10):4
+
+right: line  speed 1 -> 2/3 [line]  swing 2/3 [[line line]:1/2]  hold 3 [0:2] _:2
+left:  bass  bass                   bass              (-12 -5):2 _:2

@@ -5,7 +5,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Data.Either (isLeft)
-import Data.List (sort, isInfixOf, isPrefixOf)
+import Data.List (sort, sortOn, isInfixOf, isPrefixOf)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
@@ -82,7 +82,7 @@ scoreGroup = Group "NeoMusic score and views"
       timeline <- evalEither (render perf music)
       events <- evalEither (sheetEvents perf view music)
       sort [(A.start v,A.duration v) | v <- A.notes timeline] ===
-        sort [(fromRational t*0.5,fromRational d*0.5) | (_,t,d,ps) <- events, _ <- ps]
+        sort [(fromRational t*0.5,fromRational d*0.5) | (_,t,d,ps,_) <- events, _ <- ps]
       sheet <- evalEither (engrave perf view music)
       assert ("~" `isInfixOf` sheet && "\\\\" `isInfixOf` sheet))
   , ("strict sheet/MIDI bounds and exact tick resolution", withTests 1 $ property $ do
@@ -153,11 +153,151 @@ scoreGroup = Group "NeoMusic score and views"
         , defaultInstrument {tuning=A.Tuning 0 2}, defaultInstrument {timbre=A.pianoPatch {A.resonance=1}} ]
       -- Declared-but-unused instruments are still checked.
       assert (isLeft (validate perf {instruments=M.insert "spare" defaultInstrument {pan=9} (instruments perf)} note)))
+  , ("gate: sounding length is a ratio, separate from occupied time", property $ do
+      xs <- forAll (Gen.list (Range.linear 1 12) (Gen.int (Range.linear (-12) 12)))
+      g <- forAll (Gen.element [1/4, 1/2, 3/4, 1, 3/2, 2])
+      k <- forAll (Gen.element [1/3, 1/2, 2, 3])
+      let phrase = concatMap n xs
+          gated = scaleGate g phrase
+      -- Articulation survives stretching, and gates never move onsets or change length.
+      map gate (stretch k gated) === map gate gated
+      fmap (map onset . snd) (flatten (Line "right" gated)) === fmap (map onset . snd) (flatten (Line "right" phrase))
+      scoreLength (Line "right" gated) === scoreLength (Line "right" phrase)
+      map gate (scaleGate 2 (scaleGate g phrase)) === map gate (scaleGate (2*g) phrase)
+      timeline <- evalEither (render perf (Line "right" gated))
+      map A.duration (A.notes timeline) === replicate (length xs) (fromRational (g * 1/2))
+      assert (isLeft (render perf (Line "right" (withGate 0 phrase)))))
+  , ("pedal holds every note to the end of its own score", withTests 1 $ property $ do
+      let held = pedal (Line "right" (n 0 <> rest <> n 4 <> hit [7] 2 1))
+      (_, es) <- evalEither (flatten held)
+      map (gate . event) es === [5, 1, 3, 1]
+      -- Inside a larger score, pedal ends where its own section ends.
+      doc <- evalEither (parseDocument (header++"right: pedal [0 [4 & 7:2]] 9\n"))
+      (_, ds) <- evalEither (flatten (score doc))
+      [(onset e, gate (event e)) | e <- ds] === [(0,3),(1,2),(1,1),(3,1)]
+      staccatoDoc <- evalEither (parseDocument (header++"right: gate 1/2 [0 gate 1/2 [4]]\n"))
+      (_, ss) <- evalEither (flatten (score staccatoDoc))
+      map (gate . event) ss === [1/2, 1/4]
+      assert (isLeft (parseDocument (header++"gate = 0\nright: gate\n")))
+      -- The canonical source round-trips gates.
+      text <- evalEither (prettyScore (score staccatoDoc))
+      again <- evalEither (parseDocument (header++text))
+      (_, rs) <- evalEither (flatten (score again))
+      sort [(onset e, gate (event e)) | e <- rs, not (null (pitches (event e)))] === sort [(onset e, gate (event e)) | e <- ss])
+  , ("gate in MIDI, staff and numeric views", withTests 1 $ property $ do
+      short <- evalEither (midi perf (Line "right" (staccato (n 0))))
+      assert (BS.pack [0,0x90,60,127,1,0x80,60,0] `BS.isInfixOf` BL.toStrict short)
+      -- A note ringing past the score's end extends the track instead of being cut.
+      ringing <- evalEither (midi perf (Line "right" (withGate 2 (n 0))))
+      assert (BS.pack [0,0x90,60,127,2,0x80,60,0,0,0xff,0x2f,0] `BS.isInfixOf` BL.toStrict ringing)
+      -- Legato repeats of one pitch overlap, so they take separate channels.
+      legato <- evalEither (midi perf (Line "right" (withGate (3/2) (n 0 <> n 0))))
+      BL.take 2 (BL.drop 10 legato) === BL.pack [0,3]
+      sheet <- evalEither (engrave perf view (Line "right" (staccato (n 0) <> scaleGate (3/4) (n 2) <> withGate 2 (hit [4] 6 1))))
+      -- Articulation goes on a note's first segment; "let ring" on its last tied segment.
+      assert ("c'4-. d'4-_ e'2~ | e'1\\laissezVibrer |" `isInfixOf` sheet)
+      numeric (Line "right" (staccato (n 0) <> withGate 2 (n 4) <> n 7)) === Right "right: 0' 4~ 7\n"
+      page <- evalEither (numericPage perf (Line "right" (staccato (n 0))))
+      assert ("' = detached: sounds shorter than written" `isInfixOf` page && not ("~ = rings" `isInfixOf` page)))
+  , ("tempo laws: identity, composition, stretch, closed form", property $ do
+      xs <- forAll (Gen.list (Range.linear 1 10) (Gen.int (Range.linear (-12) 12)))
+      ds <- forAll (Gen.list (Range.singleton (length xs)) (Gen.element [1/4, 1/2, 1, 3/2, 2]))
+      a <- forAll (Gen.element [1/3, 1/2, 3/4, 1, 5/4, 2])
+      b <- forAll (Gen.element [1/2, 2/3, 1, 3/2])
+      let line = Line "right" (concat (zipWith (\x d -> hit [x] d 1) xs ds))
+          times sc = do
+            t <- evalEither (render perf sc)
+            pure (A.seconds t, [(A.start v, A.duration v) | v <- A.notes t])
+          close (s1, n1) (s2, n2) = abs (s1 - s2) < 1e-9 && length n1 == length n2
+            && and [abs (x - y) < 1e-9 && abs (u - w) < 1e-9 | ((x, u), (y, w)) <- zip n1 n2]
+      plain <- times line
+      same <- times (Tempo (Speed 1) line)
+      assert (close plain same)
+      nested <- times (Tempo (Speed a) (Tempo (Speed b) line))
+      product' <- times (Tempo (Speed (a * b)) line)
+      assert (close nested product')
+      -- Log-linear ramps over the same span multiply into one ramp.
+      ramps <- times (Tempo (Ramp 1 a) (Tempo (Ramp b 1) line))
+      oneRamp <- times (Tempo (Ramp b a) line)
+      assert (close ramps oneRamp)
+      -- Audio can't tell a constant speed from rewritten durations.
+      slower <- times (Tempo (Speed (1 / a)) line)
+      stretched <- times (mapPhrases (stretch a) line)
+      assert (close slower stretched)
+      (whole, _) <- times (Tempo (Ramp 1 (1/2)) (Line "right" (hit [0] 4 1)))
+      assert (abs (whole - 0.5 * 4 / log 2) < 1e-12))
+  , ("tempo laws: swing keeps beats, locality, monotone clock", property $ do
+      xs <- forAll (Gen.list (Range.linear 2 16) (Gen.int (Range.linear (-12) 12)))
+      let eighths = Line "right" (concatMap (\x -> hit [x] (1/2) 1) xs)
+      straight <- evalEither (render perf eighths)
+      swung <- evalEither (render perf (Tempo (Swing 1 (2/3)) eighths))
+      let pairs = zip3 [0 :: Int ..] (A.notes straight) (A.notes swung)
+      assert (and [abs (A.start u - A.start v) < 1e-12 | (i, u, v) <- pairs, even i])
+      assert (and [abs (A.start v - (A.start u - 0.25 + 0.5 * 2/3)) < 1e-12 | (i, u, v) <- pairs, odd i])
+      -- Whole pairs keep the total; an unpaired last eighth is played long.
+      if even (length xs) then assert (abs (A.seconds swung - A.seconds straight) < 1e-12)
+        else assert (abs (A.seconds swung - (A.seconds straight - 0.25 + 0.5 * 2/3)) < 1e-12)
+      -- A slowed middle section leaves earlier notes alone and shifts later ones evenly.
+      let before = Line "right" (n 0 <> n 1)
+          middle = Line "right" (n 2 <> n 3 <> n 4)
+          after = Line "right" (n 5 <> n 6)
+      flat <- evalEither (render perf (before :>>: middle :>>: after))
+      warped <- evalEither (render perf (before :>>: Tempo (Ramp 1 (1/2)) middle :>>: after))
+      let starts t = map A.start (A.notes t)
+          extra = 0.5 * (3 / log 2) - 0.5 * 3
+      take 2 (starts warped) === take 2 (starts flat)
+      assert (and [abs (w - f - extra) < 1e-9 | (w, f) <- drop 5 (zip (starts warped) (starts flat))])
+      -- Nested and overlapping shapes still give a strictly increasing clock.
+      shape1 <- forAll (Gen.element [Speed 1, Speed (1/3), Ramp 2 (1/2), Swing 1 (3/5)])
+      shape2 <- forAll (Gen.element [Speed 3, Ramp (1/4) 1, Swing (1/2) (1/3)])
+      clocked <- evalEither (render perf (Tempo shape1 (eighths :||: Tempo shape2 (Line "right" (concatMap n xs)))))
+      let ordered = sortOn fst [(A.start v, ()) | v <- A.notes clocked]
+      assert (all (\(u, w) -> fst u <= fst w) (zip ordered (drop 1 ordered))))
+  , ("MIDI tempo map plays back at the audio's times", property $ do
+      xs <- forAll (Gen.list (Range.linear 1 12) (Gen.int (Range.linear (-12) 12)))
+      ds <- forAll (Gen.list (Range.singleton (length xs)) (Gen.element [1/4, 1/2, 3/4, 1, 2]))
+      g <- forAll (Gen.element [1/2, 1, 3/2])
+      shape <- forAll (Gen.element [Speed (2/3), Ramp 1 (1/2), Ramp (1/2) (3/2), Swing 1 (2/3)])
+      let line = Line "right" (withGate g (concat (zipWith (\x d -> hit [x] d 1) xs ds)))
+          music = Line "right" (n 0) :>>: Tempo shape line :>>: Line "right" (n 7)
+      changes <- evalEither (tempoChanges perf music)
+      timeline <- evalEither (render perf music)
+      (_, es) <- evalEither (flatten music)
+      -- Seconds at a written beat, from the emitted microseconds-per-quarter steps.
+      let played b = sum [ fromInteger us * fromRational (min b x1 - x0) / 1e6
+                         | ((x0, us), x1) <- zip changes (map fst (drop 1 changes) ++ [b]), x0 < b ]
+          pitched = [e | e <- es, not (null (pitches (event e)))]
+      assert (and [ abs (played (onset e) - A.start v) < 1e-6
+                    && abs (played (onset e + dur (event e) * gate (event e)) - (A.start v + A.duration v)) < 1e-6
+                  | (e, v) <- zip pitched (A.notes timeline) ]))
+  , ("tempo in the language, staff and numeric views", withTests 1 $ property $ do
+      doc <- evalEither (parseDocument (header++"right: 0 speed 1 -> 3/4 [2 4] swing 2/3 [5:1/2 7:1/2] hold 2 [9] 0\n"))
+      map (\(t0, len, shape) -> (t0, len, shape)) (tempoNodes (score doc)) ===
+        [(1, 2, Ramp 1 (3/4)), (3, 1, Swing 1 (2/3)), (4, 1, Speed (1/2))]
+      mapM_ (assert . isLeft . parseDocument . (header++))
+        ["right: speed 0 [0]", "right: swing 3/2 [0]", "right: swing 1 [0]", "right: hold 0 [0]", "right: speed 1 -> [0]"]
+      reversed <- evalEither (parseDocument (header++"right: rev [speed 1 -> 1/2 [0 2] swing 1/3 [4:1/2 5:1/2]]\n"))
+      map (\(_, _, shape) -> shape) (tempoNodes (score reversed)) === [Swing 1 (2/3), Ramp (1/2) 1]
+      -- Canonical source keeps the clock: tempo nodes are written over rests.
+      text <- evalEither (prettyScore (score doc))
+      again <- evalEither (parseDocument (header++text))
+      t1 <- evalEither (render perf (score doc))
+      t2 <- evalEither (render perf (score again))
+      assert (abs (A.seconds t1 - A.seconds t2) < 1e-12)
+      assert (and [abs (A.start u - A.start v) < 1e-12 | (u, v) <- zip (sortOn A.start (A.notes t1)) (sortOn A.start (filter ((> 0) . A.velocity) (A.notes t2)))])
+      sheet <- evalEither (engrave perf view (score doc))
+      assert (all (`isInfixOf` sheet)
+        ["\\new Dynamics", "\\tempo 4 = 120", "\"rit.\"", "\"a tempo, Swing\"", "\"Straight\"", "a'4\\fermata"])
+      page <- evalEither (numeric (score doc))
+      assert (all (`isInfixOf` page) ["speed 1 -> 3/4", "a tempo, swing 2/3", "straight, hold 2"])
+      -- A score without tempo changes prints no tempo lane.
+      plain <- evalEither (numeric (Line "right" (n 0)))
+      assert (not ("tempo" `isInfixOf` plain)))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))
         doc <- evalEither (parseDocument source)
         actual <- evalEither (engrave (performance doc) (sheetView doc) (score doc))
         expected <- evalIO (readFile ("test/golden/neomusic/"++name++".ly"))
-        actual === expected) ["scale","twinkle","voices","ties"])
+        actual === expected) ["scale","twinkle","voices","ties","tempo"])
   ]

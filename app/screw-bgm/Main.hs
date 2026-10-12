@@ -162,7 +162,7 @@ risers :: Score
 risers = together
   [ at "sweep" 24 (hit [0] 8 0.9)
   , at "microRiser" 24
-      [Event (1 / 6) v [Step x] | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)]
+      [Event (1 / 6) v [Step x] 1 | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)]
   ]
 
 layers :: [(String, Score)]

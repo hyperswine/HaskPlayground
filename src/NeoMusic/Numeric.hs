@@ -35,13 +35,45 @@ numericLanes score = do
         go at [] = hush (total - at)
         go at (e : es) = hush (onset e - at) ++ [event e] ++ go (onset e + dur (event e)) es
 
--- | One column per distinct onset across all lanes; a lane has an event in a
--- column only if one of its events starts there.
-aligned :: [(Name, Phrase)] -> [(Name, [Maybe Event])]
-aligned lanes = [(name, map (`M.lookup` starts phrase) columns) | (name, phrase) <- lanes]
-  where
-    starts phrase = M.fromList (zip (scanl (+) 0 (map dur phrase)) phrase)
-    columns = nub (sort (concatMap (M.keys . starts . snd) lanes))
+-- | A cell is a voice's event or a tempo-lane annotation.
+data Cell = EventCell Event | MarkCell String
+
+-- | One column per distinct onset across all lanes, plus every tempo change's
+-- start and end; a lane has a cell in a column only if something starts there.
+-- The tempo lane comes first and only when the score has tempo changes.
+layout :: Score -> Either String [(Name, [Maybe Cell])]
+layout score = do
+  lanes <- numericLanes score
+  marks <- tempoMarks score
+  let starts phrase = M.fromList (zip (scanl (+) 0 (map dur phrase)) phrase)
+      columns = nub (sort (concatMap (M.keys . starts . snd) lanes ++ map fst marks))
+      markAt = M.fromList marks
+      tempoRow = [("tempo", map (fmap MarkCell . (`M.lookup` markAt)) columns) | not (null marks)]
+  pure (tempoRow ++ [(name, map (fmap EventCell . (`M.lookup` starts phrase)) columns) | (name, phrase) <- lanes])
+
+-- | Tempo annotations by written beat, as source-like text: a shape where it
+-- starts, and where it ends "a tempo" (or "straight" after swing) unless an
+-- earlier change is still going. A constant slow-down covering a single onset
+-- reads as "hold k", a fermata, and needs no end mark.
+tempoMarks :: Score -> Either String [(Rational, String)]
+tempoMarks score = do
+  (total, es) <- flatten score
+  let nodes = [node | node@(_, len, _) <- tempoNodes score, len > 0]
+      onsets = nub (sort [onset e | e <- es, not (null (pitches (event e)))])
+      single (t0, len, _) = [t | t <- onsets, t0 <= t, t < t0 + len] == [t0]
+      active x = any (\(t0, len, _) -> t0 < x && x < t0 + len) nodes
+      startText node@(_, _, shape) = case shape of
+        Speed r | r < 1 && single node -> "hold " ++ rationalText (1 / r)
+        Speed r -> "speed " ++ rationalText r
+        Ramp a b -> "speed " ++ rationalText a ++ " -> " ++ rationalText b
+        Swing p sh -> "swing " ++ rationalText sh ++ (if p == 1 then "" else " per " ++ rationalText p)
+      isHold node@(_, _, shape) = case shape of Speed r -> r < 1 && single node; _ -> False
+      endText (Swing _ _) = "straight"
+      endText _ = "a tempo"
+      -- Ends sort before starts at the same beat: "a tempo, swing 2/3".
+      raw = [(t0 + len, 0 :: Int, endText shape) | node@(t0, len, shape) <- nodes, not (isHold node), t0 + len < total, not (active (t0 + len))]
+            ++ [(t0, 1, startText node) | node@(t0, _, _) <- nodes]
+  pure [(t, intercalate ", " (nub [x | (u, _, x) <- sortOn (\(u, k, _) -> (u, k)) raw, u == t])) | t <- nub (sort [u | (u, _, _) <- raw])]
 
 -- | Greedy page layout: split column indices so each system's text fits @budget@.
 systems :: Int -> [Int] -> [[Int]]
@@ -52,28 +84,37 @@ systems budget widths = filter (not . null) (go 0 [] (zip [0 ..] widths))
       | null current || used + w + 1 <= budget = go (used + w + 1) (i : current) more
       | otherwise = reverse current : go (w + 1) [i] more
 
-cellText :: Maybe Event -> String
-cellText = maybe "" eventText
+cellText :: Maybe Cell -> String
+cellText Nothing = ""
+cellText (Just (EventCell e)) = eventText e
+cellText (Just (MarkCell m)) = m
 
-columnWidths :: [(Name, [Maybe Event])] -> [Int]
+columnWidths :: [(Name, [Maybe Cell])] -> [Int]
 columnWidths rows = case rows of
   [] -> []
   (_, first) : _ -> [maximum [length (cellText (cells !! i)) | (_, cells) <- rows] | i <- [0 .. length first - 1]]
 
-textSystem :: [(Name, [Maybe Event])] -> [Int] -> [Int] -> [String]
+textSystem :: [(Name, [Maybe Cell])] -> [Int] -> [Int] -> [String]
 textSystem rows widths columns =
   [ trimEnd (pad labelWidth (name ++ ":") ++ " " ++ unwords [pad (widths !! i) (cellText (cells !! i)) | i <- columns])
-    | (name, cells) <- rows
+    | (name, cells) <- shownRows rows columns
   ]
   where
     labelWidth = maximum (0 : [length name + 1 | (name, _) <- rows])
     pad k s = s ++ replicate (k - length s) ' '
     trimEnd = reverse . dropWhile (== ' ') . reverse
 
+-- | The tempo lane is only printed in systems where something changes.
+shownRows :: [(Name, [Maybe Cell])] -> [Int] -> [(Name, [Maybe Cell])]
+shownRows rows columns = [row | row@(name, cells) <- rows, not (isTempo name cells)]
+  where isTempo name cells = name == "tempo" && all (\i -> null (cellText (cells !! i))) columns && any isMark cells
+        isMark (Just (MarkCell _)) = True
+        isMark _ = False
+
 -- | Aligned lanes on unbounded lines, without a legend.
 numeric :: Score -> Either String String
 numeric score = do
-  rows <- aligned <$> numericLanes score
+  rows <- layout score
   let widths = columnWidths rows
   pure (unlines (textSystem rows widths [0 .. length widths - 1]))
 
@@ -82,7 +123,7 @@ numeric score = do
 numericPage :: Performance -> Score -> Either String String
 numericPage perf score = do
   info <- legend perf score
-  rows <- aligned <$> numericLanes score
+  rows <- layout score
   let widths = columnWidths rows
       labelWidth = maximum (0 : [length name + 2 | (name, _) <- rows])
       body = map (textSystem rows widths) (systems (max 24 (72 - labelWidth)) widths)
@@ -93,7 +134,8 @@ numericPage perf score = do
 -- piece uses (12-TET only).
 data Legend = Legend
   { legendTempo :: Double,
-    legendGroups :: [([Name], String, Maybe [(Int, Int)])] -- names, tuning text, (step, MIDI) keys
+    legendGroups :: [([Name], String, Maybe [(Int, Int)])], -- names, tuning text, (step, MIDI) keys
+    legendMarks :: [String] -- explanations of the gate marks the piece uses
   }
 
 legend :: Performance -> Score -> Either String Legend
@@ -117,12 +159,16 @@ legend perf score = do
           Left _ -> Right Nothing
           Right _ -> Just <$> mapM (\x -> (,) x <$> midiPitch t (A.Step x)) steps
         pure (names, describe t, keys)
-  Legend (bpm perf) <$> mapM group groups
+      marks = nub (filter (not . null) (map (gateMark . event) es))
+      explain m = if m == "'" then "' = detached: sounds shorter than written" else "~ = rings on past its written length"
+  described <- mapM group groups
+  pure (Legend (bpm perf) described (map explain (sort marks)))
 
 legendText :: Legend -> [String]
-legendText (Legend speed groups) =
+legendText (Legend speed groups marks) =
   ("tempo " ++ tempoText speed ++ ", durations in beats (default 1)")
-    : concat
+    : marks
+    ++ concat
       [ (intercalate ", " names ++ ": " ++ text)
           : maybe [] (\ks -> map ("  keys: " ++) (wrapWords 70 [show x ++ "=" ++ pitchName p | (x, p) <- ks])) keys
         | (names, text, keys) <- groups
@@ -162,7 +208,14 @@ pitchText e = case pitches e of
   xs -> "(" ++ unwords [show x | A.Step x <- xs] ++ ")"
 
 eventText :: Event -> String
-eventText e = pitchText e ++ if dur e == 1 then "" else ":" ++ rationalText (dur e)
+eventText e = pitchText e ++ (if dur e == 1 then "" else ":" ++ rationalText (dur e)) ++ gateMark e
+
+-- | A reading aid, not the exact ratio: ' sounds shorter than written, ~ rings on.
+gateMark :: Event -> String
+gateMark e
+  | null (pitches e) || gate e == 1 = ""
+  | gate e < 1 = "'"
+  | otherwise = "~"
 
 -- | Standalone readable page: legend, a keyboard strip per 12-TET tuning
 -- showing which step is which key, and the aligned lanes. Hybrid mode is a
@@ -171,7 +224,7 @@ eventText e = pitchText e ++ if dur e == 1 then "" else ":" ++ rationalText (dur
 numericHtml :: Bool -> Performance -> Score -> Either String String
 numericHtml hybrid perf score = do
   info <- legend perf score
-  rows <- aligned <$> numericLanes score
+  rows <- layout score
   let widths = columnWidths rows
   pure $
     "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -188,6 +241,7 @@ numericHtml hybrid perf score = do
       ++ ".system{display:grid;gap:14px 22px;align-items:end;overflow-x:auto;padding:16px 0 24px;border-top:1px solid var(--rule)}"
       ++ ".lane{font-size:14px;color:var(--muted);align-self:center;white-space:nowrap}"
       ++ ".event{justify-self:start;display:inline-flex;align-items:flex-start;flex-direction:column;gap:10px;font:24px ui-monospace,monospace;white-space:nowrap}"
+      ++ ".mark{justify-self:start;align-self:end;font-size:14px;font-style:italic;color:var(--muted);white-space:nowrap}"
       ++ ".bar{width:24px;height:4px;border-top:2px solid currentColor;border-bottom:2px solid currentColor}"
       ++ "@media(max-width:480px){main{margin:24px auto;padding:0 16px}.system{gap:12px 16px}.event{font-size:20px}}"
       ++ "@media print{body{background:white}main{margin:0}.system{break-inside:avoid}}</style><main><h1>"
@@ -198,7 +252,7 @@ numericHtml hybrid perf score = do
       ++ "</p>"
       ++ "<p>Events in the same column start together. A blank cell means that lane's previous event is still sounding.</p>"
       ++ "<section class=\"legend\">"
-      ++ concatMap (\l -> "<p>" ++ escape l ++ "</p>") (take 1 (legendText info))
+      ++ concatMap (\l -> "<p>" ++ escape l ++ "</p>") (take (1 + length (legendMarks info)) (legendText info))
       ++ concat ["<p>" ++ escape (intercalate ", " names ++ ": " ++ text) ++ "</p>" ++ maybe "" keyboard keys | (names, text, keys) <- legendGroups info]
       ++ "</section>"
       ++ concatMap (htmlSystem rows) (systems 44 widths)
@@ -209,10 +263,11 @@ numericHtml hybrid perf score = do
       "<section class=\"system\" style=\"grid-template-columns:max-content repeat("
         ++ show (length columns)
         ++ ",max-content)\">"
-        ++ concat ["<div class=\"lane\">" ++ escape name ++ "</div>" ++ concat [cell (cells !! i) | i <- columns] | (name, cells) <- rows]
+        ++ concat ["<div class=\"lane\">" ++ escape name ++ "</div>" ++ concat [cell (cells !! i) | i <- columns] | (name, cells) <- shownRows rows columns]
         ++ "</section>"
     cell Nothing = "<span></span>"
-    cell (Just e) =
+    cell (Just (MarkCell m)) = "<span class=\"mark\">" ++ escape m ++ "</span>"
+    cell (Just (EventCell e)) =
       "<span class=\"event\">"
         ++ (if hybrid && not (null (pitches e)) then "<span class=\"bar\" aria-hidden=\"true\"></span>" else "")
         ++ "<span>"

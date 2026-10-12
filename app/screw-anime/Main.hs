@@ -348,7 +348,7 @@ groups =
   , ("fx", together
       [ at "air" 0 (hit [hatStep] 16 0.5)
       , at "sweep" 40 (hit [hatStep] 8 0.9)
-      , at "microRiser" 40 [Event (1/6) v [Step x] | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)]
+      , at "microRiser" 40 [Event (1/6) v [Step x] 1 | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)]
       , glints ])
   ]
 

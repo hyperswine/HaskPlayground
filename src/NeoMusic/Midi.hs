@@ -1,5 +1,5 @@
 -- | Strict 12-TET SMF type 1 view. No microtonal pitch rounding.
-module NeoMusic.Midi (midi, midiPitch) where
+module NeoMusic.Midi (midi, midiPitch, tempoChanges) where
 
 import Control.Monad (unless)
 import Data.Bits ((.|.))
@@ -28,18 +28,17 @@ midi perf score = do
   validate perf score
   (total,es) <- flatten score
   let names = nub [instrument e | e <- es]
-      division = foldl lcm 1 (map denominator (total : concat [[onset e,dur (event e)] | e <- es]))
+      -- A note sounds until onset + dur * gate, which may pass the score's end.
+      release e = onset e + dur (event e) * gate (event e)
+      end = maximum (total : map release es)
+  changes <- tempoChanges perf score
+  let division = foldl lcm 1 (map denominator (total : map fst changes ++ concat [[onset e,release e] | e <- es]))
       ticks x = numerator (x * fromInteger division)
-      tempoMicros = 60000000 / bpm perf
-  unless (not (isNaN tempoMicros || isInfinite tempoMicros) && tempoMicros >= 0.5 && tempoMicros < 16777215.5)
-    (Left "tempo outside MIDI representable range")
-  let micros = round tempoMicros :: Integer
   unless (division <= 32767) (Left "exact rhythm needs MIDI resolution above 32767 ticks/quarter")
-  unless (micros >= 1 && micros <= 16777215) (Left "tempo outside MIDI representable range")
   lanes <- concat <$> mapM (instrumentLanes es) names
   unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments and overlapping unisons")
-  tracks <- mapM (makeTrack ticks total) (zip lanes ([0..8]++[10..15]))
-  conductor <- track (ticks total) [(0, [0xff,0x51,3] ++ bytes3 micros)]
+  tracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
+  conductor <- track (ticks end) [(ticks at, [0xff,0x51,3] ++ bytes3 micros) | (at, micros) <- changes]
   pure $ toLazyByteString (string8 "MThd" <> word32BE 6 <> word16BE 1
     <> word16BE (fromIntegral (length tracks+1)) <> word16BE (fromInteger division)
     <> conductor <> mconcat tracks)
@@ -62,8 +61,47 @@ midi perf score = do
       track (ticks total) ((0,[0xc0+channel,0]) : [(t,bytes) | (t,_,bytes) <- events])
     convert i e = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
-      pure [(onset e,onset e+dur (event e),p,max 1 (round (127 * vel (event e))))
+      pure [(onset e,onset e+dur (event e)*gate (event e),p,max 1 (round (127 * vel (event e))))
            | p <- ps, vel (event e) > 0]
+
+-- | The conductor track as (written beat, microseconds per quarter) changes.
+--
+-- Ticks stay in written beats, so every onset and gate is exact; the shared
+-- clock becomes tempo changes. Constant stretches are one change each. A ramp
+-- is stepped at every note-on and note-off inside it and at least every 1/4
+-- beat, and each step's tempo makes the step last exactly as long as the
+-- clock says. Integer microseconds are the only rounding, and its error is
+-- carried into the next step, so note times stay within about a microsecond.
+tempoChanges :: Performance -> Score -> Either String [(Rational, Integer)]
+tempoChanges perf score = do
+  validate perf score
+  (total, es) <- flatten score
+  let clock = timeMap score
+      notes = concat [[onset e, onset e + dur (event e) * gate (event e)] | e <- es]
+      end = maximum (total : notes)
+      inside u v x = u < x && x < v
+      ramps = [(u, v) | (u, v, k) <- timePieces clock, k /= 0]
+      breaks = M.keys (M.fromList [(x, ()) | x <- 0 : end : concat
+        [ [u, v] ++ filter (inside u v) notes ++ takeWhile (< v) [u + 1/4, u + 1/2 ..] | (u, v) <- ramps ]
+        ++ concat [[u, v] | (u, v, _) <- timePieces clock], x <= end])
+      micros x = performed clock x * 60000000 / bpm perf
+      steps = zip breaks (drop 1 breaks)
+      go _ [] = Right []
+      go emitted ((x0, x1) : more) = do
+        let width = x1 - x0
+            target = toRational (micros x1)
+            tempo = round ((target - emitted) / width) :: Integer
+        unless (tempo >= 1 && tempo <= 16777215) (Left "tempo outside MIDI representable range")
+        ((x0, tempo) :) <$> go (emitted + fromInteger tempo * width) more
+  stepped <- if null steps then pure [] else go 0 steps
+  base <- let b = round (60000000 / bpm perf) :: Integer
+          in if b >= 1 && b <= 16777215 && not (isInfinite (60000000 / bpm perf))
+               then Right b else Left "tempo outside MIDI representable range"
+  -- Drop changes that repeat the tempo already in force.
+  let kept = case stepped of
+        [] -> [(0, base)]
+        first : later -> first : [c | (c, (_, prev)) <- zip later stepped, snd c /= prev]
+  pure kept
 
 bytes3 :: Integer -> [Int]
 bytes3 x = [fromInteger (x `div` 65536),fromInteger (x `div` 256 `mod` 256),fromInteger (x `mod` 256)]

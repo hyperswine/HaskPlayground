@@ -205,6 +205,10 @@ voices use separate labeled lanes, aligned in columns: every onset in any lane
 starts a column, so simultaneous events stack vertically. A column is a moment,
 not a bar, and column width is typographic, not proportional to time. Dynamics
 remain in the source/performance and are omitted from the first reading view.
+How long a note sounds (its gate, a ratio of the time it occupies) is shown as a
+mark rather than a number: `0'` is detached and `0~` rings on. Tempo changes, which shape
+performance without changing the written beats, get a `tempo` lane above the
+voices that names each change where it starts and ends.
 
 A second, optional view combines the same numeric labels with flat horizontal
 bar-like marks above each event, visually closer to `==` than drawn noteheads.

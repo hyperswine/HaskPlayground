@@ -20,6 +20,7 @@ data Document = Document { performance :: Performance, sheetView :: SheetView, s
   deriving (Eq, Show)
 data Expr = Notes [Int] | Ref Name [Expr] | SeqE [Expr] | ParE Expr Expr
   | Scale Rational Expr | Trans Int Expr | Repeat Int Expr | Rev Expr | Inv Expr | Vel Double Expr
+  | Gate Rational Expr | Pedal Expr | TempoE Shape Expr
   deriving (Eq, Show)
 data Definition = Definition [Name] Expr deriving (Eq, Show)
 
@@ -58,7 +59,7 @@ rational :: Parser Rational
 rational = do
   a <- integerValue
   b <- option 1 (symbol "/" *> integerValue)
-  if a <= 0 || b <= 0 then fail "duration must be positive" else pure (a % b)
+  if a <= 0 || b <= 0 then fail "expected a positive whole number or fraction" else pure (a % b)
 keyword :: String -> Parser ()
 keyword word = void (try (lexeme (string word <* notFollowedBy (alphaNum <|> oneOf "_-"))))
 
@@ -74,6 +75,12 @@ expression arities = parallel
       <|> (keyword "rev" *> (Rev <$> term))
       <|> (keyword "inv" *> (Inv <$> term))
       <|> (keyword "vel" *> (Vel <$> number <*> term))
+      <|> (keyword "gate" *> (Gate <$> rational <*> term))
+      <|> (keyword "pedal" *> (Pedal <$> term))
+      -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
+      <|> (keyword "speed" *> (TempoE <$> (rational >>= \a -> option (Speed a) (Ramp a <$> (try (symbol "->") *> rational))) <*> term))
+      <|> (keyword "swing" *> (TempoE . Swing 1 <$> rational <*> term))
+      <|> (keyword "hold" *> (TempoE . Speed . recip <$> rational <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
       <|> between (symbol "(") (symbol ")") (Notes <$> many integer)
@@ -113,7 +120,7 @@ parseDocument input = do
   let ls = [(i,stripComment s) | (i,s) <- zip [1..] (lines input), not (all isSpace (stripComment s))]
       isBinding s = '=' `elem` s && takeWord s /= "instrument"
       bindings = [(i,s) | (i,s) <- ls, isBinding s]
-      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel"]
+      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold"]
   signatures <- mapM (\(i,s) -> runLine i (many1 ident) (takeWhile (/='=') s)) bindings
   unless (all (\xs -> length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
     (Left "duplicate parameters or reserved binding name")
@@ -208,6 +215,9 @@ evaluate defs locals active name expr = case expr of
   Rev e -> reverseScore <$> recur e
   Inv e -> mapPhrases invert <$> recur e
   Vel v e -> mapPhrases (scaleVelocity v) <$> recur e
+  Gate g e -> mapPhrases (scaleGate g) <$> recur e
+  Pedal e -> pedal <$> recur e
+  TempoE shape e -> Tempo shape <$> recur e
   Ref ref args -> case M.lookup ref locals of
     Just x -> if null args then Right x else Left "parameters cannot be called"
     Nothing -> do
@@ -223,21 +233,26 @@ scaleScore k (Silence d) = Silence (k*d)
 scaleScore k (Line name xs) = Line name (stretch k xs)
 scaleScore k (a :>>: b) = scaleScore k a :>>: scaleScore k b
 scaleScore k (a :||: b) = scaleScore k a :||: scaleScore k b
+scaleScore k (Tempo shape s) = Tempo (scaled shape) (scaleScore k s)
+  where
+    scaled (Swing p sh) = Swing (k * p) sh
+    scaled other = other
 reverseScore :: Score -> Score
 reverseScore (Line name xs) = Line name (retro xs)
 reverseScore (Silence d) = Silence d
 reverseScore (a :>>: b) = reverseScore b :>>: reverseScore a
+-- A ramp runs backwards; swing becomes short-long (exact when the extent is a
+-- whole number of periods, since periods are counted from the node's start).
+reverseScore (Tempo shape s) = Tempo (mirrored shape) (reverseScore s)
+  where
+    mirrored (Ramp a b) = Ramp b a
+    mirrored (Swing p sh) = Swing p (1 - sh)
+    mirrored other = other
 reverseScore (a :||: b) =
   let da = scoreLength a
       db = scoreLength b
       total = max da db
   in (Silence (total-da) :>>: reverseScore a) :||: (Silence (total-db) :>>: reverseScore b)
-
-scoreLength :: Score -> Rational
-scoreLength (Line _ xs) = sum (map dur xs)
-scoreLength (Silence d) = d
-scoreLength (a :>>: b) = scoreLength a + scoreLength b
-scoreLength (a :||: b) = max (scoreLength a) (scoreLength b)
 
 -- | Canonical expanded source. Instruments/headers are supplied by the caller;
 -- each structural leaf is a voice with an explicit initial delay. No bindings
@@ -245,14 +260,26 @@ scoreLength (a :||: b) = max (scoreLength a) (scoreLength b)
 prettyScore :: Score -> Either String String
 prettyScore s = do
   (total,events) <- flatten s
+  let carrier = case events of e:_ -> instrument e; [] -> "silent"
+  -- The clock is shared, so each tempo node can stand alone over rests.
+  tempos <- mapM (\(t0,len,shape) -> do
+      text <- shapeText shape
+      pure (carrier ++ ": " ++ silence t0 ++ text ++ " [_:" ++ rat len ++ "]"))
+    [node | node@(_,len,_) <- tempoNodes s, len > 0]
   pure (unlines ([instrument e ++ ": " ++ silence (onset e) ++ token (event e)
                   ++ silence (total-onset e-dur (event e)) | e <- events] ++
-                if null events then ["instrument silent = sine", "silent: "++if total == 0 then "[0]*0" else "_:"++rat total] else []))
+                (if null events then ["instrument silent = sine", "silent: "++if total == 0 then "[0]*0" else "_:"++rat total] else [])
+                ++ tempos))
   where
+    shapeText (Speed r) = Right ("speed "++rat r)
+    shapeText (Ramp a b) = Right ("speed "++rat a++" -> "++rat b)
+    shapeText (Swing 1 sh) = Right ("swing "++rat sh)
+    shapeText (Swing _ _) = Left "swing with a period other than one beat has no text form yet"
     rat x = show (numerator x) ++ if denominator x == 1 then "" else "/"++show (denominator x)
     silence 0 = ""
     silence d = " _:"++rat d++" "
-    token e = "vel "++show (vel e)++" ["++pitch (pitches e)++":"++rat (dur e)++"]"
+    token e = "vel "++show (vel e)++" ["++gated e (pitch (pitches e)++":"++rat (dur e))++"]"
+    gated e body = if gate e == 1 then body else "gate "++rat (gate e)++" ["++body++"]"
     pitch [] = "_"
     pitch [A.Step x] = show x
     pitch xs = "("++unwords [show x | A.Step x <- xs]++")"

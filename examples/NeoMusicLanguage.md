@@ -57,6 +57,22 @@ A `key` or `meter` header affects only the sheet view.
   `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5. Notes start at 1, so a
   single `vel` still sets the level. Accents are written as relative levels
   inside an outer level; nothing can exceed the level around it.
+- `gate r` sets how long notes *sound* as a ratio `r` of the time they occupy,
+  multiplying like `vel`: `gate 1/2 [...]` is staccato, `gate 3/2 [...]` rings
+  into the next note. It never moves onsets or changes a passage's length.
+  `pedal [...]` holds every note in the group until the group ends, as a
+  sustain pedal held through it; rests and the passage's length are unchanged.
+  See `examples/neomusic/articulation.neomusic`.
+- `speed r [...]` performs the group at `r` times the written tempo (`speed 3/4`
+  is slower); `speed a -> b [...]` changes smoothly from `a` to `b` across the
+  group, as a ritardando or accelerando; `swing s [...]` plays each beat's two
+  halves long-short, the first taking share `s` of the beat (`swing 2/3` is
+  triplet swing); `hold k [...]` holds the group `k` times as long, a fermata
+  when it covers one note. The written notes never change: these shape the
+  performance only. A tempo change acts on everything sounding during its
+  beats, in every voice, so it doesn't matter which hand's line you write it in
+  and the hands can't drift apart. Nested changes multiply. See
+  `examples/neomusic/tempo.neomusic` and `neomusic-timemap.md`.
 - `rev` reverses durations and velocities with pitches. When reversing a parallel
   expression, shorter branches are delayed so the whole passage is mirrored.
 - Bindings may refer forward to other bindings. Functions have fixed positional
@@ -109,12 +125,28 @@ S.writeAudio "music.wav" perf music
 S.render perf music
 ```
 
-`Event { dur, vel, pitches }` keeps all axes together. Empty `pitches` means rest.
+`Event { dur, vel, pitches, gate }` keeps all axes together. Empty `pitches`
+means rest. `dur` is the time the event occupies, so the next event starts after
+it; `gate` is how long it sounds, as a ratio of `dur` (1 as written, below 1
+detached, above 1 ringing on). Because the gate is a ratio, `stretch` keeps
+articulation unchanged.
 A `Phrase` is a list, so concatenation and reversal preserve the association.
 `transpose`/`invert` affect only pitch; `stretch` affects only duration.
 `withRhythm` cycles a positive, nonempty pattern and returns `Either` for invalid
 patterns. `scaleVelocity` multiplies event velocities (what `vel` does);
-`withVelocity` overwrites them.
+`withVelocity` overwrites them. `scaleGate` (what `gate` does), `withGate`,
+`staccato` (gate × 1/2) and `pedal :: Score -> Score` do the same for gates;
+`scoreLength` gives a score's length in beats.
+
+`Tempo shape score` shapes how fast `score` is performed; `Shape` is
+`Speed r`, `Ramp a b` or `Swing period share`, all exact rationals, and
+`hold k = Tempo (Speed (1/k))`. Every shape changes tempo by an equal ratio per
+beat, so nested shapes multiply into the same family. `timeMap` builds the one
+shared clock from all tempo nodes, `performed` maps written beats through it,
+and `tempoNodes` lists each node with its written start and length. `render`
+is the only place the clock meets `bpm`. `rev` reverses ramps and mirrors swing
+(exact when the swung extent is a whole number of periods); `stretch` scales a
+node's extent and swing period.
 
 `Score` has `Line name phrase`, `Silence beats`, sequential `:>>:` and parallel
 `:||:`. Sequential composition has `Semigroup`/`Monoid` instances with `Silence 0`
@@ -164,8 +196,16 @@ strip, with used keys marked by their step number. Other tunings give the step
 size and 0 in Hz, and no key list. The Haskell `numeric` function returns the
 aligned lanes alone, unwrapped and without a legend; `numericPage` and
 `numericHtml` take the `Performance` for the legend.
+
+When the score has tempo changes, a `tempo` lane sits above the voices, in
+systems where something changes. Each change's start and end are columns of
+their own, so the annotation is directly above the music it shapes:
+`speed 1 -> 3/4`, `swing 2/3`, `hold 2`, then `a tempo` or `straight` where it
+ends (unless an earlier change is still going; a hold needs no end mark).
 This view accepts microtones and arbitrary rational rhythms because it displays
-the score without imposing a tuning or traditional notation. Velocities are not
+the score without imposing a tuning or traditional notation. Gates show as a
+mark, not their exact ratio: `0'` sounds shorter than written and `0~` rings on,
+and the legend explains whichever marks the piece uses. Velocities are not
 shown, so this is a reading view rather than a lossless source serialization.
 
 **Numeric + bars (prototype):** `hybrid` writes `.html` with a flat double stroke
@@ -178,7 +218,16 @@ The previous `sheet ... .ly --pdf` command is now `staff ... .ly --pdf` to keep
 traditional engraving an explicit alternative.
 
 **MIDI:** SMF type 1, a conductor tempo track and pitched tracks using GM piano
-(program 0). It preserves pitches, gate durations and per-event velocity;
+(program 0). It preserves pitches, gated sounding lengths (note-off at
+`onset + dur × gate`, extending the track if a note rings past the end) and
+per-event velocity. Ticks stay in written beats; the shared clock becomes the
+conductor track's tempo changes (`tempoChanges` exposes them). Constant
+stretches are one change each. A ramp is stepped at every note-on and note-off
+inside it and at least every 1/4 beat, each step lasting exactly as long as the
+clock says; integer microseconds per quarter are the only rounding, carried
+into the next step, so every note lands within a microsecond of the audio
+render (a test plays the tempo map back to check). Swing is two changes per
+beat;
 custom synth patches, gain/pan/reverb are not reproduced. Steps must use 12-EDO
 with an exactly aligned 12-TET reference (floating-point tolerance applies).
 No pitch rounding. Notes must fit MIDI 0–127. Noise and pitch-drop percussion patches require a future
@@ -190,6 +239,13 @@ per quarter, as required by SMF; timing/gates exclude synth release and reverb.
 
 **LilyPond:** treble and bass PianoStaff, key spelling hint, meter, tempo,
 chords, separate overlapping voices, dotted durations and ties across bars.
+Gates become articulation: at most 1/2 is staccato (`-.`), below 1 portato
+(`-_`), above 1 a "let ring" tie (`\laissezVibrer`) on the note's last tied
+segment. A pedal therefore shows as let-ring ties on each note, not as a
+*Ped.* marking. Tempo changes are marks on a spacer line between the staves,
+so the notes stay as written: a speed is a metronome mark, a ramp "rit." or
+"accel." then "a tempo", swing "Swing" then "Straight", and a hold over a
+single onset a `\fermata` on its notes.
 Pitches must fit piano A0–C8. The initial supported rhythmic grid is 1/8 beat
 (32nd note) or larger; tuplets and finer dyadic durations fail explicitly.
 `sheetEvents` exposes the exact pre-engraving onsets/gates for comparison with
