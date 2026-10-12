@@ -20,6 +20,10 @@ import NeoMusic.Sheet
 
 perf :: Performance
 perf = defaultPerformance {instruments=M.singleton "right" defaultInstrument}
+-- | The numeric view with its reading marks on.
+marked :: NumericView
+marked = plain {showMarks = True}
+
 view :: SheetView
 view = SheetView 4 "C" (M.singleton "right" Treble) False
 header :: String
@@ -105,35 +109,35 @@ scoreGroup = Group "NeoMusic score and views"
       assert (BS.pack [0,0x90,60,127,1,0x80,60,0,0,0x90,60,64] `BS.isInfixOf` BL.toStrict bytes))
   , ("numeric view preserves steps, durations and independent voices", withTests 1 $ property $ do
       let line = Line "voice" (n 1 <> n 2 <> n 3 <> n (-1) <> n 0 <> chord [4,5,6])
-      numeric line === Right "voice: 1 2 3 -1 0 (4 5 6)\n"
-      numeric (Silence 2 :>>: Line "micro" (hit [1] (1/3) 1)) === Right "micro: _:2 1:1/3\n"
+      numeric plain line === Right "voice: 1 2 3 -1 0 (4 5 6)\n"
+      numeric plain (Silence 2 :>>: Line "micro" (hit [1] (1/3) 1)) === Right "micro: _:2 1:1/3\n"
       lanes <- evalEither (numericLanes (Line "a" (n 0) :||: Line "a" (hit [4] 2 1)))
       map (sum . map dur . snd) lanes === [2,2]
       length lanes === 2
       let unsafe = defaultPerformance {instruments=M.singleton "<unsafe>" defaultInstrument}
-      html <- evalEither (numericHtml False unsafe (Line "<unsafe>" (n 0)))
+      html <- evalEither (numericHtml plain unsafe (Line "<unsafe>" (n 0)))
       assert ("&lt;unsafe&gt;" `isInfixOf` html && not ("<unsafe>" `isInfixOf` html)))
   , ("numeric lanes align on shared onsets", withTests 1 $ property $ do
       let hands = Line "a" (hit [0] 2 1 <> n 1) :||: Line "b" (n 5 <> n 6 <> n 7)
-      numeric hands === Right "a: 0:2   1\nb: 5   6 7\n"
+      numeric plain hands === Right "a: 0:2   1\nb: 5   6 7\n"
       -- A gap inside one lane still gets its own column in the others.
-      numeric (Line "a" (n 0 <> hush 1 <> n 2) :||: Line "b" (hit [4] 3 1)) === Right "a: 0   _ 2\nb: 4:3\n"
+      numeric plain (Line "a" (n 0 <> hush 1 <> n 2) :||: Line "b" (hit [4] 3 1)) === Right "a: 0   _ 2\nb: 4:3\n"
       -- Wrapping only splits between columns, so every system stays aligned.
       let long = Line "right" (concatMap n [0..40]) :||: Line "right" (hit [-12] 41 1)
-      page <- evalEither (numericPage perf long)
+      page <- evalEither (numericPage plain perf long)
       let systemsOf = filter (\l -> "right / " `isPrefixOf` l) (lines page)
       assert (length systemsOf > 2 && all ((<= 80) . length) systemsOf))
   , ("legend states tempo, tuning and keys beside the numbers", withTests 1 $ property $ do
       doc <- evalEither (parseDocument (header++"instrument left = piano staff bass\nright: 0 7\nleft: -12\n"))
-      page <- evalEither (numericPage (performance doc) (score doc))
+      page <- evalEither (numericPage plain (performance doc) (score doc))
       let legendLines = takeWhile (not . null) (lines page)
       legendLines === ["tempo 120, durations in beats (default 1)"
                       ,"right, left: 12-EDO, 0 = C4"
                       ,"  keys: -12=C3 0=C4 7=G4"]
       micro <- evalEither (parseDocument "tuning 24 at A4\ninstrument m = sine\nm: 0 1\n")
-      microPage <- evalEither (numericPage (performance micro) (score micro))
+      microPage <- evalEither (numericPage plain (performance micro) (score micro))
       assert ("m: 24-EDO, 0 = 440.0 Hz" `isInfixOf` microPage && not ("keys:" `isInfixOf` microPage))
-      assert (isLeft (numericPage perf (Line "nobody" (n 0)))))
+      assert (isLeft (numericPage plain perf (Line "nobody" (n 0)))))
   , ("vel scales, so nested levels compose", property $ do
       a <- forAll (Gen.double (Range.linearFrac 0 1))
       b <- forAll (Gen.double (Range.linearFrac 0 1))
@@ -197,8 +201,10 @@ scoreGroup = Group "NeoMusic score and views"
       sheet <- evalEither (engrave perf view (Line "right" (staccato (n 0) <> scaleGate (3/4) (n 2) <> withGate 2 (hit [4] 6 1))))
       -- Articulation goes on a note's first segment; "let ring" on its last tied segment.
       assert ("c'4-. d'4-_ e'2~ | e'1\\laissezVibrer |" `isInfixOf` sheet)
-      numeric (Line "right" (staccato (n 0) <> withGate 2 (n 4) <> n 7)) === Right "right: 0' 4~ 7\n"
-      page <- evalEither (numericPage perf (Line "right" (staccato (n 0))))
+      numeric marked (Line "right" (staccato (n 0) <> withGate 2 (n 4) <> n 7)) === Right "right: 0' 4~ 7\n"
+      -- The default view is just the numbers.
+      numeric plain (Line "right" (staccato (n 0) <> withGate 2 (n 4) <> n 7)) === Right "right: 0 4 7\n"
+      page <- evalEither (numericPage marked perf (Line "right" (staccato (n 0))))
       assert ("' = detached: sounds shorter than written" `isInfixOf` page && not ("~ = rings" `isInfixOf` page)))
   , ("tempo laws: identity, composition, stretch, closed form", property $ do
       xs <- forAll (Gen.list (Range.linear 1 10) (Gen.int (Range.linear (-12) 12)))
@@ -289,10 +295,10 @@ scoreGroup = Group "NeoMusic score and views"
       sheet <- evalEither (engrave perf view (score doc))
       assert (all (`isInfixOf` sheet)
         ["\\new Dynamics", "\\tempo 4 = 120", "\"rit.\"", "\"a tempo, Swing\"", "\"Straight\"", "a'4\\fermata"])
-      page <- evalEither (numeric (score doc))
+      page <- evalEither (numeric plain (score doc))
       assert (all (`isInfixOf` page) ["speed 1 -> 3/4", "a tempo, swing 2/3", "straight, hold 2"])
       -- A score without tempo changes prints no tempo lane.
-      plain <- evalEither (numeric (Line "right" (n 0)))
+      plain <- evalEither (numeric plain (Line "right" (n 0)))
       assert (not ("tempo" `isInfixOf` plain)))
   , ("curves: bends add, swells multiply, glide joins successors", withTests 1 $ property $ do
       let up = [(0, 0), (1, 2)]
@@ -355,9 +361,11 @@ scoreGroup = Group "NeoMusic score and views"
       BL.take 2 (BL.drop 10 plainBoth) === BL.pack [0,2]
       sheet <- evalEither (engrave perf view (Line "right" (bend [(0,0),(1,4)] (n 0) <> n 4 <> addVibrato (1/4) (n 7) <> swell [(0,1),(1,1/2)] (n 9))))
       assert (all (`isInfixOf` sheet) ["c'4\\glissando e'4", "g'4^\\markup \\italic \"vib.\"", "a'4_\\markup \\italic \"dim.\""])
-      numeric (Line "right" (bend [(0,0),(1,1)] (n 0) <> addVibrato (1/4) (n 2) <> swell [(0,1),(1,0)] (n 4) <> bend [(0,0),(1/2,1),(1,0)] (n 5)))
+      numeric marked (Line "right" (bend [(0,0),(1,1)] (n 0) <> addVibrato (1/4) (n 2) <> swell [(0,1),(1,0)] (n 4) <> bend [(0,0),(1/2,1),(1,0)] (n 5)))
         === Right "right: 0/ 2w 4> 5^\n"
-      page <- evalEither (numericPage perf (Line "right" (addVibrato (1/4) (n 2))))
+      page <- evalEither (numericPage marked perf (Line "right" (addVibrato (1/4) (n 2))))
+      plainPage <- evalEither (numericPage plain perf (Line "right" (addVibrato (1/4) (n 2))))
+      assert (not ("vibrato" `isInfixOf` plainPage) && "right: 2" `isInfixOf` plainPage)
       assert ("w = vibrato" `isInfixOf` page && not ("/ = pitch" `isInfixOf` page)))
   , ("cents: a fine offset under the steps, in every view", withTests 1 $ property $ do
       -- 100 cents is one 12-EDO step; offsets add; transposing keeps them; inverting mirrors them.
@@ -379,7 +387,7 @@ scoreGroup = Group "NeoMusic score and views"
       half <- evalEither (midi perf (Line "right" (detune 50 (n 0))))
       assert (BS.pack [0,0xb0,6,1] `BS.isInfixOf` BL.toStrict half)
       assert (BS.pack [0,0xe0,0,96,0,0x90,60,127] `BS.isInfixOf` BL.toStrict half)
-      numeric (Line "right" (detune (-14) (n 4) <> n 7)) === Right "right: 4-14c 7\n"
+      numeric plain (Line "right" (detune (-14) (n 4) <> n 7)) === Right "right: 4-14c 7\n"
       sheet <- evalEither (engrave perf view (Line "right" (detune (-14) (n 4))))
       assert ("e'4^\\markup \\small \"-14¢\"" `isInfixOf` sheet))
   , ("staff carries the numeric notation under the notes", withTests 1 $ property $ do

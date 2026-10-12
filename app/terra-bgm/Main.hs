@@ -4,27 +4,30 @@
 module Main (main) where
 
 import Control.Monad (unless)
-import NeoMusic
+import qualified Data.Map.Strict as M
+import NeoMusic.Audio hiding (note)
+import NeoMusic.Pitch (Tuning(..))
+import NeoMusic.Score (Phrase, Score(..), Performance(..), defaultInstrument, dur, hit, hush)
+import qualified NeoMusic.Score as S
 import System.Environment (getArgs)
 import Text.Printf (printf)
 
-type Line = [(Event, Rational, Double)]
+type Line = Phrase
 data Harmony = H { root :: Int, keys :: [Int] }
 
 -- MIDI-number pitches, interpreted directly by NeoMusic's equal temperament.
 tune :: Tuning
 tune = Tuning 8.175798915643707 (2 ** (1/12))
 note :: [Int] -> Rational -> Double -> Line
-note ns d v = [(Play (map Step ns), d, v)]
+note = hit
 silent :: Rational -> Line
-silent d = [(Rest, d, 0) | d > 0]
+silent = hush
 gated :: Int -> Rational -> Double -> Line
 gated p d v = note [p] (d * 9/10) v ++ silent (d/10)
-line :: Patch -> Line -> Piece
-line patch es = FromPart (Part tune (Tempo 144) (Synth patch)
-  [e | (e,_,_) <- es] [d | (_,d,_) <- es] [v | (_,_,v) <- es])
-together :: [Piece] -> Piece
-together = foldr1 (:||:)
+line :: S.Name -> Line -> Score
+line = Line
+together :: [Score] -> Score
+together = foldr (:||:) (Silence 0)
 
 -- Close-position sevenths/ninths; the bass supplies the harmonic root.
 dmaj, bmin, gmaj, amaj, fsmin, emin, fsmaj :: Harmony
@@ -122,26 +125,42 @@ snarePositions :: Int -> [Int]
 snarePositions b | b < 4 || (b >= 36 && b < 40) || b >= 54 = []
                  | b `elem` [19,35,43,51] = [4,12,14,15] | otherwise = [4,12]
 
-score :: Piece
+score :: Score
 score = together
- [ Send 0.2 $ Gain 0.29 $ line lead (concatMap melodyBar [0..55])
- , Send 0.22 $ Pan (-0.28) $ Gain 0.14 $ line piano (concat (zipWith keysBar [0..] harmonies))
- , Send 0.3 $ Pan 0.3 $ Gain 0.12 $ line bell (concat (zipWith arpBar [0..] harmonies))
- , Send 0.28 $ Gain 0.085 $ line pad (concat [note (keys h) 4 (0.5 + 0.15 * energy b) | (b,h) <- zip [0..] harmonies])
- , Gain 0.31 $ line bass (concat (zipWith bassBar [0..] harmonies))
- , Gain 0.65 $ line kick (concat [drumBar b 30 (kickPositions b) | b <- [0..55]])
- , Send 0.1 $ Gain 0.19 $ line snare (concat [drumBar b 50 (snarePositions b) | b <- [0..55]])
- , Pan 0.2 $ Gain 0.095 $ line hat (concat [drumBar b 72 (if b<4 || b>=54 then [] else [0,2..14]) | b <- [0..55]])
- , Send 0.22 $ Pan (-0.35) $ Gain 0.12 $ line cymbal (concat [if b `elem` [4,20,28,44] then note [72] 1 0.7 ++ silent 3 else silent 4 | b <- [0..55]])
- , Send 0.3 $ Pan (-0.1) $ Gain 0.19 $ line piano (silent (36*4) ++ concat [note [p] d 0.72 | (p,d) <- concat (take 8 (cycle verse))])
+ [ line "lead" (concatMap melodyBar [0..55])
+ , line "keys" (concat (zipWith keysBar [0..] harmonies))
+ , line "bell" (concat (zipWith arpBar [0..] harmonies))
+ , line "pad" (concat [note (keys h) 4 (0.5 + 0.15 * energy b) | (b,h) <- zip [0..] harmonies])
+ , line "bass" (concat (zipWith bassBar [0..] harmonies))
+ , line "kick" (concat [drumBar b 30 (kickPositions b) | b <- [0..55]])
+ , line "snare" (concat [drumBar b 50 (snarePositions b) | b <- [0..55]])
+ , line "hat" (concat [drumBar b 72 (if b<4 || b>=54 then [] else [0,2..14]) | b <- [0..55]])
+ , line "cymbal" (concat [if b `elem` [4,20,28,44] then note [72] 1 0.7 ++ silent 3 else silent 4 | b <- [0 .. 55 :: Int]])
+ , line "bridgeKeys" (silent (36*4) ++ concat [note [p] d 0.72 | (p,d) <- concat (take 8 (cycle verse))])
  ]
+
+-- Each layer's sound and mix: patch, gain, pan, reverb send.
+performance :: Performance
+performance = Performance 144 (M.fromList
+ [ inst "lead" lead 0.29 0 0.2
+ , inst "keys" piano 0.14 (-0.28) 0.22
+ , inst "bell" bell 0.12 0.3 0.3
+ , inst "pad" pad 0.085 0 0.28
+ , inst "bass" bass 0.31 0 0
+ , inst "kick" kick 0.65 0 0
+ , inst "snare" snare 0.19 0 0.1
+ , inst "hat" hat 0.095 0.2 0
+ , inst "cymbal" cymbal 0.12 (-0.35) 0.22
+ , inst "bridgeKeys" piano 0.19 (-0.1) 0.3 ])
+ (Mix 44100 (hall { roomSize=0.67, wet=0.23 }) 0.35 0.86 1.2 True)
+ where inst name patch g p s = (name, defaultInstrument {S.tuning = tune, S.timbre = patch, S.gain = g, S.pan = p, S.send = s})
 
 check :: IO ()
 check = do
  unless (length harmonies == 56) (error "expected 56 harmony bars")
  unless (all ((==4) . sum . map snd) (hook ++ verse)) (error "melody bar length")
- mapM_ (\(b,h) -> unless (all ((==4) . sum . map (\(_,d,_) -> d)) [melodyBar b,keysBar b h,arpBar b h,bassBar b h,drumBar b 30 (kickPositions b)]) (error ("bad bar " ++ show b))) (zip [0..] harmonies)
- case render score of
+ mapM_ (\(b,h) -> unless (all ((==4) . sum . map dur) [melodyBar b,keysBar b h,arpBar b h,bassBar b h,drumBar b 30 (kickPositions b)]) (error ("bad bar " ++ show b))) (zip [0..] harmonies)
+ case S.render performance score of
   Left e -> error e
   Right t -> do
    unless (abs (seconds t - 280/3) < 0.0001) (error "unexpected arrangement length")
@@ -153,5 +172,5 @@ main = do
  check
  case args of
   ["--check"] -> pure ()
-  [out] -> writeMix out (Mix 44100 (hall { roomSize=0.67, wet=0.23 }) 0.35 0.86 1.2 True) score
+  [out] -> S.writeAudio out performance score
   _ -> ioError (userError "usage: terra-bgm --check | terra-bgm output.wav")

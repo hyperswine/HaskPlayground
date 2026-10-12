@@ -46,10 +46,8 @@ library
       MyClash
       MyData
       MyStuff
-      NeoMusic
       NeoMusic.Audio
       NeoMusic.Language
-      NeoMusic.Legacy
       NeoMusic.Midi
       NeoMusic.Numeric
       NeoMusic.Pitch

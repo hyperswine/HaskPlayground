@@ -17,13 +17,19 @@ import qualified Data.Vector.Unboxed as VU
 import qualified Data.Map.Strict as M
 import NeoMusic.Score (Score(..), Phrase, hit, hush)
 import qualified NeoMusic.Score as S
-import NeoMusic
-  ( Envelope(..), Mix(..), Osc(..), Patch(..), Reverb(..)
-  , Tuning(..), Wave(..)
-  , hall, hat, kick, noiseSweep, pluck, ramp, reeseBass, renderTimelineMix, snare, subBass, supersaw
+import NeoMusic.Audio
+  ( Envelope(..), Mix(..), Osc(..), Patch(..), Reverb(..), Wave(..)
+  , hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass, supersaw
   , writeTimelineMix )
+import NeoMusic.Pitch (Tuning(..))
 import System.Environment (getArgs)
 import Text.Printf (printf)
+
+-- | @k@ levels moving linearly from @a@ to @b@ inclusive.
+ramp :: Double -> Double -> Int -> [Double]
+ramp a b k
+  | k <= 1 = replicate k a
+  | otherwise = [a + (b - a) * fromIntegral i / fromIntegral (k - 1) | i <- [0 .. k - 1]]
 
 -- | Semitones and quarter-tones above D3.
 semis, quarterTones :: Tuning

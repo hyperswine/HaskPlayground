@@ -4,7 +4,7 @@
 -- a column, so events that sound together are printed one above the other. A
 -- column is a moment in time, not a bar; blank cells mean the lane's previous
 -- event is still sounding. Wrapping into systems is page layout only.
-module NeoMusic.Numeric (numeric, numericPage, numericHtml, numericLanes, Legend (..), legend) where
+module NeoMusic.Numeric (NumericView (..), plain, numeric, numericPage, numericHtml, numericLanes, Legend (..), legend) where
 
 import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
@@ -12,6 +12,21 @@ import Data.Ratio (denominator, numerator)
 import NeoMusic.Midi (midiPitch)
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
+
+-- | What the reading view shows beyond steps and durations. The default,
+-- 'plain', is just the numbers: integer steps (with any cents offset, which is
+-- part of the pitch), durations, rests and the tempo lane. 'showMarks' adds
+-- reading aids for gates and curves; 'flatBars' is the hybrid HTML sketch.
+data NumericView = NumericView {showMarks :: Bool, flatBars :: Bool}
+
+plain :: NumericView
+plain = NumericView False False
+
+-- | With marks off, events are shown as if they had no gate or curves.
+visible :: NumericView -> Event -> Event
+visible view e
+  | showMarks view = e
+  | otherwise = e {gate = 1, bends = [], swells = [], vibrato = 0}
 
 -- | Separate simultaneous lines without merging independently timed events.
 -- Every lane starts at beat zero; gaps and trailing silence remain explicit.
@@ -41,9 +56,9 @@ data Cell = EventCell Event | MarkCell String
 -- | One column per distinct onset across all lanes, plus every tempo change's
 -- start and end; a lane has a cell in a column only if something starts there.
 -- The tempo lane comes first and only when the score has tempo changes.
-layout :: Score -> Either String [(Name, [Maybe Cell])]
-layout score = do
-  lanes <- numericLanes score
+layout :: NumericView -> Score -> Either String [(Name, [Maybe Cell])]
+layout view score = do
+  lanes <- map (fmap (map (visible view))) <$> numericLanes score
   marks <- tempoMarks score
   let starts phrase = M.fromList (zip (scanl (+) 0 (map dur phrase)) phrase)
       columns = nub (sort (concatMap (M.keys . starts . snd) lanes ++ map fst marks))
@@ -112,22 +127,26 @@ shownRows rows columns = [row | row@(name, cells) <- rows, not (isTempo name cel
         isMark _ = False
 
 -- | Aligned lanes on unbounded lines, without a legend.
-numeric :: Score -> Either String String
-numeric score = do
-  rows <- layout score
+numeric :: NumericView -> Score -> Either String String
+numeric view score = do
+  rows <- layout view score
   let widths = columnWidths rows
   pure (unlines (textSystem rows widths [0 .. length widths - 1]))
 
 -- | A printable page: the interpretation legend, then aligned lanes wrapped
 -- into systems about 72 characters wide.
-numericPage :: Performance -> Score -> Either String String
-numericPage perf score = do
-  info <- legend perf score
-  rows <- layout score
+numericPage :: NumericView -> Performance -> Score -> Either String String
+numericPage view perf score = do
+  info <- shownLegend view <$> legend perf score
+  rows <- layout view score
   let widths = columnWidths rows
       labelWidth = maximum (0 : [length name + 2 | (name, _) <- rows])
       body = map (textSystem rows widths) (systems (max 24 (72 - labelWidth)) widths)
   pure (unlines (legendText info ++ [""]) ++ intercalate "\n" (map unlines body))
+
+-- | The legend explains marks only when they are shown.
+shownLegend :: NumericView -> Legend -> Legend
+shownLegend view info = if showMarks view then info else info {legendMarks = []}
 
 -- | What a reader needs beside the numbers: tempo, and for each group of
 -- instruments sharing a tuning, what step 0 is and which physical keys the
@@ -252,10 +271,10 @@ gateMark e
 -- showing which step is which key, and the aligned lanes. Hybrid mode is a
 -- visual sketch: equal double strokes sit above events; they do not yet
 -- encode rhythm or pitch height.
-numericHtml :: Bool -> Performance -> Score -> Either String String
-numericHtml hybrid perf score = do
-  info <- legend perf score
-  rows <- layout score
+numericHtml :: NumericView -> Performance -> Score -> Either String String
+numericHtml view perf score = do
+  info <- shownLegend view <$> legend perf score
+  rows <- layout view score
   let widths = columnWidths rows
   pure $
     "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -289,6 +308,7 @@ numericHtml hybrid perf score = do
       ++ concatMap (htmlSystem rows) (systems 44 widths)
       ++ "</main></html>"
   where
+    hybrid = flatBars view
     title = if hybrid then "Numeric + flat bars" else "Numeric notation"
     htmlSystem rows columns =
       "<section class=\"system\" style=\"grid-template-columns:max-content repeat("

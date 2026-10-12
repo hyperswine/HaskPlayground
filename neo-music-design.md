@@ -205,11 +205,13 @@ voices use separate labeled lanes, aligned in columns: every onset in any lane
 starts a column, so simultaneous events stack vertically. A column is a moment,
 not a bar, and column width is typographic, not proportional to time. Dynamics
 remain in the source/performance and are omitted from the first reading view.
-How long a note sounds (its gate, a ratio of the time it occupies) is shown as a
-mark rather than a number: `0'` is detached and `0~` rings on. Tempo changes, which shape
-performance without changing the written beats, get a `tempo` lane above the
-voices that names each change where it starts and ends. Curves within a note
-(bends, vibrato, swells) are marks as well, never numbers.
+A cents offset is part of the pitch and shows exactly (`4-14c`). Tempo changes,
+which shape performance without changing the written beats, get a `tempo` lane
+above the voices that names each change where it starts and ends, in source
+form. Everything else about how a note is performed (its gate, bends, vibrato,
+swells, velocity) stays out of the default view: the source is the full
+notation. A reader who wants hints can ask for marks (`--marks`), never numbers:
+`0'` detached, `0~` rings on, `/ \ ^` bends, `w` vibrato, `< > <>` swells.
 
 A second, optional view combines the same numeric labels with flat horizontal
 bar-like marks above each event, visually closer to `==` than drawn noteheads.

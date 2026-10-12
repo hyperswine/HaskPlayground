@@ -23,7 +23,8 @@ stack test --fast
 `play` renders a file; it does not open an audio player. WAV synthesis is native.
 MP3/FLAC need `ffmpeg` on PATH. `.ly` generation is native; `--pdf` invokes
 `lilypond` on PATH. Source is still saved if LilyPond is missing. Exports overwrite
-the named output. The old `neo-music output.wav` demo command still works.
+the named output. `sheet` and `hybrid` take `--marks` to show gate and curve
+marks; `staff` takes `--pdf` and `--no-numbers`.
 
 ## Everyday authoring
 
@@ -126,10 +127,9 @@ Modules, each depending only on the ones above it:
 | `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Patch` and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export |
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
-| `NeoMusic.Legacy` | the v1/v2 API (`Seq`, `Part`, `Piece` with `Gain`/`Pan`/`Send`), lowered onto `Audio` |
-| `NeoMusic` | compatibility umbrella: `Legacy` + `Pitch` + `Audio`, the old export list |
-
-No new module imports `NeoMusic.Legacy` or `NeoMusic`.
+Import the modules you need. `Score` and `Audio` share some field names
+(`gain`, `pan`, `send`, `swells`, `vibratoRate`): an instrument's and a rendered
+note's. Qualify one of them, e.g. `import qualified NeoMusic.Score as S`.
 
 ```haskell
 import qualified NeoMusic.Score as S
@@ -231,13 +231,16 @@ their own, so the annotation is directly above the music it shapes:
 `speed 1 -> 3/4`, `swing 2/3`, `hold 2`, then `a tempo` or `straight` where it
 ends (unless an earlier change is still going; a hold needs no end mark).
 This view accepts microtones and arbitrary rational rhythms because it displays
-the score without imposing a tuning or traditional notation. Gates show as a
-mark, not their exact ratio: `0'` sounds shorter than written and `0~` rings on.
-A cents offset is part of the pitch, so it is shown exactly: `4-14c`.
-Curves are marks: `/`, `\` or `^` for a bend that ends higher, lower, or
-goes away and back; `w` for vibrato; `<`, `>` or `<>` for a swell that grows,
-fades, or both. The legend explains whichever marks the piece uses. Velocities are not
-shown, so this is a reading view rather than a lossless source serialization.
+the score without imposing a tuning or traditional notation. A cents offset is
+part of the pitch, so it is shown exactly: `4-14c`.
+
+By default that is all: steps, durations, rests and the tempo lane. Gates,
+curves and velocities are not shown, so this is a reading view, not a lossless
+serialization; the source is the full notation. `--marks` (`showMarks` in
+`NumericView`) adds reading aids, explained in the legend: `0'` sounds shorter
+than written and `0~` rings on; `/`, `\` or `^` for a bend that ends higher,
+lower, or goes away and back; `w` for vibrato; `<`, `>` or `<>` for a swell that
+grows, fades, or both.
 
 **Numeric + bars (prototype):** `hybrid` writes `.html` with a flat double stroke
 above each pitched event. It uses the same integers and duration suffixes. The
@@ -305,18 +308,14 @@ rather than silently approximating them.
 
 ## Migration and validation
 
-`NeoMusic` remains the v1/v2 compatibility umbrella, with its old export list.
-Its parallel lists and mixer constructors live in `NeoMusic.Legacy` for existing
-host programs; new scores should use `NeoMusic.Score`. The legacy `toPiece`
-adapter is gone: scores lower straight to an `Audio` timeline. Legacy `Note`'s
-`sound` field is now the `Patch` it plays (`patchOf` maps `Sine`/`Saw`/`Square`
-to their presets). Renders are byte-identical to before the split.
-
-The separate `classicWave` engine is removed. Legacy `Sine`, `Saw`, and `Square`
-now select patch presets. Their sound changes and they have a 15 ms release after
-the gate; duration-sensitive tests have been updated. `screw-bgm` now uses real
-phrases, named instruments, one performance tempo and `Silence` for offsets.
-Its locally invented event tuple and mixer-node score have been removed.
+The v1/v2 API (`Seq`, `Part`, `Piece` with `Gain`/`Pan`/`Send`, the `NeoMusic`
+umbrella module and its `demo`) was removed on 2026-10-12; `NeoMusic.Score` is
+the only score API. `terra-bgm`, its last user, was ported: the same notes,
+pitches and mix, with onsets now computed from exact beats rather than summed
+seconds. That moves some notes on exact sample boundaries by one sample, so
+its render is not byte-identical to the legacy one. The audio engine tests now
+drive the engine through the score API. The legacy `Sine`, `Saw` and `Square`
+timbres survive as the `sinePatch`, `sawPatch` and `squarePatch` presets.
 
 Tests cover phrase/score laws, exact timing, semantic source round trips,
 functions and syntax errors, MIDI bounds/unisons, and four golden sheet views:

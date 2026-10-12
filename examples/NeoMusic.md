@@ -1,5 +1,7 @@
 # NeoMusic: first playable implementation
 
+> **Historical.** This API (`Seq`, `Part`, `Piece`, the `NeoMusic` module) was removed on 2026-10-12. The audio engine it describes lives on in `NeoMusic.Audio`; see [NeoMusicLanguage.md](NeoMusicLanguage.md) for the current API.
+
 For the current score API, `.neomusic` files, MIDI and sheet music, see [NeoMusicLanguage.md](NeoMusicLanguage.md). This page documents the older API; legacy simple timbres now use patch presets with a 15 ms release.
 
 `src/NeoMusic.hs` implements the sequence, interpretation and piece layers of
