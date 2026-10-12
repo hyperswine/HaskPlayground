@@ -1321,13 +1321,22 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
           cpuPrefetchIssue = False}
         memoryWord received txReady emergencyReset
       cancelled = emergencyReset
-      (bus', response, busOutput, effect) = if cancelled
-        then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), NoEffect)
-        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine) (cpuDevices machine)
+      (busStepped, busResponse, busOutput, busEffect) =
+        busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine) (cpuDevices machine)
+      (bus', response, effect) = if cancelled
+        then ((systemBus machine) {busPhase = BusIdle}, Nothing, NoEffect)
+        else (busStepped, busResponse, busEffect)
       busActive = case busPhase (systemBus machine) of
         BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
         _ -> True
-      output = if busActive && not cancelled then busOutput else coreOutput
+      -- A break cancels writes and UART bytes; the read address is a
+      -- don't-care then, so it does not wait on the break.
+      (busAddress', busWrite', busTx) = busOutput
+      (coreAddress, coreWrite, coreTx) = coreOutput
+      output =
+        ( if busActive then busAddress' else coreAddress,
+          if busActive then (if cancelled then Nothing else busWrite') else coreWrite,
+          if busActive then (if cancelled then Nothing else busTx) else coreTx )
       counterWrite lowAddress highAddress = case cpuCounterWrite machine of
         Just (address, value)
           | address == lowAddress -> Just (False, value)
@@ -1689,7 +1698,6 @@ pipeStep machine memoryWord =
       arrival = (`fetchedWord` memoryWord) <$> last inflight
       readPointer = pQueueRead pipe
       writePointer = pQueueWrite pipe
-      queued = writePointer - readPointer
       waiting = writePointer /= readPointer
       slot i = fromIntegral (i .&. 3) :: Index 4
       -- The arriving word is written at the write pointer regardless; it
@@ -1789,7 +1797,11 @@ cpuStep machine memoryWord received txReady
 
 cpuStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
 cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset
-  | not emergencyReset && cpuPipelined machine && cpuFast machine = pipeStep machine memoryWord
+  | cpuPipelined machine && cpuFast machine =
+      let (machine', write, (address, memoryWrite, tx)) = pipeStep machine memoryWord
+       in if emergencyReset
+            then (resetCpu machine, Nothing, (address, Nothing, Nothing))
+            else (machine', write, (address, memoryWrite, tx))
   -- Between instructions, with nothing for the phases to do, the pipeline
   -- takes over at the pc.
   -- (The interrupt flag is a cycle late; the pipeline cannot commit in
