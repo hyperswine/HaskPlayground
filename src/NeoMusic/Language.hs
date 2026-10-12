@@ -14,7 +14,9 @@ import Text.Parsec hiding (Line, label, token)
 import Text.Parsec.String (Parser)
 
 data Staff = Treble | Bass deriving (Eq, Ord, Show)
-data SheetView = SheetView { meter :: Int, key :: String, staves :: M.Map Name Staff }
+-- | 'numbers' prints each note's Neo step under it (chords stacked), so the
+-- staff view carries the numeric notation alongside the traditional one.
+data SheetView = SheetView { meter :: Int, key :: String, staves :: M.Map Name Staff, numbers :: Bool }
   deriving (Eq, Show)
 data Document = Document { performance :: Performance, sheetView :: SheetView, score :: Score }
   deriving (Eq, Show)
@@ -22,6 +24,7 @@ data Expr = Notes [Int] | Ref Name [Expr] | SeqE [Expr] | ParE Expr Expr
   | Scale Rational Expr | Trans Int Expr | Repeat Int Expr | Rev Expr | Inv Expr | Vel Double Expr
   | Gate Rational Expr | Pedal Expr | TempoE Shape Expr
   | BendE Curve Expr | SwellE Curve Expr | VibratoE Rational Expr | GlideE Rational Expr
+  | CentsE Rational Expr
   deriving (Eq, Show)
 data Definition = Definition [Name] Expr deriving (Eq, Show)
 
@@ -99,6 +102,7 @@ expression arities = parallel
       <|> (keyword "swell" *> (SwellE <$> curveP <*> term))
       <|> (keyword "vibrato" *> (VibratoE <$> rational <*> term))
       <|> (keyword "glide" *> (GlideE <$> rational <*> term))
+      <|> (keyword "cents" *> (CentsE <$> signedFraction <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
       <|> between (symbol "(") (symbol ")") (Notes <$> many integer)
@@ -138,7 +142,7 @@ parseDocument input = do
   let ls = [(i,stripComment s) | (i,s) <- zip [1..] (lines input), not (all isSpace (stripComment s))]
       isBinding s = '=' `elem` s && takeWord s /= "instrument"
       bindings = [(i,s) | (i,s) <- ls, isBinding s]
-      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold","bend","swell","vibrato","glide"]
+      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold","bend","swell","vibrato","glide","cents"]
   signatures <- mapM (\(i,s) -> runLine i (many1 ident) (takeWhile (/='=') s)) bindings
   unless (all (\xs -> length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
     (Left "duplicate parameters or reserved binding name")
@@ -150,7 +154,7 @@ parseDocument input = do
       pure (name, Definition params expr)) (zip bindings [(name,params) | name:params <- signatures])
   let defs = M.fromList definitions
       nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
-      initial = (defaultPerformance, SheetView 4 "C" M.empty, tuning defaultInstrument, [], [])
+      initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
   (perf,view,_,voices,_) <- foldM (readStatement arities) initial nonbindings
   scores <- mapM (\(name,expr) -> evaluate defs M.empty [] name expr) voices
   let result = foldr (:||:) (Silence 0) scores
@@ -240,6 +244,7 @@ evaluate defs locals active name expr = case expr of
   BendE c e -> mapPhrases (bend c) <$> recur e
   SwellE c e -> mapPhrases (swell c) <$> recur e
   VibratoE d e -> mapPhrases (addVibrato d) <$> recur e
+  CentsE c e -> mapPhrases (detune c) <$> recur e
   GlideE f e
     | f > 1 -> Left "glide fraction must be within 0..1"
     | otherwise -> glide f <$> recur e
@@ -307,10 +312,11 @@ prettyScore s = do
     -- Bends add, swells multiply and vibrato depths add, so each nests on its own.
     curved e body = foldr (\c b -> "bend "++curveText c++" ["++b++"]") (
                       foldr (\c b -> "swell "++curveText c++" ["++b++"]") (
-                        if vibrato e == 0 then body else "vibrato "++rat (vibrato e)++" ["++body++"]")
+                        detuned e (if vibrato e == 0 then body else "vibrato "++rat (vibrato e)++" ["++body++"]"))
                       (swells e))
                     (bends e)
     curveText c = "{"++unwords [rat u++":"++rat y | (u, y) <- c]++"}"
+    detuned e body = if cents e == 0 then body else "cents "++rat (cents e)++" ["++body++"]"
     gated e body = if gate e == 1 then body else "gate "++rat (gate e)++" ["++body++"]"
     pitch [] = "_"
     pitch [A.Step x] = show x

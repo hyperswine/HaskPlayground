@@ -209,7 +209,13 @@ pitchText e = case pitches e of
   xs -> "(" ++ unwords [show x | A.Step x <- xs] ++ ")"
 
 eventText :: Event -> String
-eventText e = pitchText e ++ (if dur e == 1 then "" else ":" ++ rationalText (dur e)) ++ concat (eventMarks e)
+eventText e = pitchText e ++ centsText e ++ (if dur e == 1 then "" else ":" ++ rationalText (dur e)) ++ concat (eventMarks e)
+
+-- | A fine offset is part of the pitch, so it is shown exactly: @7+14c@.
+centsText :: Event -> String
+centsText e
+  | null (pitches e) || cents e == 0 = ""
+  | otherwise = (if cents e > 0 then "+" else "") ++ rationalText (cents e) ++ "c"
 
 -- | Reading aids, not exact values, in this order after an event: gate, bend,
 -- vibrato, swell.

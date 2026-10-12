@@ -81,7 +81,7 @@ Octave is derived, not primitive: it is whatever step count makes `ratio ^ n == 
 
 **Extension point:** to support non-equal tunings (just intonation), generalise `ratio :: Double` to `stepFn :: Int -> Double`. Nothing else changes.
 
-**Fine offset:** cents should be a *second tier* riding on top of a coarse tuning (coarse step + fine cent offset), not a replacement mode — ±7 keys in cents-per-key is too narrow to play in.
+**Fine offset:** cents should be a *second tier* riding on top of a coarse tuning (coarse step + fine cent offset), not a replacement mode — ±7 keys in cents-per-key is too narrow to play in. *(Implemented 2026-10-12: each event carries a `cents` offset, written `cents c [...]`; steps stay integers.)*
 
 ### 4.2 Time
 
@@ -221,4 +221,7 @@ stacking, or stroke count should carry rhythm or pitch information remains open.
 
 Traditional piano staff engraving is an optional interoperability view, not the
 default notation or the main design direction. The existing LilyPond/MIDI work
-remains useful without defining how NeoMusic normally looks.
+remains useful without defining how NeoMusic normally looks. The staff view
+carries the numeric notation with it: each note's step is printed under it
+(chords stacked), with a line saying what 0 is, so the two readings sit side by
+side (`--no-numbers` turns this off).

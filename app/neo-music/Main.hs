@@ -19,21 +19,21 @@ main = do
   case args of
     [] -> A.writeAudio "neo-music.wav" 44100 A.demo
     [path] | takeExtension path `elem` [".wav",".mp3",".flac"] -> A.writeAudio path 44100 A.demo
-    [command,input,"-o",output] -> run command input output False
-    ["staff",input,"-o",output,"--pdf"] -> run "staff" input output True
+    [command,input,"-o",output] -> run command input output []
+    "staff":input:"-o":output:flags | all (`elem` ["--pdf","--no-numbers"]) flags -> run "staff" input output flags
     ["sheet",input] -> readDocument input >>= \doc -> orDie (numericPage (performance doc) (score doc)) >>= putStr
     ["check",input] -> do
       doc <- readDocument input
       timeline <- orDie (S.render (performance doc) (score doc))
       putStrLn (show (length (A.notes timeline))++" notes, "++show (A.seconds timeline)++" seconds")
-    _ -> die "usage: neo-music {play|midi|sheet|hybrid|staff} song.neomusic -o output [--pdf for staff]\n       neo-music check song.neomusic\n       neo-music [demo.wav|demo.mp3|demo.flac]"
+    _ -> die "usage: neo-music {play|midi|sheet|hybrid|staff} song.neomusic -o output [staff: --pdf --no-numbers]\n       neo-music check song.neomusic\n       neo-music [demo.wav|demo.mp3|demo.flac]"
 
 readDocument :: FilePath -> IO Document
 readDocument path = readFile path >>= orDie . parseDocument
 orDie :: Either String a -> IO a
 orDie = either die pure
-run :: String -> FilePath -> FilePath -> Bool -> IO ()
-run command input output pdf = do
+run :: String -> FilePath -> FilePath -> [String] -> IO ()
+run command input output flags = do
   doc <- readDocument input
   let perf = performance doc
       music = score doc
@@ -49,9 +49,10 @@ run command input output pdf = do
       else die "hybrid preview output must be .html"
     "staff" -> do
       if takeExtension output /= ".ly" then die "staff output must have .ly extension" else pure ()
-      text <- orDie (engrave perf (sheetView doc) music)
+      let view = (sheetView doc) {numbers = "--no-numbers" `notElem` flags}
+      text <- orDie (engrave perf view music)
       writeFile output text
-      if pdf then do
+      if "--pdf" `elem` flags then do
         executable <- findExecutable "lilypond"
         program <- maybe (die "LilyPond source was written; PDF requires lilypond on PATH") pure executable
         callProcess program ["--pdf","-o",dropExtension output,output]

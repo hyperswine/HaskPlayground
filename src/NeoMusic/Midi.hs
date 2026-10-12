@@ -83,6 +83,7 @@ midi perf score = do
     bendSamples n =
       [ fromRational (sum [curveValue c (toRational u) | c <- bends (noteEvent n)])
           + fromRational (vibrato (noteEvent n)) * sin (2 * pi * vibratoRate (noteInstrument n) * secs)
+          + fromRational (cents (noteEvent n)) / 100
       | b <- sampleBeats n, let (u, secs) = position n b ] :: [Double]
     swellSamples n = [product [fromRational (curveValue c (toRational u)) | c <- swells (noteEvent n)] | b <- sampleBeats n, let (u, _) = position n b] :: [Double]
     curveEvents ticks channel range n =
@@ -105,7 +106,8 @@ data MidiNote = MidiNote
   , noteEvent :: Event, noteInstrument :: Instrument }
 
 curved :: MidiNote -> Bool
-curved n = let e = noteEvent n in not (null (bends e) && null (swells e) && vibrato e == 0)
+-- A cents offset is a constant bend, so it needs a channel of its own too.
+curved n = let e = noteEvent n in not (null (bends e) && null (swells e) && vibrato e == 0 && cents e == 0)
 
 -- | The conductor track as (written beat, microseconds per quarter) changes.
 --

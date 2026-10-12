@@ -16,6 +16,7 @@ stack run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.html
 stack run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.txt
 stack run neo-music -- hybrid examples/neomusic/twinkle.neomusic -o twinkle-bars.html
 stack run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --pdf
+stack run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --no-numbers
 stack test --fast
 ```
 
@@ -84,6 +85,12 @@ A `key` or `meter` header affects only the sheet view.
   its sound; chords, rests, the last note, and a note with two possible
   successors don't glide. See `examples/neomusic/curves.neomusic` and
   `neomusic-curves.md`.
+- `cents c [...]` adds a fixed fine offset of `c` cents (1/100 of an
+  equal-tempered semitone, any sign, fractions allowed) to every note: the
+  second tier under the integer steps, the same whatever the tuning. Offsets
+  add, transposing keeps them, and `inv` negates them. It applies to every
+  note of an event, so to detune one note of a chord write it as a parallel
+  part: `0:4 & cents -14 [4:4] & 7:4`. See `examples/neomusic/cents.neomusic`.
 - `rev` reverses durations and velocities with pitches. When reversing a parallel
   expression, shorter branches are delayed so the whole passage is mirrored.
 - Bindings may refer forward to other bindings. Functions have fixed positional
@@ -160,7 +167,7 @@ is the only place the clock meets `bpm`. `rev` reverses ramps and mirrors swing
 (exact when the swung extent is a whole number of periods); `stretch` scales a
 node's extent and swing period.
 
-`Event` also carries `bends` and `swells` (lists of `Curve`, breakpoints
+`Event` also carries `cents` (added by `detune`), `bends` and `swells` (lists of `Curve`, breakpoints
 `(u, value)`) and a `vibrato` depth in steps; `bend`, `swell` and `addVibrato`
 add to them, and `glide :: Rational -> Score -> Score` works on a whole score
 so it can join notes that sit in separate lines. `Instrument` has
@@ -226,7 +233,8 @@ ends (unless an earlier change is still going; a hold needs no end mark).
 This view accepts microtones and arbitrary rational rhythms because it displays
 the score without imposing a tuning or traditional notation. Gates show as a
 mark, not their exact ratio: `0'` sounds shorter than written and `0~` rings on.
-Curves are marks too: `/`, `\` or `^` for a bend that ends higher, lower, or
+A cents offset is part of the pitch, so it is shown exactly: `4-14c`.
+Curves are marks: `/`, `\` or `^` for a bend that ends higher, lower, or
 goes away and back; `w` for vibrato; `<`, `>` or `<>` for a swell that grows,
 fades, or both. The legend explains whichever marks the piece uses. Velocities are not
 shown, so this is a reading view rather than a lossless source serialization.
@@ -275,7 +283,14 @@ so the notes stay as written: a speed is a metronome mark, a ramp "rit." or
 single onset a `\fermata` on its notes. A bend that ends higher or lower draws
 a `\glissando` to the next note in its voice; other bends are marked "bend",
 vibrato "vib.", a growing or fading swell "cresc." or "dim.", and one that does
-both an `\espressivo`.
+both an `\espressivo`. A cents offset is a mark like "-14¢" above the note,
+which is written on the key of its step. By default every note also has its
+Neo step printed under it (a chord's steps stacked, highest on top) and the
+page says what 0 is, so the numeric notation reads alongside the staff;
+`--no-numbers` (or `numbers = False` in `SheetView`) leaves the staff plain.
+Silent stretches in a staff's second and later voices are invisible spacer
+rests, as LilyPond expects. In MIDI a cents offset is a constant pitch bend on
+the note's own channel, like a curve.
 Pitches must fit piano A0–C8. The initial supported rhythmic grid is 1/8 beat
 (32nd note) or larger; tuplets and finer dyadic durations fail explicitly.
 `sheetEvents` exposes the exact pre-engraving onsets/gates for comparison with

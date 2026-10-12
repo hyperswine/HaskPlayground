@@ -42,7 +42,8 @@ engrave perf view score = do
   keyName <- maybe (Left "unsupported major key hint") Right (M.lookup (key view) keys)
   let staff name clef =
         let voices = separate (sortOn (\(_, t, _, _, _) -> t) [e | e@(s, _, _, ps, _) <- es, s == name, not (null ps)])
-            content = if null voices then [emitRest 0 total] else map (emitVoice total) voices
+            -- Gaps in secondary voices are invisible spacers, as LilyPond expects.
+            content = if null voices then [emitRest 0 total] else zipWith (\i v -> emitVoice total (if i == (0 :: Int) then "r" else "s") v) [0 ..] voices
          in "  \\new Staff { \\clef "
               ++ clef
               ++ " \\time "
@@ -62,13 +63,23 @@ engrave perf view score = do
       spacer d
         | d <= 0 = ""
         | otherwise = "s4*" ++ show (numerator d) ++ (if denominator d == 1 then "" else "/" ++ show (denominator d)) ++ " "
-  pure ("\\version \"2.24.3\"\n\\score {\n \\new PianoStaff <<\n" ++ staff Treble "treble" ++ tempoLine ++ staff Bass "bass" ++ " >>\n \\layout { }\n}\n")
+      -- With numbers on, say what they mean once, above the music.
+      zeros = nub [ (name, z) | e <- flattened, let name = instrument e, M.member name (staves view)
+                  , Just i <- [M.lookup name (instruments perf)], Right z <- [midiPitch (tuning i) (A.Step 0)] ]
+      zeroText = case nub (map snd zeros) of
+        [z] -> "0 = " ++ keyName' z
+        _ -> intercalate ", " [name ++ " 0 = " ++ keyName' z | (name, z) <- zeros]
+      header = if numbers view && not (null zeros)
+        then " \\header { piece = \\markup \\small \"Numbers under the notes are Neo steps: " ++ zeroText ++ "\" }\n" else ""
+  pure ("\\version \"2.24.3\"\n\\score {\n \\new PianoStaff <<\n" ++ staff Treble "treble" ++ tempoLine ++ staff Bass "bass" ++ " >>\n" ++ header ++ " \\layout { }\n}\n")
   where
     metronome speed
       | speed == fromInteger (round speed) = "\\tempo 4 = " ++ show (round speed :: Integer)
       | otherwise = "\\tempo \"" ++ show speed ++ " BPM\""
     -- Only reached after sheetEvents succeeded in the do block above.
     events = either (const []) id (sheetEvents perf view score)
+    flattened = either (const []) snd (flatten score)
+    keyName' z = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] !! (z `mod` 12) ++ show (z `div` 12 - 1)
     nodes = [node | node@(_, len, _) <- tempoNodes score, len > 0]
     pitchedOnsets = nub (sort [t | (_, t, _, ps, _) <- events, not (null ps)])
     -- A constant slow-down covering exactly one onset, starting on it, is a fermata.
@@ -125,11 +136,11 @@ engrave perf view score = do
     sharpNames = ["c", "cis", "d", "dis", "e", "f", "fis", "g", "gis", "a", "ais", "b"]
     flatNames = ["c", "des", "d", "ees", "e", "f", "ges", "g", "aes", "a", "bes", "b"]
     octave k = replicate (abs k) (if k >= 0 then '\'' else ',')
-    emitRest t d = emit True ("", "") t d []
-    emitVoice total = go 0
+    emitRest t d = emit "r" True ("", "") t d []
+    emitVoice total gap = go 0
       where
-        go at [] = emitRest at (total - at)
-        go at ((_, t, d, ps, ev) : xs) = emitRest at (t - at) ++ emit True (articulation ev t (continues (t + d) xs)) t d ps ++ go (t + d) xs
+        go at [] = emit gap True ("", "") at (total - at) []
+        go at ((_, t, d, ps, ev) : xs) = emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs)) t d ps ++ go (t + d) xs
         continues t ((_, u, _, qs, _) : _) = u == t && not (null qs)
         continues _ [] = False
     -- The gate becomes an articulation on the note's first segment, or for a
@@ -148,14 +159,23 @@ engrave perf view score = do
                 Falling -> "_\\markup \\italic \"dim.\""
                 Returning -> "\\espressivo"
                 Flat -> "" ]
-       in (front ++ (if t `elem` fermatas then "\\fermata" else "") ++ curveFront, back ++ (if sliding then "\\glissando" else ""))
+          -- The numeric notation under each note: its steps, highest on top.
+          stepsBelow = case reverse (sort [x | A.Step x <- pitches ev]) of
+            _ | not (numbers view) -> ""
+            [x] -> "_\\markup \\small \"" ++ show x ++ "\""
+            xs -> "_\\markup \\small \\override #'(baseline-skip . 1.7) \\center-column { " ++ unwords ["\"" ++ show x ++ "\"" | x <- xs] ++ " }"
+          centsAbove
+            | cents ev == 0 = ""
+            | otherwise = "^\\markup \\small \"" ++ (if cents ev > 0 then "+" else "") ++ centsNumber (cents ev) ++ "¢\""
+       in (front ++ (if t `elem` fermatas then "\\fermata" else "") ++ curveFront ++ centsAbove ++ stepsBelow, back ++ (if sliding then "\\glissando" else ""))
+    centsNumber c = show (numerator c) ++ (if denominator c == 1 then "" else "/" ++ show (denominator c))
     gateMarks g
       | g <= 1 / 2 = ("-.", "")
       | g < 1 = ("-_", "")
       | g > 1 = ("", "\\laissezVibrer")
       | otherwise = ("", "")
-    emit _ _ _ 0 _ = ""
-    emit first (front, back) at remaining ps =
+    emit _ _ _ _ 0 _ = ""
+    emit gap first (front, back) at remaining ps =
       let bar = fromIntegral (meter view)
           boundary = (fromInteger (floor (at / bar)) + 1) * bar
           allowed = min remaining (boundary - at)
@@ -164,11 +184,11 @@ engrave perf view score = do
           fitting = [(value, s) | (value, s) <- choices, value <= allowed, denominator (at / base value) == 1]
           (d, spelling) = case fitting of x : _ -> x; [] -> (1 / 8, "32")
           base value = if value `elem` [6, 3, 3 / 2, 3 / 4, 3 / 8] then value * 2 / 3 else value
-          chord = case ps of [] -> "r"; [p] -> pitch p; _ -> "<" ++ unwords (map pitch ps) ++ ">"
+          chord = case ps of [] -> gap; [p] -> pitch p; _ -> "<" ++ unwords (map pitch ps) ++ ">"
           tie = if not (null ps) && d < remaining then "~" else ""
           barline = if at + d == boundary then " | " else " "
           marked = (if first then front else "") ++ (if d == remaining then back else "")
-       in chord ++ spelling ++ (if null ps then "" else marked) ++ tie ++ barline ++ emit False (front, back) (at + d) (remaining - d) ps
+       in chord ++ spelling ++ (if null ps then "" else marked) ++ tie ++ barline ++ emit gap False (front, back) (at + d) (remaining - d) ps
 
 -- Greedy interval partition: each lane is monophonic; chord events stay intact.
 separate :: [(Staff, Rational, Rational, [Int], Event)] -> [[(Staff, Rational, Rational, [Int], Event)]]

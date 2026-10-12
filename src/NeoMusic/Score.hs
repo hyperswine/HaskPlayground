@@ -2,7 +2,7 @@
 module NeoMusic.Score
   ( Event(..), Phrase, Name, Score(..), Shape(..), Instrument(..), Performance(..)
   , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
-  , Curve, curveValue, bend, swell, addVibrato, glide, Motion(..), bendMotion, swellMotion
+  , Curve, curveValue, bend, swell, addVibrato, glide, Motion(..), bendMotion, swellMotion, detune
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withVelocity, scaleVelocity, withGate, scaleGate, staccato, pedal
   , mapPhrases, scoreLength, flatten, validate, render, writeAudio
@@ -24,9 +24,12 @@ type Name = String
 -- 'bends' offset the pitch in (fractional) steps and add together; 'swells'
 -- scale the loudness and multiply together; 'vibrato' is a depth in steps,
 -- whose rate in Hz belongs to the instrument. Rests ignore all three.
+--
+-- 'cents' is a fixed fine offset on every pitch of the event, in cents
+-- (1/1200 octave) whatever the tuning: the second tier under the integer steps.
 data Event = Event
   { dur :: Rational, vel :: Double, pitches :: [Step], gate :: Rational
-  , bends :: [Curve], swells :: [Curve], vibrato :: Rational }
+  , bends :: [Curve], swells :: [Curve], vibrato :: Rational, cents :: Rational }
   deriving (Eq, Show)
 
 -- | Piecewise-linear breakpoints @(u, value)@ with @u@ in 0..1, nondecreasing;
@@ -87,13 +90,14 @@ chord xs = hit xs 1 1
 rest :: Phrase
 rest = hush 1
 hit :: [Int] -> Rational -> Double -> Phrase
-hit xs d v = [Event d v (map Step xs) 1 [] [] 0]
+hit xs d v = [Event d v (map Step xs) 1 [] [] 0 0]
 hush :: Rational -> Phrase
-hush d = [Event d 0 [] 1 [] [] 0 | d /= 0]
+hush d = [Event d 0 [] 1 [] [] 0 0 | d /= 0]
 transpose :: Int -> Phrase -> Phrase
 transpose k = map (\e -> e {pitches = [Step (x+k) | Step x <- pitches e]})
 invert :: Phrase -> Phrase
-invert = map (\e -> e {pitches = [Step (negate x) | Step x <- pitches e]})
+-- Mirroring a pitch around 0 mirrors its fine offset too.
+invert = map (\e -> e {pitches = [Step (negate x) | Step x <- pitches e], cents = negate (cents e)})
 retro :: Phrase -> Phrase
 retro = reverse
 stretch :: Rational -> Phrase -> Phrase
@@ -126,6 +130,10 @@ swell c = map (\e -> if null (pitches e) then e else e {swells = c : swells e})
 -- | Add vibrato depth, in steps, to every note.
 addVibrato :: Rational -> Phrase -> Phrase
 addVibrato d = map (\e -> if null (pitches e) then e else e {vibrato = vibrato e + d})
+
+-- | Add a fine offset in cents to every note: @detune a . detune b = detune (a+b)@.
+detune :: Rational -> Phrase -> Phrase
+detune c = map (\e -> if null (pitches e) then e else e {cents = cents e + c})
 
 -- | How a note's curves move overall, for the reading views.
 data Motion = Flat | Rising | Falling | Returning deriving (Eq, Show)
@@ -333,7 +341,7 @@ render performance score = do
       -- Bends add, so they merge exactly into one curve over all their breakpoints.
       merged cs = [ (fromRational u, fromRational (sum [curveValue c u | c <- cs]))
                   | u <- M.keys (M.fromList [(u, ()) | c <- cs, (u, _) <- c]) ]
-      ns = [ A.Note (seconds (onset e)) (freq (tuning i) pitch)
+      ns = [ A.Note (seconds (onset e)) (freq (tuning i) pitch * 2 ** (fromRational (cents (event e)) / 1200))
                (seconds (onset e + dur (event e) * gate (event e)) - seconds (onset e))
                (timbre i) (vel (event e)) (gain i) (pan i) (send i)
                [(u, y * octaves i) | (u, y) <- merged (bends (event e))]

@@ -21,7 +21,7 @@ import NeoMusic.Sheet
 perf :: Performance
 perf = defaultPerformance {instruments=M.singleton "right" defaultInstrument}
 view :: SheetView
-view = SheetView 4 "C" (M.singleton "right" Treble)
+view = SheetView 4 "C" (M.singleton "right" Treble) False
 header :: String
 header = "tempo 120\ntuning 12 at C4\ninstrument right = piano staff treble\n"
 
@@ -359,11 +359,45 @@ scoreGroup = Group "NeoMusic score and views"
         === Right "right: 0/ 2w 4> 5^\n"
       page <- evalEither (numericPage perf (Line "right" (addVibrato (1/4) (n 2))))
       assert ("w = vibrato" `isInfixOf` page && not ("/ = pitch" `isInfixOf` page)))
+  , ("cents: a fine offset under the steps, in every view", withTests 1 $ property $ do
+      -- 100 cents is one 12-EDO step; offsets add; transposing keeps them; inverting mirrors them.
+      a <- evalEither (render perf (Line "right" (detune 100 (n 0))))
+      b <- evalEither (render perf (Line "right" (n 1)))
+      assert (and [abs (A.hz u / A.hz v - 1) < 1e-12 | (u, v) <- zip (A.notes a) (A.notes b)])
+      map cents (detune 5 (detune (-19) (n 4))) === [-14]
+      map cents (transpose 7 (detune 3 (n 0))) === [3]
+      [(pitches e, cents e) | e <- invert (detune 3 (n 4))] === [([A.Step (-4)], -3)]
+      map cents (detune 9 rest) === [0]
+      doc <- evalEither (parseDocument (header++"right: 0:4 & cents -14 [4:4] & cents 1/2 [7:4]\n"))
+      (_, es) <- evalEither (flatten (score doc))
+      sort (map (cents . event) es) === [-14, 0, 1/2]
+      text <- evalEither (prettyScore (score doc))
+      again <- evalEither (parseDocument (header++text))
+      (_, rs) <- evalEither (flatten (score again))
+      sort [cents (event e) | e <- rs, not (null (pitches (event e)))] === [-14, 0, 1/2]
+      -- MIDI: the key is the step, the offset a constant bend on its own channel.
+      half <- evalEither (midi perf (Line "right" (detune 50 (n 0))))
+      assert (BS.pack [0,0xb0,6,1] `BS.isInfixOf` BL.toStrict half)
+      assert (BS.pack [0,0xe0,0,96,0,0x90,60,127] `BS.isInfixOf` BL.toStrict half)
+      numeric (Line "right" (detune (-14) (n 4) <> n 7)) === Right "right: 4-14c 7\n"
+      sheet <- evalEither (engrave perf view (Line "right" (detune (-14) (n 4))))
+      assert ("e'4^\\markup \\small \"-14¢\"" `isInfixOf` sheet))
+  , ("staff carries the numeric notation under the notes", withTests 1 $ property $ do
+      let numbered = view {numbers = True}
+          music = Line "right" (n 0 <> chord [0, 4, 7] <> hit [12] 2 1) :||: Line "right" (hush 2 <> n 2 <> n 4)
+      sheet <- evalEither (engrave perf numbered music)
+      assert (all (`isInfixOf` sheet)
+        [ "c'4_\\markup \\small \"0\""
+        , "\\center-column { \"7\" \"4\" \"0\" }"
+        , "Numbers under the notes are Neo steps: 0 = C4"
+        , "{ s2 d'4" ])  -- the second voice's gap is an invisible spacer
+      plain <- evalEither (engrave perf view music)
+      assert (not ("Neo steps" `isInfixOf` plain) && not ("_\\markup \\small \"0\"" `isInfixOf` plain)))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))
         doc <- evalEither (parseDocument source)
         actual <- evalEither (engrave (performance doc) (sheetView doc) (score doc))
         expected <- evalIO (readFile ("test/golden/neomusic/"++name++".ly"))
-        actual === expected) ["scale","twinkle","voices","ties","tempo","curves"])
+        actual === expected) ["scale","twinkle","voices","ties","tempo","curves","cents"])
   ]

@@ -1,0 +1,12 @@
+-- Cents: a fixed fine offset under the integer steps (1/100 of a semitone).
+-- A just major third sits about 14 cents below the equal-tempered one.
+tempo 72
+tuning 12 at C4
+instrument right = sine staff treble
+instrument left  = sine staff bass
+
+tempered = (0 4 7):4
+just     = 0:4 & cents -14 [4:4] & cents 2 [7:4]
+
+right: tempered just
+left:  -12:4 -12:4
