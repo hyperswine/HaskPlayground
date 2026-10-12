@@ -747,6 +747,15 @@ data Machine = Machine
     -- | Fast RAM access: ExecuteFinish found an aligned load or store to
     -- RAM and issued the word's read; Commit skips the bus.
     cpuFastMemory :: Bool,
+    -- | The memory port's store, prepared at ExecuteFinish so the port's
+    -- write register is fed from flip-flops: the RAM word index, the data
+    -- already in its byte lanes and the lanes it replaces. A word store
+    -- writes at Commit (cpuStoreNow); a byte or halfword store merges into
+    -- the word read back, at MemoryCapture.
+    cpuPortIndex :: MemAddr,
+    cpuStoreData :: Word32,
+    cpuStoreMask :: Word32,
+    cpuStoreNow :: Bool,
     -- Fetch overlap: Decode reads the word at pc + 4 while the CPU's RAM
     -- port is otherwise idle; it arrives three cycles later. A Fetch whose
     -- pc matches a valid prefetch goes straight to Decode.
@@ -851,6 +860,10 @@ initialMachine =
       cpuFetchFault = False,
       cpuLocalMemory = True,
       cpuFastMemory = False,
+      cpuPortIndex = 0,
+      cpuStoreData = 0,
+      cpuStoreMask = 0,
+      cpuStoreNow = False,
       cpuPrefetchAddress = 0,
       cpuPrefetchWord = 0,
       cpuPrefetchValid = False,
@@ -1312,14 +1325,17 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
       -- The prefetch arrives three cycles after Decode issued it, the
       -- branch target three after ExecuteFinish. (Stores into a buffered
       -- word drop it at Commit.)
+      -- The word is taken whenever its read arrives (a register decides);
+      -- only the valid bit and the count wait on this cycle's phase.
+      arriving = cpuPrefetchCount machine == 1
+      prefetchedWord = if arriving then counted {cpuPrefetchWord = memoryWord} else counted
       prefetched
-        | clearRegisters counted = counted {cpuPrefetchValid = False, cpuPrefetchCount = 0}
-        | cpuPrefetchIssue counted = counted -- a read issued this cycle
-        | cpuPrefetchCount machine == 1 =
-            counted {cpuPrefetchCount = 0, cpuPrefetchWord = memoryWord, cpuPrefetchValid = True}
+        | clearRegisters counted = prefetchedWord {cpuPrefetchValid = False, cpuPrefetchCount = 0}
+        | cpuPrefetchIssue counted = prefetchedWord -- a read issued this cycle
+        | arriving = prefetchedWord {cpuPrefetchCount = 0, cpuPrefetchValid = True}
         | cpuPrefetchCount machine /= 0 =
-            counted {cpuPrefetchCount = cpuPrefetchCount machine - 1}
-        | otherwise = counted
+            prefetchedWord {cpuPrefetchCount = cpuPrefetchCount machine - 1}
+        | otherwise = prefetchedWord
       -- the same for the branch target (issued at ExecuteFinish)
       targeted
         | clearRegisters prefetched = prefetched {cpuTargetValid = False, cpuTargetCount = 0}
@@ -1409,7 +1425,39 @@ cpuStep machine memoryWord received txReady
   = cpuStepDecodedWith decodeMemoryTarget machine memoryWord received txReady (received == Just 0x03)
 
 cpuStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
-cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyReset
+cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset =
+  let (machine', write, (_, _, tx)) = cpuStepPhases decodeTarget machine memoryWord received txReady emergencyReset
+   in (machine', write, (portAddress machine, if emergencyReset then Nothing else portWrite machine memoryWord, tx))
+
+-- | The CPU's read address this cycle, from registers: Fetch reads the pc,
+-- Decode the next word (the prefetch), ExecuteFinish a load or store's word,
+-- a branch or jump's target, or (decode-ahead) the word after next. A read
+-- nobody waits for is harmless, so every other phase reads the pc too and
+-- no phase needs its own "no read" case.
+portAddress :: Machine -> MemAddr
+portAddress machine = case cpuPhase machine of
+  ExecuteFinish
+    | execMemory control -> memoryIndex (cAddress (cpuComputed machine))
+    | execJump control -> memoryIndex (cTarget (cpuComputed machine))
+    | otherwise -> memoryIndex (cpuPc machine + 8)
+  Decode -> memoryIndex (cpuPc machine + 4)
+  _ -> memoryIndex (cpuPc machine)
+  where
+    control = cpuExecuteControl machine
+
+-- | The CPU's write to its memory port this cycle, from registers prepared
+-- at ExecuteFinish: a word store at Commit, a byte or halfword store merged
+-- into the word read back at MemoryCapture.
+portWrite :: Machine -> Word32 -> Maybe (MemAddr, Word32)
+portWrite machine word = case cpuPhase machine of
+  Commit | cpuStoreNow machine -> Just (cpuPortIndex machine, cpuStoreData machine)
+  MemoryCapture | execStore (cpuExecuteControl machine) ->
+    Just (cpuPortIndex machine, (word .&. complement (cpuStoreMask machine)) .|. cpuStoreData machine)
+  _ -> Nothing
+
+-- | The phases' next state; their memory writes are 'portWrite''s.
+cpuStepPhases :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
+cpuStepPhases decodeTarget machine memoryWord _received txReady emergencyReset
   | emergencyReset = (resetCpu machine, Nothing, (0, Nothing, Nothing))
   | otherwise =
       let machineRx = machine
@@ -1456,7 +1504,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                          _ -> cpuPrefetchWord
                     in withoutRegister
                          ( fetched {cpuPhase = phase, cpuInstruction = word},
-                           (memoryIndex cpuPc, Nothing, Nothing)
+                           (0, Nothing, Nothing) -- the read: 'portAddress'
                          )
                FetchDelay -> next machineRx {cpuPhase = FetchCapture}
                -- (cpuTargetCount is 1 exactly when its word is on the bus)
@@ -1468,12 +1516,12 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                  | otherwise -> next machineRx {cpuPhase = Fetch}
                FetchCapture -> next machineRx {cpuPhase = FetchWait}
                FetchWait -> next machineRx {cpuPhase = Decode, cpuInstruction = memoryWord}
-               Decode
-                 | cpuFetchFault -> withoutRegister (machineRx {cpuPhase = Trap, cpuFetchSource = FromMemory, cpuAhead = False}, (0, Nothing, Nothing))
-                 | otherwise ->
+               -- A fetch fault only changes the phase (its cause and value
+               -- were written at Fetch); the rest is harmless for a trap.
+               Decode ->
                      withoutRegister
                        ( machineRx
-                           { cpuPhase = OperandSelect,
+                           { cpuPhase = if cpuFetchFault then Trap else OperandSelect,
                              cpuRegA = sharedRegA,
                              cpuRegB = sharedRegB,
                              cpuImm = decodeImmediate instruction,
@@ -1484,7 +1532,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                              cpuPrefetchIssue = cpuLocalMemory,
                              cpuNextValid = False
                            },
-                         (if cpuLocalMemory then memoryIndex (cpuPc + 4) else 0, Nothing, Nothing)
+                         (0, Nothing, Nothing) -- the read of pc + 4: 'portAddress'
                        )
                OperandSelect ->
                  next machineRx
@@ -1501,7 +1549,8 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                      cpuAluCompare = compareOperands cpuA cpuOp2,
                      cpuBranchCompare = compareOperands cpuA cpuB,
                      cpuAluCandidates = aluCandidates cpuExecuteControl cpuA cpuOp2,
-                     cpuMulDiv = cpuMulDiv {mdStep = MdPrepare}
+                     cpuMulDiv = cpuMulDiv {mdStep = MdPrepare},
+                     cpuStoreNow = False
                    }
                ExecuteFinish ->
                  let control = cpuExecuteControl
@@ -1559,16 +1608,17 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                              cpuComputed = cpuComputed {cAlu = result,
                                cTaken = branchTakenPrepared (execFunct3 control) cpuBranchCompare},
                              cpuFastMemory = fast,
+                             cpuPortIndex = ramWordIndex (cAddress cpuComputed),
+                             cpuStoreData = storeLanes (execFunct3 control) (resize (cAddress cpuComputed)) cpuB,
+                             cpuStoreMask = storeMask (execFunct3 control) (resize (cAddress cpuComputed)),
+                             cpuStoreNow = fast && store && execFunct3 control == 2 && cAddress cpuComputed .&. 3 == 0,
                              cpuStoreHitsPrefetch = store && sameWord (cAddress cpuComputed) cpuPrefetchAddress,
                              cpuStoreHitsTarget = store && sameWord (cAddress cpuComputed) cpuTargetAddress,
                              cpuTargetAddress = if jump then cTarget cpuComputed else cpuTargetAddress,
                              cpuTargetValid = cpuTargetValid && not jump,
                              cpuTargetCount = if jump then 3 else cpuTargetCount
                            },
-                         ( if memoryOp then memoryIndex (cAddress cpuComputed)
-                             else if jump then memoryIndex (cTarget cpuComputed)
-                             else if ahead then memoryIndex (cpuPc + 8) else 0,
-                           Nothing, Nothing )
+                         (0, Nothing, Nothing) -- the read: 'portAddress'
                        )
                ShiftFinish ->
                  let control = cpuExecuteControl
@@ -1608,9 +1658,7 @@ cpuStepDecodedWith decodeTarget machine memoryWord _received txReady emergencyRe
                MemoryWait -> next machineRx {cpuPhase = MemoryCapture}
                MemoryCapture
                  | testBit instruction 5 ->
-                     withoutRegister (finishInstruction machineRx {cpuPc = cLink cpuComputed, cpuFetchSource = FromPrefetch}
-                       (Just (memoryIndex address,
-                         storeValue (instructionFunct3 instruction) (resize address) cpuB memoryWord)))
+                     withoutRegister (finishInstruction machineRx {cpuPc = cLink cpuComputed, cpuFetchSource = FromPrefetch} Nothing)
                  | otherwise ->
                      withRegister (instructionRd instruction)
                        (loadValue (instructionFunct3 instruction) (resize address) memoryWord)
@@ -1731,8 +1779,8 @@ commitInstruction committing _txReady =
           | misalignedMemory funct3 address -> fault 6 address
           -- a word store writes at once; a byte or halfword waits for the word
           | cpuFastMemory machine && funct3 == 2 ->
-              withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromPrefetch}
-                (Just (memoryIndex address, cpuB machine)))
+              -- (the port writes from cpuStoreNow; see 'portWrite')
+              withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromPrefetch} Nothing)
           | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus True
         -- FENCE is a no-op in this single-master core. FENCE.I fetches the
@@ -1923,24 +1971,24 @@ csrWriteStep machine =
 writeSelectedCsr :: Vec 14 Bool -> Word32 -> Machine -> Machine
 writeSelectedCsr selection value machine =
   let regs = cpuTrapRegisters machine
-      at i = selection !! (i :: Index 14)
+      chosen i = selection !! (i :: Index 14)
       counter
-        | at 8 = Just (0xb00, value)
-        | at 9 = Just (0xb80, value)
-        | at 10 = Just (0xb02, value)
-        | at 11 = Just (0xb82, value)
+        | chosen 8 = Just (0xb00, value)
+        | chosen 9 = Just (0xb80, value)
+        | chosen 10 = Just (0xb02, value)
+        | chosen 11 = Just (0xb82, value)
         | otherwise = Nothing
    in machine
         { cpuTrapRegisters = regs
-            { trapMie = if at 0 then testBit value 3 else trapMie regs,
-              trapMpie = if at 0 then testBit value 7 else trapMpie regs,
-              trapVector = if at 3 then value .&. complement 3 else trapVector regs,
-              trapEpc = if at 5 then value .&. complement 3 else trapEpc regs,
-              trapCause = if at 6 then value else trapCause regs,
-              trapValue = if at 7 then value else trapValue regs
+            { trapMie = if chosen 0 then testBit value 3 else trapMie regs,
+              trapMpie = if chosen 0 then testBit value 7 else trapMpie regs,
+              trapVector = if chosen 3 then value .&. complement 3 else trapVector regs,
+              trapEpc = if chosen 5 then value .&. complement 3 else trapEpc regs,
+              trapCause = if chosen 6 then value else trapCause regs,
+              trapValue = if chosen 7 then value else trapValue regs
             },
-          cpuInterruptEnable = if at 2 then value .&. 0x888 else cpuInterruptEnable machine,
-          cpuScratch = if at 4 then value else cpuScratch machine,
+          cpuInterruptEnable = if chosen 2 then value .&. 0x888 else cpuInterruptEnable machine,
+          cpuScratch = if chosen 4 then value else cpuScratch machine,
           cpuCounterWrite = counter
         }
 
@@ -2111,6 +2159,21 @@ loadValue funct3 byteOffset word = case funct3 of
     shiftAmount = fromIntegral byteOffset * 8
     byte = resize (word `shiftR` shiftAmount) :: Unsigned 8
     half = resize (word `shiftR` shiftAmount) :: Unsigned 16
+
+-- | A store's data in its byte lanes, and the lanes it replaces.
+storeLanes :: BitVector 3 -> Unsigned 2 -> Word32 -> Word32
+storeLanes funct3 byteOffset value = case funct3 of
+  0b000 -> (value .&. 0xff) `shiftL` (fromIntegral byteOffset * 8)
+  0b001 -> (value .&. 0xffff) `shiftL` (fromIntegral byteOffset * 8)
+  _ -> value
+
+storeMask :: BitVector 3 -> Unsigned 2 -> Word32
+storeMask funct3 byteOffset = storeLanes funct3 byteOffset maxBound
+
+-- | The RAM word index of a RAM address (bit 14 clear): 'memoryIndex'
+-- without its ROM case.
+ramWordIndex :: Word32 -> MemAddr
+ramWordIndex address = resize (address `shiftR` 2) .&. 0x3fff
 
 storeValue :: BitVector 3 -> Unsigned 2 -> Word32 -> Word32 -> Word32
 storeValue funct3 byteOffset value oldWord = case funct3 of

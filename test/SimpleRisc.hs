@@ -17,6 +17,7 @@ module SimpleRisc where
 import Clash.Prelude hiding (And, Xor)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as List
+import Data.Maybe (isNothing)
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -141,6 +142,11 @@ settleBus = go (32 :: Int)
 
 -- | Commit with the stage register's decoded control filled in from the
 -- instruction word, as OperandSelect would have done.
+-- | No memory write and no UART byte. (The read address of a cycle that
+-- reads nothing is a don't-care: the CPU reads the pc.)
+quiet :: StepOutput -> Bool
+quiet (_, write, tx) = isNothing write && isNothing tx
+
 commitDecoded :: Machine -> Bool -> (Machine, RegisterWrite, StepOutput)
 commitDecoded machine = commitInstruction machine {cpuExecuteControl = decodeExecuteControl (cpuInstruction machine)}
 
@@ -710,7 +716,7 @@ prop_precise_exception_entry = property $ do
     cpuPc queued === faultPc
     cpuTrapRegisters queued === cpuTrapRegisters base
     write === Nothing
-    output === (0, Nothing, Nothing)
+    quiet output === True
     cpuPhase entered === Fetch
     cpuPc entered === 0x100
     trapEpc regs === faultPc
@@ -721,7 +727,7 @@ prop_precise_exception_entry = property $ do
     cpuRegs entered === cpuRegs base
     rxHolding entered === Just 0x5a
     trapWrite === Nothing
-    trapOutput === (0, Nothing, Nothing)
+    quiet trapOutput === True
     ) cases
 
 -- With mtvec 0 a trap lands in the boot ROM, which reports the end of the
@@ -834,7 +840,7 @@ prop_csr_access_rules_and_masks = property $ do
               cpuCsrReadOnly = address == 0x301 || address .&. 0xc00 == 0xc00} 0 Nothing True
         cpuPhase m === if faults then Trap else CsrWrite
         write === Nothing
-        output === (0, Nothing, Nothing)
+        quiet output === True
         if faults then do
           cpuExceptionCause m === 2
           cpuExceptionValue m === instruction
@@ -1446,12 +1452,12 @@ prop_registered_memory_decode = property $ do
     busPhase accepted === BusDecode
     busRequest accepted === q
     earlyResponse === Nothing
-    earlyOutput === (0, Nothing, Nothing)
+    quiet earlyOutput === True
     earlyEffect === NoEffect
     busPhase decoded === BusDispatch
     busTarget decoded === target
     response === Nothing
-    output === (0, Nothing, Nothing)
+    quiet output === True
     effect === NoEffect
     ) [(ramBase + offset, RamTarget), (romOffset, RomTarget),
        (uartTxData, UartTxTarget), (uartStatus, UartStatusTarget), (uartRxData, UartRxTarget),
@@ -1477,8 +1483,8 @@ prop_finisher_commands = property $ do
         (counted, _) = machineStep completed (0, Nothing, True)
     cpuPhase queued === BusWait
     cpuBusRequest queued === Just (BusRequest exitDevice (if width == 2 then 2 else 1) True value)
-    command === (0, Nothing, Nothing)
-    response === (0, Nothing, Nothing)
+    quiet command === True
+    quiet response === True
     -- An exit resets into the boot ROM with cause EXIT; anything else is an
     -- ordinary store that retires.
     cpuPc completed === if stops then 0 else 8
@@ -1493,7 +1499,7 @@ prop_finisher_commands = property $ do
     let m = initialMachine {cpuPhase = Commit, cpuInstruction = instruction,
           cpuComputed = Computed Nothing 4 0 Nothing address}
         (result, write, output) = commitSettled m True
-    output === (0, Nothing, Nothing)
+    quiet output === True
     case expectedCause of
       Nothing -> do
         write === Just (1, 0)
@@ -1528,10 +1534,10 @@ prop_bus_completion_and_rx_race = property $ do
         (after, response, output, consume) = busStep before Nothing 0 True (Just byte) 0 initialDevices
         (_, repeated, repeatedOutput, repeatedConsume) = busStep after Nothing 0 True (Just byte) 0 initialDevices
     response === Just (BusResponse expected False False)
-    output === (0, Nothing, Nothing)
+    quiet output === True
     consume === ConsumeRx
     repeated === Nothing
-    repeatedOutput === (0, Nothing, Nothing)
+    quiet repeatedOutput === True
     repeatedConsume === NoEffect
     ) [(0, resize byte .|. 0xffffff00), (4, resize byte), (1, resize byte), (2, resize byte)]
   let writing = initialBus {busPhase = BusRamWrite,
@@ -1542,7 +1548,7 @@ prop_bus_completion_and_rx_race = property $ do
   write === (0, Just (memoryIndex address, value), Nothing)
   consume === NoEffect
   repeatedAck === Nothing
-  repeatedWrite === (0, Nothing, Nothing)
+  quiet repeatedWrite === True
   -- A byte arriving while an empty RX read is completed belongs to the next
   -- read; it must not be cleared by an unconditional consume pulse.
   let reading = initialMachine {cpuPhase = BusWait,
@@ -1569,14 +1575,14 @@ prop_bus_wait_faults_and_cancel = property $ do
     cpuPc waiting === 4
     cpuCountRetirement waiting === False
     pendingWrite === Nothing
-    output === (0, Nothing, Nothing)
+    quiet output === True
     cpuPhase fault === Trap
     cpuPc fault === 4
     cpuExceptionCause fault === if write then 7 else 5
     cpuExceptionValue fault === 0x20000000
     cpuCountRetirement fault === False
     faultWrite === Nothing
-    faultOutput === (0, Nothing, Nothing)
+    quiet faultOutput === True
     cpuPhase completed === Fetch
     cpuPc completed === 8
     cpuCountRetirement completed === True
@@ -1593,7 +1599,7 @@ prop_bus_wait_faults_and_cancel = property $ do
     cpuBusRequest cancelled === Nothing
     cpuBusResponse cancelled === Nothing
     busPhase (systemBus cancelled) === BusIdle
-    output === (0, Nothing, Nothing)
+    quiet output === True
     ) [BusDecode, BusDispatch, BusLoadIssue, BusLoadWait, BusStoreIssue,
        BusStoreMerge, BusRamWrite, BusTx, BusReply]
 
