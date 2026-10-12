@@ -120,7 +120,7 @@ execute ins m = case opcode of
   0x13 -> opImm
   0x33 -> op
   0x0f
-    | funct3 == 0 -> retire next m -- FENCE: nothing to order here
+    | funct3 == 0 || funct3 == 1 -> retire next m -- FENCE, FENCE.I: nothing to order here
     | otherwise -> illegal
   0x73 -> system
   _ -> illegal

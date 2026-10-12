@@ -431,6 +431,19 @@ prop_taken_jump_fetches_its_target_early = withTests 1 . property $ do
   trapEpc (cpuTrapRegisters (simMachine halted)) === ramBase + 12
   cycles === 9 + 7 + 7
 
+-- | MISC-MEM: FENCE and FENCE.I retire; reserved encodings (here funct3 5,
+-- the word the differential test found) are illegal instructions.
+prop_misc_mem_decoding :: Property
+prop_misc_mem_decoding = withTests 1 . property $ do
+  let run program = simMachine (P.snd (runUntilHalt 400 (startSim (runningMachine []) (ramFromList program))))
+      fenced = run [0x0ff0_000f, 0x0000_100f, addi 1 0 5]
+      reserved = run [0x58cf_520f]
+  cpuRegs fenced !! (1 :: Index 32) === 5
+  trapEpc (cpuTrapRegisters fenced) === ramBase + 12
+  trapCause (cpuTrapRegisters reserved) === 2
+  trapValue (cpuTrapRegisters reserved) === 0x58cf_520f
+  trapEpc (cpuTrapRegisters reserved) === ramBase
+
 prop_store_into_next_instruction_is_fetched_fresh :: Property
 prop_store_into_next_instruction_is_fetched_fresh = withTests 1 . property $ do
   -- addi x1,x0,1; sw x5,8(x31) where x5 holds "addi x6,x0,42" and x31 the
@@ -1671,6 +1684,7 @@ simpleRiscGroup =
       ("Simple instructions take six cycles with fetch overlap", prop_simple_instructions_take_six_cycles_with_fetch_overlap),
       ("Two-stage shifts cover every distance", prop_shift_stages_all_distances),
       ("Store into next instruction is fetched fresh", prop_store_into_next_instruction_is_fetched_fresh),
+      ("MISC-MEM decoding", prop_misc_mem_decoding),
       ("RAM accesses take the fast path", prop_ram_accesses_take_the_fast_path),
       ("A taken jump fetches its target early", prop_taken_jump_fetches_its_target_early),
       ("UART TX store waits for ready", prop_uart_tx_store_waits_for_ready),

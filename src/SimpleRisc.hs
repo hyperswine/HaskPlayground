@@ -1566,7 +1566,13 @@ commitInstruction committing _txReady =
                 (Just (memoryIndex address, cpuB machine)))
           | cpuFastMemory machine -> withoutRegister (machine {cpuPhase = MemoryWait}, (0, Nothing, Nothing))
           | otherwise -> requestBus True
-        0x0f -> noWrite nextPc -- FENCE is a no-op in this tiny single-master core.
+        -- FENCE is a no-op in this single-master core. FENCE.I fetches the
+        -- next instruction from memory, not from a prefetch buffer. The
+        -- other MISC-MEM encodings are reserved.
+        0x0f
+          | funct3 == 0 -> noWrite nextPc
+          | funct3 == 1 -> withoutRegister (finishInstruction machine {cpuPc = nextPc, cpuFetchSource = FromMemory} Nothing)
+          | otherwise -> invalid
         0x73
           | instruction == 0x0000_0073 -> fault 11 0 -- ECALL from M mode
           | instruction == 0x0010_0073 -> fault 3 (cpuPc machine) -- EBREAK
