@@ -1,14 +1,20 @@
 -- | Line-oriented .neomusic authoring, with acyclic, first-order definitions.
+--
+-- Values are music (scores) and numbers (exact rationals). Definitions take
+-- music parameters and, marked @#@ in the signature, number parameters. A
+-- prelude of ordinary definitions ("NeoMusic.Prelude") is read before every
+-- document; a document's own definitions shadow it. See neomusic-prelude.md.
 module NeoMusic.Language
   ( Document(..), SheetView(..), Staff(..), parseDocument, prettyScore, pitchNumber ) where
 
-import Control.Monad (foldM, unless, void)
+import Control.Monad (foldM, unless, void, when)
 import Data.Char (isSpace)
 import Data.List (intercalate, nub)
 import qualified Data.Map.Strict as M
 import Data.Ratio ((%), numerator, denominator)
 import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
+import NeoMusic.Prelude (preludeSource)
 import NeoMusic.Score
 import Text.Parsec hiding (Line, label, token)
 import Text.Parsec.String (Parser)
@@ -20,13 +26,31 @@ data SheetView = SheetView { meter :: Int, key :: String, staves :: M.Map Name S
   deriving (Eq, Show)
 data Document = Document { performance :: Performance, sheetView :: SheetView, score :: Score }
   deriving (Eq, Show)
-data Expr = Notes [Int] | Ref Name [Expr] | SeqE [Expr] | ParE Expr Expr
-  | Scale Rational Expr | Trans Int Expr | Repeat Int Expr | Rev Expr | Inv Expr | Vel Double Expr
-  | Gate Rational Expr | Pedal Expr | TempoE Shape Expr
-  | BendE Curve Expr | SwellE Curve Expr | VibratoE Rational Expr | GlideE Rational Expr
-  | CentsE Rational Expr
+
+-- | A number expression, kept exact until it is evaluated.
+data NumE = NLit Rational | NVar Name | NBin Char NumE NumE | NNeg NumE
   deriving (Eq, Show)
-data Definition = Definition [Name] Expr deriving (Eq, Show)
+data Param = MusicParam Name | NumberParam Name deriving (Eq, Show)
+data Arg = MusicArg Expr | NumberArg NumE deriving (Eq, Show)
+data ShapeE = SpeedS NumE | RampS NumE NumE | SwingS NumE deriving (Eq, Show)
+data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr Expr
+  | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr | Vel NumE Expr
+  | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
+  | BendE [(NumE, NumE)] Expr | SwellE [(NumE, NumE)] Expr | VibratoE NumE Expr | GlideE NumE Expr
+  | CentsE NumE Expr
+  deriving (Eq, Show)
+-- | Parameters, body, and whether it came from the prelude (whose bodies only
+-- see prelude definitions, so a document can't change what they mean).
+data Definition = Definition [Param] Expr Bool deriving (Eq, Show)
+data Value = MusicV Score | NumberV Rational
+
+paramName :: Param -> Name
+paramName (MusicParam p) = p
+paramName (NumberParam p) = p
+
+isNumberParam :: Param -> Bool
+isNumberParam (NumberParam _) = True
+isNumberParam _ = False
 
 white :: Parser ()
 white = skipMany (oneOf " \t\r")
@@ -59,63 +83,87 @@ number = lexeme $ do
     pure (e:signE++ds))
   let x = read (sign++a++b++exponentPart)
   if isInfinite x then fail "number overflow" else pure x
-rational :: Parser Rational
-rational = do
-  a <- integerValue
-  b <- option 1 (symbol "/" *> integerValue)
-  if a <= 0 || b <= 0 then fail "expected a positive whole number or fraction" else pure (a % b)
--- | A fraction of either sign: @-1/2@, @3@.
-signedFraction :: Parser Rational
-signedFraction = do
-  a <- integerValue
-  b <- option 1 (symbol "/" *> integerValue)
-  if b <= 0 then fail "fraction needs a positive denominator" else pure (a % b)
+
+-- | An exact decimal literal: @3@, @-14@, @0.25@ (= 1/4), @1.0e-2@ (= 1/100).
+decimal :: Parser Rational
+decimal = lexeme $ do
+  sign <- option id (char '-' >> pure negate)
+  whole <- many1 digit
+  fraction <- option "" (try (char '.' *> many1 digit))
+  exponentPart <- option 0 (try (do
+    _ <- oneOf "eE"
+    s <- option id ((char '-' >> pure negate) <|> (char '+' >> pure id))
+    ds <- many1 digit
+    pure (s (read ds :: Integer))))
+  notFollowedBy (letter <|> char '.')
+  let mantissa = read (whole ++ fraction) % (10 ^ length fraction)
+      scaled = if exponentPart >= 0 then mantissa * 10 ^ exponentPart else mantissa / 10 ^ negate exponentPart
+  pure (sign scaled)
+
+-- | A full number expression: @+ -@ over @* /@ over atoms. A @-@ only
+-- subtracts when followed by a space, so @-2@ is always a negative number.
+numExpr :: Parser NumE
+numExpr = chainl1 numTerm addOp
+  where
+    addOp = (NBin '+' <$ symbol "+") <|> (NBin '-' <$ try (lexeme (char '-' <* lookAhead (oneOf " \t"))))
+    numTerm = chainl1 numAtom (NBin '*' <$ symbol "*" <|> NBin '/' <$ symbol "/")
+
+-- | One atom: a literal, a name, a parenthesised expression, or a negation.
+-- A literal fraction @a/b@ counts as one atom, so @x:1/2@ still reads as before.
+numAtom :: Parser NumE
+numAtom = between (symbol "(") (symbol ")") numExpr
+  <|> try (do a <- decimal; b <- optionMaybe (try (symbol "/" *> decimal)); pure (maybe (NLit a) (NBin '/' (NLit a) . NLit) b))
+  <|> (NVar <$> ident)
+  <|> (NNeg <$> (try (char '-' <* lookAhead (letter <|> char '(')) *> numAtom))
 
 -- | @a -> b@ (from a at the start to b at the end) or explicit breakpoints
 -- @{u:value u:value ...}@ over the note's sounding time, u from 0 to 1.
-curveP :: Parser Curve
-curveP = between (symbol "{") (symbol "}") (many1 ((,) <$> signedFraction <* symbol ":" <*> signedFraction))
-  <|> (do a <- signedFraction; _ <- try (symbol "->"); b <- signedFraction; pure [(0, a), (1, b)])
+curveP :: Parser [(NumE, NumE)]
+curveP = between (symbol "{") (symbol "}") (many1 ((,) <$> numAtom <* symbol ":" <*> numAtom))
+  <|> (do a <- numAtom; _ <- try (symbol "->"); b <- numAtom; pure [(NLit 0, a), (NLit 1, b)])
 
 keyword :: String -> Parser ()
 keyword word = void (try (lexeme (string word <* notFollowedBy (alphaNum <|> oneOf "_-"))))
 
-expression :: M.Map Name Int -> Parser Expr
-expression arities = parallel
+-- | Parse music, knowing each function's parameter kinds (True = number) and
+-- which names in scope are number parameters.
+expression :: M.Map Name [Bool] -> [Name] -> Parser Expr
+expression kinds numberNames = parallel
   where
     parallel = chainl1 sequenceP (symbol "&" >> pure ParE)
     sequenceP = SeqE <$> many1 term
     term = do
       base <- prefix <|> atom
       suffix base
-    prefix = (keyword "stretch" *> (Scale <$> rational <*> term))
+    prefix = (keyword "stretch" *> (Scale <$> numExpr <*> term))
       <|> (keyword "rev" *> (Rev <$> term))
       <|> (keyword "inv" *> (Inv <$> term))
-      <|> (keyword "vel" *> (Vel <$> number <*> term))
-      <|> (keyword "gate" *> (Gate <$> rational <*> term))
+      <|> (keyword "vel" *> (Vel <$> numExpr <*> term))
+      <|> (keyword "gate" *> (Gate <$> numExpr <*> term))
       <|> (keyword "pedal" *> (Pedal <$> term))
       -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
-      <|> (keyword "speed" *> (TempoE <$> (rational >>= \a -> option (Speed a) (Ramp a <$> (try (symbol "->") *> rational))) <*> term))
-      <|> (keyword "swing" *> (TempoE . Swing 1 <$> rational <*> term))
-      <|> (keyword "hold" *> (TempoE . Speed . recip <$> rational <*> term))
+      <|> (keyword "speed" *> (TempoE <$> (numExpr >>= \a -> option (SpeedS a) (RampS a <$> (try (symbol "->") *> numExpr))) <*> term))
+      <|> (keyword "swing" *> (TempoE . SwingS <$> numExpr <*> term))
       <|> (keyword "bend" *> (BendE <$> curveP <*> term))
       <|> (keyword "swell" *> (SwellE <$> curveP <*> term))
-      <|> (keyword "vibrato" *> (VibratoE <$> rational <*> term))
-      <|> (keyword "glide" *> (GlideE <$> rational <*> term))
-      <|> (keyword "cents" *> (CentsE <$> signedFraction <*> term))
+      <|> (keyword "vibrato" *> (VibratoE <$> numExpr <*> term))
+      <|> (keyword "glide" *> (GlideE <$> numExpr <*> term))
+      <|> (keyword "cents" *> (CentsE <$> numExpr <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
       <|> between (symbol "(") (symbol ")") (Notes <$> many integer)
       <|> between (symbol "[") (symbol "]") parallel
       <|> do
         name <- ident
-        args <- count (M.findWithDefault 0 name arities) term
-        pure (Ref name args)
-    suffix e = (symbol ":" *> rational >>= suffix . (`Scale` e))
-      <|> (symbol "+" *> integer >>= suffix . (`Trans` e))
+        if name `elem` numberNames
+          then pure (NoteE (NVar name))  -- a number in a music position is a note
+          else Ref name <$> mapM argument (M.findWithDefault [] name kinds)
+    argument isNumber = if isNumber then NumberArg <$> numExpr else MusicArg <$> term
+    suffix e = (symbol ":" *> numAtom >>= suffix . (`Scale` e))
+      <|> (symbol "+" *> numAtom >>= suffix . (`Trans` e))
       -- '-2' starts a negative note; '- 2' is a transpose operator.
-      <|> (try (lexeme (char '-' <* lookAhead (oneOf " \t"))) *> integer >>= suffix . (\k -> Trans (negate k) e))
-      <|> (symbol "*" *> integer >>= \k -> if k < 0 then fail "repeat count must be nonnegative" else suffix (Repeat k e))
+      <|> (try (lexeme (char '-' <* lookAhead (oneOf " \t"))) *> numAtom >>= suffix . (\k -> Trans (NNeg k) e))
+      <|> (symbol "*" *> numAtom >>= suffix . (`Repeat` e))
       <|> pure e
 
 runLine :: Int -> Parser a -> String -> Either String a
@@ -137,35 +185,61 @@ presets = M.fromList
   ,("pluck",A.pluck),("supersaw",A.supersaw),("reeseBass",A.reeseBass),("subBass",A.subBass)
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
-parseDocument :: String -> Either String Document
-parseDocument input = do
-  let ls = [(i,stripComment s) | (i,s) <- zip [1..] (lines input), not (all isSpace (stripComment s))]
-      isBinding s = '=' `elem` s && takeWord s /= "instrument"
-      bindings = [(i,s) | (i,s) <- ls, isBinding s]
-      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold","bend","swell","vibrato","glide","cents"]
-  signatures <- mapM (\(i,s) -> runLine i (many1 ident) (takeWhile (/='=') s)) bindings
-  unless (all (\xs -> length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
-    (Left "duplicate parameters or reserved binding name")
-  let names = [name | name:_ <- signatures]
-  unless (length names == length (nub names)) (Left "duplicate binding")
-  let arities = M.fromList [(name,length params) | name:params <- signatures]
-  definitions <- mapM (\((i,s),(name,params)) -> do
-      expr <- runLine i (expression (foldr M.delete arities params)) (drop 1 (dropWhile (/='=') s))
-      pure (name, Definition params expr)) (zip bindings [(name,params) | name:params <- signatures])
-  let defs = M.fromList definitions
-      nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
-      initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
-  (perf,view,_,voices,_) <- foldM (readStatement arities) initial nonbindings
-  scores <- mapM (\(name,expr) -> evaluate defs M.empty [] name expr) voices
-  let result = foldr (:||:) (Silence 0) scores
-  validate perf result
-  pure (Document perf view result)
+reserved :: [String]
+reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","bend","swell","vibrato","glide","cents"]
+
+-- | Source lines without comments or blank lines, numbered from 1.
+sourceLines :: String -> [(Int, String)]
+sourceLines input = [(i, s') | (i, s) <- zip [1..] (lines input), let s' = stripComment s, not (all isSpace s')]
   where
     stripComment [] = []
     stripComment ('-':'-':_) = []
     stripComment (x:xs) = x : stripComment xs
-    takeWord = takeWhile (not . isSpace) . dropWhile isSpace
-    readStatement arities (p,v,t,vs,seen) (line,s) = do
+
+takeWord :: String -> String
+takeWord = takeWhile (not . isSpace) . dropWhile isSpace
+
+isBinding :: String -> Bool
+isBinding s = '=' `elem` s && takeWord s /= "instrument"
+
+-- | Parse a file's definitions. @outer@ gives the kinds of functions defined
+-- outside it (the prelude, for a document); the file's own names shadow them.
+parseDefinitions :: Bool -> M.Map Name [Bool] -> [(Int, String)] -> Either String (M.Map Name Definition, M.Map Name [Bool])
+parseDefinitions fromPrelude outer ls = do
+  let bindings = [(i,s) | (i,s) <- ls, isBinding s]
+      paramP = (NumberParam <$> (char '#' *> ident)) <|> (MusicParam <$> ident)
+  signatures <- mapM (\(i,s) -> runLine i ((,) <$> ident <*> many paramP) (takeWhile (/='=') s)) bindings
+  unless (all (\(name, ps) -> let xs = name : map paramName ps in length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
+    (Left "duplicate parameters or reserved binding name")
+  let names = map fst signatures
+  unless (length names == length (nub names)) (Left "duplicate binding")
+  let kinds = M.union (M.fromList [(name, map isNumberParam ps) | (name, ps) <- signatures]) outer
+  definitions <- mapM (\((i,s),(name,ps)) -> do
+      let local = foldr (M.delete . paramName) kinds ps
+          numberNames = [p | NumberParam p <- ps]
+      expr <- runLine i (expression local numberNames) (drop 1 (dropWhile (/='=') s))
+      pure (name, Definition ps expr fromPrelude)) (zip bindings signatures)
+  pure (M.fromList definitions, kinds)
+
+-- | The prelude's definitions, parsed once.
+prelude :: Either String (M.Map Name Definition, M.Map Name [Bool])
+prelude = either (Left . ("prelude: " ++)) Right (parseDefinitions True M.empty (sourceLines preludeSource))
+
+parseDocument :: String -> Either String Document
+parseDocument input = do
+  (fromPreludeDefs, preludeKinds) <- prelude
+  let ls = sourceLines input
+  (defs, kinds) <- parseDefinitions False preludeKinds ls
+  let nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
+      initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
+      env = Env defs fromPreludeDefs False M.empty []
+  (perf,view,_,voices,_) <- foldM (readStatement kinds) initial nonbindings
+  scores <- mapM (\(name,expr) -> evaluate env name expr) voices
+  let result = foldr (:||:) (Silence 0) scores
+  validate perf result
+  pure (Document perf view result)
+  where
+    readStatement kinds (p,v,t,vs,seen) (line,s) = do
       let first = takeWord s
           singleton label = unless (label `notElem` seen) (Left ("duplicate header: "++label))
           unchanged = (p,v,t,vs,seen)
@@ -198,7 +272,7 @@ parseDocument input = do
           unless (length (map fst attrs) == length (nub (map fst attrs))) (Left "duplicate instrument attribute")
           pure (p {instruments=M.insert name inst (instruments p)},v {staves=M.insert name staff (staves v)},t,vs,seen)
         _ -> do
-          (name,expr) <- runLine line ((,) <$> ident <* symbol ":" <*> expression arities) s
+          (name,expr) <- runLine line ((,) <$> ident <* symbol ":" <*> expression kinds []) s
           let (p0,v0,t0,vs0,seen0) = unchanged
           pure (p0,v0,t0,vs0++[(name,expr)],seen0)
     tuningParser = try (do
@@ -227,36 +301,97 @@ parseDocument input = do
       "vibrato-rate" -> do x <- runLine 0 number value; pure (i {vibratoRate=x},staff)
       _ -> Left ("unknown instrument attribute: "++attr)
 
-evaluate :: M.Map Name Definition -> M.Map Name Score -> [Name] -> Name -> Expr -> Either String Score
-evaluate defs locals active name expr = case expr of
+-- | What evaluation can see: the document's and the prelude's definitions,
+-- whether it is inside a prelude body, the parameters bound here, and the
+-- definitions being expanded (to reject recursion).
+data Env = Env
+  { userDefs :: M.Map Name Definition, preludeDefs :: M.Map Name Definition, inPrelude :: Bool
+  , locals :: M.Map Name Value, active :: [Name] }
+
+-- | The value of a number expression.
+numberValue :: Env -> NumE -> Either String Rational
+numberValue env e = case e of
+  NLit r -> Right r
+  NVar v -> case M.lookup v (locals env) of
+    Just (NumberV r) -> Right r
+    Just (MusicV _) -> Left (v ++ " is music, not a number")
+    Nothing -> Left ("unknown number: " ++ v)
+  NNeg a -> negate <$> numberValue env a
+  NBin op a b -> do
+    x <- numberValue env a
+    y <- numberValue env b
+    case op of
+      '+' -> Right (x + y)
+      '-' -> Right (x - y)
+      '*' -> Right (x * y)
+      _ | y == 0 -> Left "division by zero"
+        | otherwise -> Right (x / y)
+
+ratText :: Rational -> String
+ratText x = show (numerator x) ++ if denominator x == 1 then "" else "/" ++ show (denominator x)
+
+-- | A number that must be whole (repeats, transposition, notes).
+wholeNumber :: String -> Rational -> Either String Int
+wholeNumber what r
+  | denominator r /= 1 = Left (what ++ " must be a whole number, not " ++ ratText r)
+  | numerator r < toInteger (minBound :: Int) || numerator r > toInteger (maxBound :: Int) = Left (what ++ " is out of range")
+  | otherwise = Right (fromInteger (numerator r))
+
+positiveNumber :: String -> Rational -> Either String Rational
+positiveNumber what r = if r > 0 then Right r else Left (what ++ " must be positive, not " ++ ratText r)
+
+evaluate :: Env -> Name -> Expr -> Either String Score
+evaluate env name expr = case expr of
   Notes xs -> pure (Line name (chord xs))
+  NoteE e -> do
+    x <- num e >>= wholeNumber "a number used as a note"
+    pure (Line name (chord [x]))
   SeqE xs -> foldr (:>>:) (Silence 0) <$> mapM recur xs
   ParE a b -> (:||:) <$> recur a <*> recur b
-  Scale k e -> scaleScore k <$> recur e
-  Trans k e -> mapPhrases (transpose k) <$> recur e
-  Repeat k e -> do x <- recur e; pure (mconcat (replicate k x))
+  Scale k e -> do k' <- num k >>= positiveNumber "a duration factor"; scaleScore k' <$> recur e
+  Trans k e -> do k' <- num k >>= wholeNumber "a transposition"; mapPhrases (transpose k') <$> recur e
+  Repeat k e -> do
+    k' <- num k >>= wholeNumber "a repeat count"
+    when (k' < 0) (Left "repeat count must be nonnegative")
+    x <- recur e
+    pure (mconcat (replicate k' x))
   Rev e -> reverseScore <$> recur e
   Inv e -> mapPhrases invert <$> recur e
-  Vel v e -> mapPhrases (scaleVelocity v) <$> recur e
-  Gate g e -> mapPhrases (scaleGate g) <$> recur e
+  Vel v e -> do v' <- num v; mapPhrases (scaleVelocity (fromRational v')) <$> recur e
+  Gate g e -> do g' <- num g >>= positiveNumber "a gate"; mapPhrases (scaleGate g') <$> recur e
   Pedal e -> pedal <$> recur e
-  TempoE shape e -> Tempo shape <$> recur e
-  BendE c e -> mapPhrases (bend c) <$> recur e
-  SwellE c e -> mapPhrases (swell c) <$> recur e
-  VibratoE d e -> mapPhrases (addVibrato d) <$> recur e
-  CentsE c e -> mapPhrases (detune c) <$> recur e
-  GlideE f e
-    | f > 1 -> Left "glide fraction must be within 0..1"
-    | otherwise -> glide f <$> recur e
-  Ref ref args -> case M.lookup ref locals of
-    Just x -> if null args then Right x else Left "parameters cannot be called"
+  TempoE shape e -> do
+    s <- case shape of
+      SpeedS r -> Speed <$> (num r >>= positiveNumber "a speed")
+      RampS a b -> Ramp <$> (num a >>= positiveNumber "a speed") <*> (num b >>= positiveNumber "a speed")
+      SwingS sh -> Swing 1 <$> num sh
+    Tempo s <$> recur e
+  BendE c e -> do c' <- curve c; mapPhrases (bend c') <$> recur e
+  SwellE c e -> do c' <- curve c; mapPhrases (swell c') <$> recur e
+  VibratoE d e -> do d' <- num d >>= positiveNumber "a vibrato depth"; mapPhrases (addVibrato d') <$> recur e
+  CentsE c e -> do c' <- num c; mapPhrases (detune c') <$> recur e
+  GlideE f e -> do
+    f' <- num f >>= positiveNumber "a glide fraction"
+    when (f' > 1) (Left "glide fraction must be within 0..1")
+    glide f' <$> recur e
+  Ref ref args -> case M.lookup ref (locals env) of
+    Just (MusicV x) | null args -> Right x
+    Just (NumberV r) | null args -> do x <- wholeNumber "a number used as a note" r; pure (Line name (chord [x]))
+    Just _ -> Left (ref ++ " is a parameter and cannot be called")
     Nothing -> do
-      unless (ref `notElem` active) (Left ("recursive definition: "++intercalate " -> " (reverse (ref:active))))
-      Definition params body <- maybe (Left ("unknown binding: "++ref)) Right (M.lookup ref defs)
-      values <- mapM recur args
-      unless (length params == length values) (Left ("wrong arity: "++ref))
-      evaluate defs (M.fromList (zip params values)) (ref:active) name body
-  where recur = evaluate defs locals active name
+      unless (ref `notElem` active env) (Left ("recursive definition: "++intercalate " -> " (reverse (ref:active env))))
+      let visible = if inPrelude env then preludeDefs env else M.union (userDefs env) (preludeDefs env)
+      Definition params body fromPrelude <- maybe (Left ("unknown binding: "++ref)) Right (M.lookup ref visible)
+      unless (length params == length args) (Left ("wrong arity: "++ref))
+      values <- mapM argument args
+      let inner = env {inPrelude = fromPrelude, locals = M.fromList (zip (map paramName params) values), active = ref : active env}
+      either (Left . (("in " ++ ref ++ ": ") ++)) Right (evaluate inner name body)
+  where
+    recur = evaluate env name
+    num = numberValue env
+    curve = mapM (\(u, y) -> (,) <$> num u <*> num y)
+    argument (MusicArg e) = MusicV <$> recur e
+    argument (NumberArg e) = NumberV <$> num e
 
 scaleScore :: Rational -> Score -> Score
 scaleScore k (Silence d) = Silence (k*d)
@@ -305,7 +440,7 @@ prettyScore s = do
     shapeText (Ramp a b) = Right ("speed "++rat a++" -> "++rat b)
     shapeText (Swing 1 sh) = Right ("swing "++rat sh)
     shapeText (Swing _ _) = Left "swing with a period other than one beat has no text form yet"
-    rat x = show (numerator x) ++ if denominator x == 1 then "" else "/"++show (denominator x)
+    rat = ratText
     silence 0 = ""
     silence d = " _:"++rat d++" "
     token e = "vel "++show (vel e)++" ["++curved e (gated e (pitch (pitches e)++":"++rat (dur e)))++"]"

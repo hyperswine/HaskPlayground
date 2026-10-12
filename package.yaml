@@ -12,6 +12,7 @@ extra-source-files:
 - examples/NeoMusicLanguage.md
 - examples/neomusic/*.neomusic
 - test/golden/neomusic/*.ly
+- src/NeoMusic/prelude.neomusic
 
 description:         Please see the README on GitHub at <https://github.com/githubuser/haskplayground#readme>
 

@@ -1,0 +1,18 @@
+-- The NeoMusic prelude: conventional names, each an ordinary definition over
+-- the primitives. Read before every score; a score's own definition of any of
+-- these names replaces this one. #k marks a number parameter.
+
+-- Time and tempo
+hold #k x     = speed 1/k [x]          -- a fermata: held k times as long
+rit #r x      = speed 1 -> r [x]       -- slow to r times the tempo
+accel #r x    = speed 1 -> r [x]       -- speed up to r times the tempo
+staccato x    = gate 1/2 [x]           -- each note sounds half its length
+legato x      = gate 3/2 [x]           -- each note rings into the next
+
+-- Pitch
+up #n x       = [x + n]                -- transpose by n steps
+octave x      = up 12 [x]              -- up an octave in 12-EDO
+
+-- Repetition
+twice x       = [x]*2
+echo #n #v x  = [x vel v [x]]*n        -- x, then a quieter copy, n times

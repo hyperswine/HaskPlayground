@@ -401,6 +401,61 @@ scoreGroup = Group "NeoMusic score and views"
         , "{ s2 d'4" ])  -- the second voice's gap is an invisible spacer
       plain <- evalEither (engrave perf view music)
       assert (not ("Neo steps" `isInfixOf` plain) && not ("_\\markup \\small \"0\"" `isInfixOf` plain)))
+  , ("number parameters: arithmetic, notes, whole numbers, kinds", withTests 1 $ property $ do
+      let events src = do
+            doc <- evalEither (parseDocument (header ++ src))
+            (_, es) <- evalEither (flatten (score doc))
+            pure es
+          rejects src = assert (isLeft (parseDocument (header ++ src)))
+      -- Arithmetic with parentheses; a fraction is still division.
+      es <- events "f #a #b x = stretch (a + b)/2 [x]\nright: f 1 3 [0 2] 4:1/2\n"
+      map (dur . event) es === [2, 2, 1/2]
+      -- Decimals are exact, exponents included.
+      vs <- events "right: vel 0.25 [0] vel 1.0e-2 [0]\n"
+      map (vel . event) vs === [0.25, 0.01]
+      -- A number parameter in a music position is a note at that step.
+      ts <- events "triad #r = r & [r + 4] & [r + 7]\nright: triad 2\n"
+      sort (map (pitches . event) ts) === [[A.Step 2], [A.Step 6], [A.Step 9]]
+      -- Suffixes take one atom: a name, a literal fraction, or parentheses.
+      ss <- events "f #k x = x:(1/k) [x + k]*k\nright: f 2 [0]\n"
+      map (dur . event) ss === [1/2, 1, 1]
+      map (pitches . event) ss === [[A.Step 0], [A.Step 2], [A.Step 2]]
+      -- '-2' is a negative number; '- 2' subtracts.
+      ns <- events "f #k x = stretch k - 1 [x]\nright: f 3 [0] -2\n"
+      map (dur . event) ns === [2, 1]
+      map (pitches . event) ns === [[A.Step 0], [A.Step (-2)]]
+      mapM_ rejects
+        [ "up2 x = up 1/2 [x]\nright: up2 [0]"           -- transposition must be whole
+        , "f #k x = [x]*k\nright: f 3/2 [0]"            -- repeat count must be whole
+        , "f #k = k\nright: f 1/3"                       -- a note must be a whole step
+        , "f #k x = stretch 1/k [x]\nright: f 0 [0]"    -- division by zero
+        , "right: hold [0] [0]"                          -- music where a number goes
+        , "f x = vel x [0]\nright: f [0]"                -- music used as a number
+        , "f x = vel y [x]\nright: f [0]"                -- unknown number
+        , "f #k #k x = x\nright: f 1 1 [0]"             -- duplicate parameter
+        , "f #speed x = x\nright: f 1 [0]" ])           -- reserved word
+  , ("the prelude: ordinary definitions a score can shadow", withTests 1 $ property $ do
+      let events src = do
+            doc <- evalEither (parseDocument (header ++ src))
+            (_, es) <- evalEither (flatten (score doc))
+            pure es
+      -- hold is no longer a keyword: it is speed 1/k from the prelude.
+      held <- evalEither (parseDocument (header ++ "right: hold 3 [0:2] 4\n"))
+      tempoNodes (score held) === [(0, 2, Speed (1/3))]
+      gs <- events "right: staccato [0 2] legato [4]\n"
+      map (gate . event) gs === [1/2, 1/2, 3/2]
+      echoes <- events "right: echo 2 1/2 [0]\n"
+      map (vel . event) echoes === [1, 0.5, 1, 0.5]
+      os <- events "right: octave [0] twice [7]\n"
+      map (pitches . event) os === [[A.Step 12], [A.Step 7], [A.Step 7]]
+      -- A score's own definition wins...
+      mine <- events "staccato x = gate 1/4 [x]\nright: staccato [0]\n"
+      map (gate . event) mine === [1/4]
+      -- ...but prelude definitions keep their own meaning: octave uses the prelude's up.
+      lexical <- events "up #n x = x\nright: octave [0] up 5 [0]\n"
+      map (pitches . event) lexical === [[A.Step 12], [A.Step 0]]
+      -- A duplicate binding within one file is still an error.
+      assert (isLeft (parseDocument (header ++ "a = 1\na = 2\nright: a\n"))))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))

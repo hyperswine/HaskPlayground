@@ -69,8 +69,8 @@ A `key` or `meter` header affects only the sheet view.
   is slower); `speed a -> b [...]` changes smoothly from `a` to `b` across the
   group, as a ritardando or accelerando; `swing s [...]` plays each beat's two
   halves long-short, the first taking share `s` of the beat (`swing 2/3` is
-  triplet swing); `hold k [...]` holds the group `k` times as long, a fermata
-  when it covers one note. The written notes never change: these shape the
+  triplet swing); `hold k [...]` (from the prelude: `speed 1/k`) holds the group
+  `k` times as long, a fermata when it covers one note. The written notes never change: these shape the
   performance only. A tempo change acts on everything sounding during its
   beats, in every voice, so it doesn't matter which hand's line you write it in
   and the hands can't drift apart. Nested changes multiply. See
@@ -98,6 +98,30 @@ A `key` or `meter` header affects only the sheet view.
   arity and consume that many terms. Use brackets to make argument scope explicit:
   `f [0 2]`, `[f 0]*2`. Parameters shadow bindings. Recursive calls, unknown names,
   missing arguments, duplicate bindings/parameters, and malformed values fail.
+- A parameter marked `#` in the signature is a *number*: `hold #k x = speed 1/k [x]`,
+  `echo #n #v x = [x vel v [x]]*n`. At the call, a number parameter takes a
+  number expression and a music parameter takes a term: `echo 2 1/2 [0 4]`.
+  Inside the body the name is plain (`k`, not `#k`). Passing music where a
+  number goes, or using a music parameter as a number, is an error.
+- Numbers are exact. Wherever a keyword takes a number it takes an expression:
+  literals (`3`, `-1/2`, `0.25` = 1/4, `1.0e-2` = 1/100), number parameters,
+  `+ - * /` and parentheses: `stretch (a + b)/2 [x]`. `1/2` is simply division,
+  so existing files read as before. A `-` subtracts only when followed by a
+  space, so `-2` is always a negative number. After the suffixes `:`, `+`, `-`,
+  `*`, and in curve points, a number is a single atom (a literal fraction, a
+  name, or parentheses), so `[x]:1/2 + 3` still scales and then transposes;
+  write `x:(1/k)` for an expression. Repeats, transpositions and notes need
+  whole numbers; a fraction there is an error, never rounded.
+- A number in a music position is a note at that step: a literal `7`, as always,
+  or a number parameter, so `triad #r = r & [r + 4] & [r + 7]` builds a chord on
+  `r`.
+- The **prelude** (`src/NeoMusic/prelude.neomusic`) is read before every score:
+  ordinary definitions for conventional names, `hold`, `rit`, `accel`,
+  `staccato`, `legato`, `up`, `octave`, `twice`, `echo`. A score's own
+  definition of any of these names replaces the prelude's for that score;
+  prelude definitions always use the prelude's own names, so redefining `up`
+  doesn't change `octave`. New conveniences belong in the prelude, not in the
+  grammar.
 - A minus immediately followed by digits is a negative note: `0 -2` is two notes.
   A minus followed by whitespace is transposition: `0 - 2` is one note at -2.
   This resolves an ambiguity in the proposed grammar. Colons bind tightly;
@@ -106,8 +130,9 @@ A `key` or `meter` header affects only the sheet view.
 A raw ratio tuning can be written `tuning 440 hz 1.0594630943592953`.
 Pitch names include accidentals and octave: C4, F#3, Bb2. Named tuning accepts
 positive EDO divisions and a reference pitch in MIDI 0–127. Raw-Hz tuning and the
-Haskell API support other references. Decimal/scientific numbers are accepted
-for tempo and levels; rhythmic durations use exact integer fractions.
+Haskell API support other references. Header and instrument values (tempo,
+gain, pan, send, vibrato rate, raw tuning) are decimals; everything in the music
+is an exact number expression.
 
 Presets: `piano`, `sine`, `saw`, `square`, `pluck`, `supersaw`, `reeseBass`,
 `subBass`, `kick`, `snare`, `hat`, `noiseSweep`. `piano` is a simple synthesized
