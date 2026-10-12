@@ -1470,9 +1470,11 @@ data Pipe = Pipe
     -- | Reads in flight, newest first; the last one's word is on the
     -- memory bus this cycle.
     pInflight :: Vec 3 (Maybe Word32),
-    -- | Fetched words waiting for decode, oldest first.
+    -- | Fetched words waiting for decode: a ring, read at pQueueRead and
+    -- written at pQueueWrite (each modulo 4; the difference is the count).
     pQueue :: Vec 4 Fetched,
-    pQueueCount :: Unsigned 3,
+    pQueueRead :: Unsigned 3,
+    pQueueWrite :: Unsigned 3,
     pD :: Maybe Fetched,
     pE1 :: Maybe ExecuteOne,
     pE2 :: Maybe ExecuteTwo,
@@ -1480,7 +1482,7 @@ data Pipe = Pipe
   deriving (Generic, NFDataX)
 
 emptyPipe :: Pipe
-emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0)) 0 Nothing Nothing Nothing Nothing
+emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0)) 0 0 Nothing Nothing Nothing Nothing
 
 -- | One cycle of the pipeline: fetch (up to four words outstanding), decode
 -- and register read with forwarding, two execute stages, and the commit
@@ -1493,17 +1495,25 @@ emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0)) 0 Nothing Nothing Not
 pipeStep :: Machine -> Word32 -> (Machine, RegisterWrite, StepOutput)
 pipeStep machine memoryWord =
   let pipe = cpuPipe machine
+      -- Every stall and port decision below reads registers (stage valid
+      -- bits, kinds, wait counts, queue pointers), never another stage's
+      -- decision, so no long chain runs from the commit stage to fetch.
       -- Commit --------------------------------------------------------------
       interrupt = isJust (interruptCause machine)
       handover = case pM pipe of
         Just m -> mSlow m || interrupt
         Nothing -> False
+      -- waiting for a load's (or a sub-word store's) word
+      mHold = case pM pipe of
+        Just m -> mWait m /= 0
+        Nothing -> False
       mCommits = case pM pipe of
         Just m -> not handover && mWait m == 0
         Nothing -> False
-      mFree = case pM pipe of
-        Just _ -> mCommits
-        Nothing -> True
+      -- the port writes this cycle (from registers; a handover makes it moot)
+      mWriting = case pM pipe of
+        Just m -> mStore m && mWait m == 0
+        Nothing -> False
       committedValue m
         | mLoad m = loadValue (mFunct3 m) (mOffset m) memoryWord
         | mShift m = shiftResult (mFunct3 m) (if mArith m then 0x20 else 0) (mValue m) (fromIntegral (mAmount m .&. 0x1c))
@@ -1515,7 +1525,16 @@ pipeStep machine memoryWord =
         Just m | mCommits && mStore m ->
           Just (mIndex m, if mStoreWord m then mData m else (memoryWord .&. complement (mMask m)) .|. mData m)
         _ -> Nothing
-      -- Execute two: select, resolve branches, start memory reads ----------
+      -- Execute two: select, resolve branches, read memory -----------------
+      -- A load or sub-word store reads its word whenever it is here (a read
+      -- nobody waits for is harmless), and moves on the cycle it can.
+      e2Reads x = case execKind (e2Control x) of
+        KindLoad -> True
+        KindStore -> execFunct3 (e2Control x) /= 2
+        _ -> False
+      e2Advance = case pE2 pipe of
+        Just x -> not mHold && not (e2Reads x && mWriting)
+        Nothing -> True
       e2Out x =
         let control = e2Control x
             comp = e2Computed x
@@ -1539,7 +1558,6 @@ pipeStep machine memoryWord =
             load = not slow && case kind of KindLoad -> True; _ -> False
             store = not slow && case kind of KindStore -> True; _ -> False
             storeWord = store && funct3 == 2
-            needsRead = load || (store && not storeWord)
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
             stage = MemoryStage
               { mPc = e2Pc x, mNext = if taken then target else cLink comp,
@@ -1550,23 +1568,17 @@ pipeStep machine memoryWord =
                 mIndex = ramWordIndex address, mData = storeLanes funct3 (resize address) (e2B x),
                 mMask = storeMask funct3 (resize address),
                 mShift = execShift control, mArith = execArithmeticShift control, mAmount = e2Op2 x,
-                mWait = if needsRead then 2 else 0, mSlow = slow }
-         in (stage, needsRead, not slow && taken, target, address)
-      -- E2 moves on when the commit stage frees and, for a read, the port
-      -- is not writing this cycle.
-      e2Advance = case pE2 pipe of
-        Just x -> let (_, needsRead, _, _, _) = e2Out x in mFree && not (needsRead && isJust memoryWrite)
-        Nothing -> True
+                mWait = if load || (store && not storeWord) then 2 else 0, mSlow = slow }
+         in (stage, if not slow && taken then Just target else Nothing)
       e2Moved = case pE2 pipe of
         Just x | e2Advance -> Just (e2Out x)
         _ -> Nothing
-      readIssue = case e2Moved of
-        Just (_, True, _, _, address) -> Just (ramWordIndex address)
-        _ -> Nothing
-      redirect = case e2Moved of
-        Just (_, _, True, target, _) -> Just target
-        _ -> Nothing
+      redirect = e2Moved >>= P.snd
       redirecting = isJust redirect
+      e2Reading = case pE2 pipe of
+        Just x -> e2Reads x
+        Nothing -> False
+      e2Index = maybe 0 (ramWordIndex . cAddress . e2Computed) (pE2 pipe)
       -- Execute one ------------------------------------------------------------
       e1Out x =
         let a = e1A x
@@ -1600,8 +1612,8 @@ pipeStep machine memoryWord =
             rs1 = instructionRs1 word
             rs2 = instructionRs2 word
             rd = instructionRd word
-            usesRs1 = not slow && opcode /= 0x37 && opcode /= 0x17 && opcode /= 0x6f
-            usesRs2 = not slow && (opcode == 0x33 || opcode == 0x23 || opcode == 0x63)
+            usesRs1 = opcode /= 0x37 && opcode /= 0x17 && opcode /= 0x6f
+            usesRs2 = opcode == 0x33 || opcode == 0x23 || opcode == 0x63
             conflicts r writes = writes && ((usesRs1 && rs1 == r) || (usesRs2 && rs2 == r))
             hazard = maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) (pE1 pipe)
               || maybe False (\x -> conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
@@ -1626,53 +1638,57 @@ pipeStep machine memoryWord =
         Nothing -> False
       dFree = isNothing d || dAdvance
       -- Fetch ------------------------------------------------------------------
-      arrival = (\pc -> Fetched pc memoryWord) <$> last (pInflight pipe)
-      count = pQueueCount pipe
-      queue = pQueue pipe
-      popping = dFree && count /= 0
+      inflight = pInflight pipe
+      arrival = (\pc -> Fetched pc memoryWord) <$> last inflight
+      readPointer = pQueueRead pipe
+      writePointer = pQueueWrite pipe
+      queued = writePointer - readPointer
+      slot i = fromIntegral (i .&. 3) :: Index 4
+      -- The arriving word is written at the write pointer regardless; it
+      -- counts as queued unless it went straight to decode.
+      bypass = dFree && queued == 0
+      queue' = case arrival of
+        Just a -> replace (slot writePointer) a (pQueue pipe)
+        Nothing -> pQueue pipe
+      writePointer' = if isJust arrival && not bypass then writePointer + 1 else writePointer
+      readPointer' = if dFree && queued /= 0 then readPointer + 1 else readPointer
       nextD
         | not dFree = d
-        | count /= 0 = Just (head queue)
+        | queued /= 0 = Just (pQueue pipe !! slot readPointer)
         | otherwise = arrival
-      pushing = isJust arrival && not (dFree && count == 0)
-      popped = if popping then queue <<+ Fetched 0 0 else queue
-      afterPop = if popping then count - 1 else count
-      queue' = case arrival of
-        Just a | pushing -> replace afterPop a popped
-        _ -> popped
-      count' = if pushing then afterPop + 1 else afterPop
+      -- Words queued or in flight never exceed the queue (decided from
+      -- registers); the port is free unless a store writes or a read waits.
+      inflightCount = P.foldr (\entry n -> if isJust entry then n + 1 else n) (0 :: Unsigned 3) inflight
+      portBusy = mWriting || e2Reading
       fetchPc = fromMaybe (pFetchPc pipe) redirect
-      stillInflight = if redirecting then 0 else
-        (if isJust (pInflight pipe !! (0 :: Index 3)) then 1 else 0)
-          + (if isJust (pInflight pipe !! (1 :: Index 3)) then 1 else 0) :: Unsigned 3
-      portBusy = isJust memoryWrite || isJust readIssue
-      issue = not portBusy && (if redirecting then 0 else count') + stillInflight < 4
-      inflight'
-        | redirecting = (if issue then Just fetchPc else Nothing) :> Nothing :> Nothing :> Nil
-        | otherwise = (if issue then Just fetchPc else Nothing) :> init (pInflight pipe)
+      issue = not portBusy && (redirecting || queued + inflightCount < 4)
+      issued = if issue then Just fetchPc else Nothing
       pipe'
         | handover = emptyPipe
+        | redirecting =
+            Pipe
+              { pFetchPc = if issue then fetchPc + 4 else fetchPc,
+                pInflight = issued :> Nothing :> Nothing :> Nil,
+                pQueue = queue', pQueueRead = 0, pQueueWrite = 0,
+                pD = Nothing, pE1 = Nothing, pE2 = Nothing,
+                pM = P.fst <$> e2Moved }
         | otherwise =
             Pipe
               { pFetchPc = if issue then fetchPc + 4 else fetchPc,
-                pInflight = inflight',
-                pQueue = queue',
-                pQueueCount = if redirecting then 0 else count',
-                pD = if redirecting then Nothing else nextD,
-                pE1 = if redirecting then Nothing
-                  else case pE1 pipe of
-                    Just x | not e1Advance -> Just x
-                    _ -> if dAdvance then P.fst . decodeOut <$> d else Nothing,
+                pInflight = issued :> init inflight,
+                pQueue = queue', pQueueRead = readPointer', pQueueWrite = writePointer',
+                pD = nextD,
+                pE1 = case pE1 pipe of
+                  Just x | not e1Advance -> Just x
+                  _ -> if dAdvance then P.fst . decodeOut <$> d else Nothing,
                 pE2 = case pE2 pipe of
                   Just x | not e2Advance -> Just x
-                  _ -> if not redirecting && e1Advance then e1Out <$> pE1 pipe else Nothing,
+                  _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
                 pM = case pM pipe of
-                  Just m | not mCommits -> Just m {mWait = mWait m - 1}
-                  _ -> (\(stage, _, _, _, _) -> stage) <$> e2Moved
+                  Just m | mHold -> Just m {mWait = mWait m - 1}
+                  _ -> P.fst <$> e2Moved
               }
-      address = case readIssue of
-        Just index -> index
-        Nothing -> memoryIndex fetchPc
+      address = if e2Reading then e2Index else memoryIndex fetchPc
       committed = case pM pipe of
         Just m | mCommits -> machine {cpuPc = mNext m, cpuInRom = romAddress (mNext m), cpuCountRetirement = True}
         _ -> machine
