@@ -2,6 +2,7 @@
 module NeoMusic.Score
   ( Event(..), Phrase, Name, Score(..), Shape(..), Instrument(..), Performance(..)
   , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
+  , Curve, curveValue, bend, swell, addVibrato, glide, Motion(..), bendMotion, swellMotion
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withVelocity, scaleVelocity, withGate, scaleGate, staccato, pedal
   , mapPhrases, scoreLength, flatten, validate, render, writeAudio
@@ -18,8 +19,30 @@ type Name = String
 -- 'gate' is how long it sounds, as a ratio of 'dur': 1 is as written, below 1
 -- is detached (staccato), above 1 rings into what follows (legato, pedal).
 -- Because the gate is a ratio, 'stretch' leaves articulation unchanged.
-data Event = Event { dur :: Rational, vel :: Double, pitches :: [Step], gate :: Rational }
+--
+-- Curves shape a note while it sounds, over its sounding time @u@ from 0 to 1:
+-- 'bends' offset the pitch in (fractional) steps and add together; 'swells'
+-- scale the loudness and multiply together; 'vibrato' is a depth in steps,
+-- whose rate in Hz belongs to the instrument. Rests ignore all three.
+data Event = Event
+  { dur :: Rational, vel :: Double, pitches :: [Step], gate :: Rational
+  , bends :: [Curve], swells :: [Curve], vibrato :: Rational }
   deriving (Eq, Show)
+
+-- | Piecewise-linear breakpoints @(u, value)@ with @u@ in 0..1, nondecreasing;
+-- flat before the first point and after the last.
+type Curve = [(Rational, Rational)]
+
+curveValue :: Curve -> Rational -> Rational
+curveValue [] _ = 0
+curveValue ((u0, y0) : more) u
+  | u <= u0 = y0
+  | otherwise = go u0 y0 more
+  where
+    go _ y [] = y
+    go ua ya ((ub, yb) : later)
+      | u <= ub = if ub == ua then yb else ya + (yb - ya) * (u - ua) / (ub - ua)
+      | otherwise = go ub yb later
 type Phrase = [Event]
 -- | 'Tempo' says how fast its music is performed relative to the written beats.
 -- It acts on everything sounding during its written extent, in every voice:
@@ -42,7 +65,9 @@ instance Semigroup Score where (<>) = (:>>:)
 instance Monoid Score where mempty = Silence 0
 
 data Instrument = Instrument
-  { tuning :: Tuning, timbre :: A.Patch, gain :: Double, pan :: Double, send :: Double }
+  { tuning :: Tuning, timbre :: A.Patch, gain :: Double, pan :: Double, send :: Double
+  , vibratoRate :: Double  -- ^ Hz; the score only says how deep
+  }
   deriving (Eq, Show)
 data Performance = Performance
   { bpm :: Double, instruments :: M.Map Name Instrument, mix :: A.Mix }
@@ -51,7 +76,7 @@ data BeatEvent = BeatEvent { onset :: Rational, instrument :: Name, event :: Eve
   deriving (Eq, Show)
 
 defaultInstrument :: Instrument
-defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) A.pianoPatch 1 0 0
+defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) A.pianoPatch 1 0 0 5.5
 defaultPerformance :: Performance
 defaultPerformance = Performance 120 M.empty (A.defaultMix 44100)
 
@@ -62,9 +87,9 @@ chord xs = hit xs 1 1
 rest :: Phrase
 rest = hush 1
 hit :: [Int] -> Rational -> Double -> Phrase
-hit xs d v = [Event d v (map Step xs) 1]
+hit xs d v = [Event d v (map Step xs) 1 [] [] 0]
 hush :: Rational -> Phrase
-hush d = [Event d 0 [] 1 | d /= 0]
+hush d = [Event d 0 [] 1 [] [] 0 | d /= 0]
 transpose :: Int -> Phrase -> Phrase
 transpose k = map (\e -> e {pitches = [Step (x+k) | Step x <- pitches e]})
 invert :: Phrase -> Phrase
@@ -89,6 +114,61 @@ scaleGate k = map (\e -> e {gate = k * gate e})
 -- | Detached: each note sounds for half its written length.
 staccato :: Phrase -> Phrase
 staccato = scaleGate (1/2)
+
+-- | Add a pitch curve, in steps, to every note: bends add, so nesting sums.
+bend :: Curve -> Phrase -> Phrase
+bend c = map (\e -> if null (pitches e) then e else e {bends = c : bends e})
+
+-- | Add a loudness curve to every note: swells multiply.
+swell :: Curve -> Phrase -> Phrase
+swell c = map (\e -> if null (pitches e) then e else e {swells = c : swells e})
+
+-- | Add vibrato depth, in steps, to every note.
+addVibrato :: Rational -> Phrase -> Phrase
+addVibrato d = map (\e -> if null (pitches e) then e else e {vibrato = vibrato e + d})
+
+-- | How a note's curves move overall, for the reading views.
+data Motion = Flat | Rising | Falling | Returning deriving (Eq, Show)
+
+motion :: (Rational -> Rational) -> [Rational] -> Motion
+motion at us
+  | end > begin = Rising
+  | end < begin = Falling
+  | any ((/= begin) . at) us = Returning
+  | otherwise = Flat
+  where begin = at 0; end = at 1
+
+-- | The summed bend: up, down, or away and back.
+bendMotion :: Event -> Motion
+bendMotion e = motion (\u -> sum [curveValue c u | c <- bends e]) [u | c <- bends e, (u, _) <- c]
+
+-- | The product of the swells: growing, fading, or rising and falling.
+swellMotion :: Event -> Motion
+swellMotion e
+  | null (swells e) = Flat
+  | otherwise = motion (\u -> product [curveValue c u | c <- swells e]) [u | c <- swells e, (u, _) <- c]
+
+-- | Portamento: each single-pitch note slides to the pitch of the note that
+-- follows it directly (same instrument, single pitch, starting exactly when
+-- its slot ends), over the last fraction @f@ of its sounding time. Notes with
+-- no such successor, chords and rests are unchanged.
+glide :: Rational -> Score -> Score
+glide f score = fst (go 0 score)
+  where
+    starts = M.fromListWith (++) [((instrument e, onset e), [pitches (event e)]) | e <- either (const []) snd (flatten score)]
+    target name t = case M.lookup (name, t) starts of
+      Just [[Step y]] -> Just y
+      _ -> Nothing
+    slide name t e = case pitches e of
+      [Step x] | Just y <- target name (t + dur e), y /= x ->
+        e {bends = [(0, 0), (1 - f, 0), (1, fromIntegral (y - x))] : bends e}
+      _ -> e
+    go at (Line name xs) =
+      (Line name (zipWith (slide name) (scanl (+) at (map dur xs)) xs), at + sum (map dur xs))
+    go at (Silence d) = (Silence d, at + d)
+    go at (a :>>: b) = let (a', ta) = go at a; (b', tb) = go ta b in (a' :>>: b', tb)
+    go at (a :||: b) = let (a', ta) = go at a; (b', tb) = go at b in (a' :||: b', max ta tb)
+    go at (Tempo shape s) = let (s', t) = go at s in (Tempo shape s', t)
 
 -- | A fermata: the music inside is held @k@ times as long ('Speed' (1/k)).
 -- The staff view prints a fermata when this covers a single onset.
@@ -139,6 +219,11 @@ flatten = go 0
       unless (all (\e -> dur e > 0 && finite (vel e) && vel e >= 0 && vel e <= 1) xs)
         (Left "events need positive durations and finite velocities within 0..1")
       unless (all ((> 0) . gate) xs) (Left "gates must be positive")
+      let curveOk c = all (\(u, _) -> u >= 0 && u <= 1) c && and (zipWith (<=) (map fst c) (drop 1 (map fst c)))
+      unless (all (\e -> all curveOk (bends e) && all curveOk (swells e)) xs)
+        (Left "curve points need u within 0..1, in nondecreasing order")
+      unless (all (\e -> all (all ((>= 0) . snd)) (swells e) && vibrato e >= 0) xs)
+        (Left "swells and vibrato depth cannot be negative")
       pure (sum (map dur xs), zipWith (\t e -> BeatEvent t name e) (scanl (+) at (map dur xs)) xs)
     go _ (Silence d)
       | d < 0 = Left "silence cannot have negative duration"
@@ -227,6 +312,7 @@ validate performance score = do
     unless (finite (gain i) && gain i >= 0) (Left (context "gain must be finite and nonnegative"))
     unless (finite (pan i) && abs (pan i) <= 1) (Left (context "pan must be within -1..1"))
     unless (finite (send i) && send i >= 0 && send i <= 1) (Left (context "reverb send must be within 0..1"))
+    unless (positive (vibratoRate i)) (Left (context "vibrato rate must be finite and positive"))
   forM_ (lineNames score) $ \name ->
     unless (M.member name (instruments performance)) (Left ("unknown instrument: " ++ name))
   where
@@ -243,9 +329,16 @@ render performance score = do
   (total,es) <- flatten score
   let clock = timeMap score
       seconds beats = performed clock beats * (60 / bpm performance)
+      octaves i = logBase 2 (ratio (tuning i))
+      -- Bends add, so they merge exactly into one curve over all their breakpoints.
+      merged cs = [ (fromRational u, fromRational (sum [curveValue c u | c <- cs]))
+                  | u <- M.keys (M.fromList [(u, ()) | c <- cs, (u, _) <- c]) ]
       ns = [ A.Note (seconds (onset e)) (freq (tuning i) pitch)
                (seconds (onset e + dur (event e) * gate (event e)) - seconds (onset e))
                (timbre i) (vel (event e)) (gain i) (pan i) (send i)
+               [(u, y * octaves i) | (u, y) <- merged (bends (event e))]
+               (fromRational (vibrato (event e)) * octaves i) (vibratoRate i)
+               [[(fromRational u, fromRational y) | (u, y) <- c] | c <- swells (event e)]
            | e <- es, let i = instruments performance M.! instrument e, pitch <- pitches (event e) ]
   unless (all (\v -> finite (A.start v) && positive (A.duration v) && positive (A.hz v)) ns
           && finite (seconds total)) (Left "score time or pitch cannot be represented in seconds and Hz")

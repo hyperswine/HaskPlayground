@@ -21,6 +21,7 @@ data Document = Document { performance :: Performance, sheetView :: SheetView, s
 data Expr = Notes [Int] | Ref Name [Expr] | SeqE [Expr] | ParE Expr Expr
   | Scale Rational Expr | Trans Int Expr | Repeat Int Expr | Rev Expr | Inv Expr | Vel Double Expr
   | Gate Rational Expr | Pedal Expr | TempoE Shape Expr
+  | BendE Curve Expr | SwellE Curve Expr | VibratoE Rational Expr | GlideE Rational Expr
   deriving (Eq, Show)
 data Definition = Definition [Name] Expr deriving (Eq, Show)
 
@@ -60,6 +61,19 @@ rational = do
   a <- integerValue
   b <- option 1 (symbol "/" *> integerValue)
   if a <= 0 || b <= 0 then fail "expected a positive whole number or fraction" else pure (a % b)
+-- | A fraction of either sign: @-1/2@, @3@.
+signedFraction :: Parser Rational
+signedFraction = do
+  a <- integerValue
+  b <- option 1 (symbol "/" *> integerValue)
+  if b <= 0 then fail "fraction needs a positive denominator" else pure (a % b)
+
+-- | @a -> b@ (from a at the start to b at the end) or explicit breakpoints
+-- @{u:value u:value ...}@ over the note's sounding time, u from 0 to 1.
+curveP :: Parser Curve
+curveP = between (symbol "{") (symbol "}") (many1 ((,) <$> signedFraction <* symbol ":" <*> signedFraction))
+  <|> (do a <- signedFraction; _ <- try (symbol "->"); b <- signedFraction; pure [(0, a), (1, b)])
+
 keyword :: String -> Parser ()
 keyword word = void (try (lexeme (string word <* notFollowedBy (alphaNum <|> oneOf "_-"))))
 
@@ -81,6 +95,10 @@ expression arities = parallel
       <|> (keyword "speed" *> (TempoE <$> (rational >>= \a -> option (Speed a) (Ramp a <$> (try (symbol "->") *> rational))) <*> term))
       <|> (keyword "swing" *> (TempoE . Swing 1 <$> rational <*> term))
       <|> (keyword "hold" *> (TempoE . Speed . recip <$> rational <*> term))
+      <|> (keyword "bend" *> (BendE <$> curveP <*> term))
+      <|> (keyword "swell" *> (SwellE <$> curveP <*> term))
+      <|> (keyword "vibrato" *> (VibratoE <$> rational <*> term))
+      <|> (keyword "glide" *> (GlideE <$> rational <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
       <|> between (symbol "(") (symbol ")") (Notes <$> many integer)
@@ -120,7 +138,7 @@ parseDocument input = do
   let ls = [(i,stripComment s) | (i,s) <- zip [1..] (lines input), not (all isSpace (stripComment s))]
       isBinding s = '=' `elem` s && takeWord s /= "instrument"
       bindings = [(i,s) | (i,s) <- ls, isBinding s]
-      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold"]
+      reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","hold","bend","swell","vibrato","glide"]
   signatures <- mapM (\(i,s) -> runLine i (many1 ident) (takeWhile (/='=') s)) bindings
   unless (all (\xs -> length xs == length (nub xs) && all (`notElem` reserved) xs) signatures)
     (Left "duplicate parameters or reserved binding name")
@@ -202,6 +220,7 @@ parseDocument input = do
       "gain" -> do x <- runLine 0 number value; pure (i {gain=x},staff)
       "pan" -> do x <- runLine 0 number value; pure (i {pan=x},staff)
       "send" -> do x <- runLine 0 number value; pure (i {send=x},staff)
+      "vibrato-rate" -> do x <- runLine 0 number value; pure (i {vibratoRate=x},staff)
       _ -> Left ("unknown instrument attribute: "++attr)
 
 evaluate :: M.Map Name Definition -> M.Map Name Score -> [Name] -> Name -> Expr -> Either String Score
@@ -218,6 +237,12 @@ evaluate defs locals active name expr = case expr of
   Gate g e -> mapPhrases (scaleGate g) <$> recur e
   Pedal e -> pedal <$> recur e
   TempoE shape e -> Tempo shape <$> recur e
+  BendE c e -> mapPhrases (bend c) <$> recur e
+  SwellE c e -> mapPhrases (swell c) <$> recur e
+  VibratoE d e -> mapPhrases (addVibrato d) <$> recur e
+  GlideE f e
+    | f > 1 -> Left "glide fraction must be within 0..1"
+    | otherwise -> glide f <$> recur e
   Ref ref args -> case M.lookup ref locals of
     Just x -> if null args then Right x else Left "parameters cannot be called"
     Nothing -> do
@@ -278,7 +303,14 @@ prettyScore s = do
     rat x = show (numerator x) ++ if denominator x == 1 then "" else "/"++show (denominator x)
     silence 0 = ""
     silence d = " _:"++rat d++" "
-    token e = "vel "++show (vel e)++" ["++gated e (pitch (pitches e)++":"++rat (dur e))++"]"
+    token e = "vel "++show (vel e)++" ["++curved e (gated e (pitch (pitches e)++":"++rat (dur e)))++"]"
+    -- Bends add, swells multiply and vibrato depths add, so each nests on its own.
+    curved e body = foldr (\c b -> "bend "++curveText c++" ["++b++"]") (
+                      foldr (\c b -> "swell "++curveText c++" ["++b++"]") (
+                        if vibrato e == 0 then body else "vibrato "++rat (vibrato e)++" ["++body++"]")
+                      (swells e))
+                    (bends e)
+    curveText c = "{"++unwords [rat u++":"++rat y | (u, y) <- c]++"}"
     gated e body = if gate e == 1 then body else "gate "++rat (gate e)++" ["++body++"]"
     pitch [] = "_"
     pitch [A.Step x] = show x

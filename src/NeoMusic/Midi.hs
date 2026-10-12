@@ -10,7 +10,7 @@ import qualified Data.Map.Strict as M
 import Data.Ratio (denominator, numerator)
 import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
-import NeoMusic.Score
+import NeoMusic.Score hiding (n)
 
 midiPitch :: A.Tuning -> A.Step -> Either String Int
 midiPitch t (A.Step x) = do
@@ -32,11 +32,14 @@ midi perf score = do
       release e = onset e + dur (event e) * gate (event e)
       end = maximum (total : map release es)
   changes <- tempoChanges perf score
-  let division = foldl lcm 1 (map denominator (total : map fst changes ++ concat [[onset e,release e] | e <- es]))
+  lanes <- concat <$> mapM (instrumentLanes es) names
+  unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments, overlapping unisons and curved notes")
+  -- Curves are sampled every 1/64 beat, so they need that resolution.
+  let anyCurved = any (any curved) lanes
+      division = foldl lcm (if anyCurved then 64 else 1)
+        (map denominator (total : map fst changes ++ concat [[onset e,release e] | e <- es]))
       ticks x = numerator (x * fromInteger division)
   unless (division <= 32767) (Left "exact rhythm needs MIDI resolution above 32767 ticks/quarter")
-  lanes <- concat <$> mapM (instrumentLanes es) names
-  unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments and overlapping unisons")
   tracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
   conductor <- track (ticks end) [(ticks at, [0xff,0x51,3] ++ bytes3 micros) | (at, micros) <- changes]
   pure $ toLazyByteString (string8 "MThd" <> word32BE 6 <> word16BE 1
@@ -48,21 +51,61 @@ midi perf score = do
       unless (A.pitchDrop (timbre i) == 0 && all ((/= A.NoiseWave) . A.wave) (A.oscillators (timbre i)))
         (Left "noise/pitch-drop percussion requires an explicit MIDI percussion mapping")
       notes <- concat <$> mapM (convert i) [e | e <- es, instrument e == name]
-      -- A separate channel prevents one unison's note-off cutting another short.
-      pure (foldl place [] (sortOn (\(a,_,_,_) -> a) notes))
-    place [] note = [[note]]
-    place (lane:lanes) note@(a,b,p,_)
-      | all (\(c,d,q,_) -> p /= q || b <= c || d <= a) lane = (note:lane):lanes
-      | otherwise = lane:place lanes note
+      -- A separate channel prevents one unison's note-off cutting another
+      -- short, and pitch bend and expression act on a whole channel, so a
+      -- curved note shares its channel with nothing that overlaps it.
+      pure (foldl place [] (sortOn noteOn notes))
+    place [] n0 = [[n0]]
+    place (lane:lanes) n0
+      | all (\n1 -> (noteKey n0 /= noteKey n1 && not (curved n0 || curved n1)) || noteOff n0 <= noteOn n1 || noteOff n1 <= noteOn n0) lane = (n0:lane):lanes
+      | otherwise = lane:place lanes n0
+    clock = timeMap score
+    clockSeconds b = performed clock b * 60 / bpm perf
     makeTrack ticks total (notes,channel) = do
-      let events = sortOn (\(t,priority,_) -> (t,priority))
-            ([(ticks a,1::Int,[0x90+channel,p,v]) | (a,_,p,v) <- notes] ++
-             [(ticks b,0,[0x80+channel,p,0]) | (_,b,p,_) <- notes])
-      track (ticks total) ((0,[0xc0+channel,0]) : [(t,bytes) | (t,_,bytes) <- events])
+      let bendRange = maximum (0 : [ceiling (maximum (0 : map abs (bendSamples n))) | n <- notes, curved n]) :: Integer
+      unless (bendRange <= 127) (Left "a bend exceeds the MIDI pitch-bend range of 127 semitones")
+      let range = max 1 bendRange
+          -- At one tick: note-offs, then resets, then curve samples, then note-ons.
+          events = sortOn (\(t,priority,_) -> (t,priority)) $ concat
+            [ [(ticks (noteOn n),3::Int,[0x90+channel,noteKey n,noteVel n]), (ticks (noteOff n),0,[0x80+channel,noteKey n,0])]
+              ++ (if curved n then curveEvents ticks channel range n else [])
+            | n <- notes ]
+          -- RPN 0 sets the bend range in semitones, then the null RPN.
+          rpn = [(0,[0xb0+channel,101,0]),(0,[0xb0+channel,100,0]),(0,[0xb0+channel,6,fromInteger range]),(0,[0xb0+channel,38,0]),(0,[0xb0+channel,101,127]),(0,[0xb0+channel,100,127])]
+      track (ticks total) ((0,[0xc0+channel,0]) : (if any curved notes then rpn else []) ++ [(t,bytes) | (t,_,bytes) <- events])
+    -- Sample times: every 1/64 beat from the onset, up to the note-off.
+    sampleBeats n = takeWhile (< noteOff n) [noteOn n, noteOn n + 1/64 ..]
+    -- Position within the sounding time and seconds since onset, through the clock.
+    position n b =
+      let p0 = performed clock (noteOn n)
+          span' = performed clock (noteOff n) - p0
+      in (if span' > 0 then (performed clock b - p0) / span' else 0, clockSeconds b - clockSeconds (noteOn n))
+    bendSamples n =
+      [ fromRational (sum [curveValue c (toRational u) | c <- bends (noteEvent n)])
+          + fromRational (vibrato (noteEvent n)) * sin (2 * pi * vibratoRate (noteInstrument n) * secs)
+      | b <- sampleBeats n, let (u, secs) = position n b ] :: [Double]
+    swellSamples n = [product [fromRational (curveValue c (toRational u)) | c <- swells (noteEvent n)] | b <- sampleBeats n, let (u, _) = position n b] :: [Double]
+    curveEvents ticks channel range n =
+      let bendValue x = max 0 (min 16383 (8192 + round (8191 * x / fromInteger range))) :: Int
+          bendsAt = [ (ticks b, 2, [0xe0+channel, v `mod` 128, v `div` 128]) | (b, x) <- zip (sampleBeats n) (bendSamples n), let v = bendValue x ]
+          -- Expression above 1 is clipped to full; below, it scales the channel.
+          exprAt = [ (ticks b, 2, [0xb0+channel, 11, max 0 (min 127 (round (127 * x)))]) | (b, x) <- zip (sampleBeats n) (swellSamples n) ]
+          dedupe xs = [x | (x, prev) <- zip xs (Nothing : map Just xs), fmap thd prev /= Just (thd x)]
+          thd (_, _, x) = x
+          resets = [(ticks (noteOff n), 1, [0xe0+channel, 0, 64]), (ticks (noteOff n), 1, [0xb0+channel, 11, 127])]
+      in dedupe bendsAt ++ (if null (swells (noteEvent n)) then [] else dedupe exprAt) ++ resets
     convert i e = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
-      pure [(onset e,onset e+dur (event e)*gate (event e),p,max 1 (round (127 * vel (event e))))
+      pure [ MidiNote (onset e) (onset e+dur (event e)*gate (event e)) p (max 1 (round (127 * vel (event e)))) (event e) i
            | p <- ps, vel (event e) > 0]
+
+-- | One sounding note on its way into a track.
+data MidiNote = MidiNote
+  { noteOn :: Rational, noteOff :: Rational, noteKey :: Int, noteVel :: Int
+  , noteEvent :: Event, noteInstrument :: Instrument }
+
+curved :: MidiNote -> Bool
+curved n = let e = noteEvent n in not (null (bends e) && null (swells e) && vibrato e == 0)
 
 -- | The conductor track as (written beat, microseconds per quarter) changes.
 --

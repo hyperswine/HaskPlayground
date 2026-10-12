@@ -208,7 +208,8 @@ remain in the source/performance and are omitted from the first reading view.
 How long a note sounds (its gate, a ratio of the time it occupies) is shown as a
 mark rather than a number: `0'` is detached and `0~` rings on. Tempo changes, which shape
 performance without changing the written beats, get a `tempo` lane above the
-voices that names each change where it starts and ends.
+voices that names each change where it starts and ends. Curves within a note
+(bends, vibrato, swells) are marks as well, never numbers.
 
 A second, optional view combines the same numeric labels with flat horizontal
 bar-like marks above each event, visually closer to `==` than drawn noteheads.

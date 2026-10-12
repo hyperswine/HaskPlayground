@@ -20,12 +20,14 @@ extra-source-files:
     CHANGELOG.md
     examples/NeoMusicLanguage.md
     examples/neomusic/articulation.neomusic
+    examples/neomusic/curves.neomusic
     examples/neomusic/numeric-preview.neomusic
     examples/neomusic/scale.neomusic
     examples/neomusic/tempo.neomusic
     examples/neomusic/ties.neomusic
     examples/neomusic/twinkle.neomusic
     examples/neomusic/voices.neomusic
+    test/golden/neomusic/curves.ly
     test/golden/neomusic/scale.ly
     test/golden/neomusic/tempo.ly
     test/golden/neomusic/ties.ly

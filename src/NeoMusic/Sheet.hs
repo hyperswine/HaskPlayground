@@ -12,8 +12,8 @@ import qualified NeoMusic.Pitch as A
 import NeoMusic.Score hiding (chord)
 
 -- | Shared pre-engraving representation: staff, onset, written duration, MIDI
--- chord and gate (sounding length as a ratio of the written duration).
-sheetEvents :: Performance -> SheetView -> Score -> Either String [(Staff, Rational, Rational, [Int], Rational)]
+-- chord and the event itself (for its gate and curves).
+sheetEvents :: Performance -> SheetView -> Score -> Either String [(Staff, Rational, Rational, [Int], Event)]
 sheetEvents perf view score = do
   validate perf score
   (total, es) <- flatten score
@@ -33,7 +33,7 @@ sheetEvents perf view score = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
       unless (all (\p -> p >= 21 && p <= 108) ps) (Left "pitch outside piano range A0..C8")
       unless (dyadic (onset e) && dyadic (dur (event e))) (Left "sheet supports durations on a 32nd-note grid; tuplets are not supported")
-      pure (staff, onset e, dur (event e), ps, gate (event e))
+      pure (staff, onset e, dur (event e), ps, event e)
 
 engrave :: Performance -> SheetView -> Score -> Either String String
 engrave perf view score = do
@@ -129,12 +129,26 @@ engrave perf view score = do
     emitVoice total = go 0
       where
         go at [] = emitRest at (total - at)
-        go at ((_, t, d, ps, g) : xs) = emitRest at (t - at) ++ emit True (articulation g t) t d ps ++ go (t + d) xs
+        go at ((_, t, d, ps, ev) : xs) = emitRest at (t - at) ++ emit True (articulation ev t (continues (t + d) xs)) t d ps ++ go (t + d) xs
+        continues t ((_, u, _, qs, _) : _) = u == t && not (null qs)
+        continues _ [] = False
     -- The gate becomes an articulation on the note's first segment, or for a
     -- note that rings past its written length, a "let ring" tie on its last.
-    articulation g t =
-      let (front, back) = gateMarks g
-       in (front ++ (if t `elem` fermatas then "\\fermata" else ""), back)
+    -- Gate and fermata as before; a bend that ends elsewhere draws a glissando
+    -- to the next note in the voice, any other bend, vibrato and swells are
+    -- written as words or an espressivo.
+    articulation ev t followed =
+      let (front, back) = gateMarks (gate ev)
+          sliding = bendMotion ev `elem` [Rising, Falling] && followed
+          curveFront = concat
+            [ if bendMotion ev /= Flat && not sliding then "^\\markup \\italic \"bend\"" else ""
+            , if vibrato ev > 0 then "^\\markup \\italic \"vib.\"" else ""
+            , case swellMotion ev of
+                Rising -> "_\\markup \\italic \"cresc.\""
+                Falling -> "_\\markup \\italic \"dim.\""
+                Returning -> "\\espressivo"
+                Flat -> "" ]
+       in (front ++ (if t `elem` fermatas then "\\fermata" else "") ++ curveFront, back ++ (if sliding then "\\glissando" else ""))
     gateMarks g
       | g <= 1 / 2 = ("-.", "")
       | g < 1 = ("-_", "")
@@ -157,7 +171,7 @@ engrave perf view score = do
        in chord ++ spelling ++ (if null ps then "" else marked) ++ tie ++ barline ++ emit False (front, back) (at + d) (remaining - d) ps
 
 -- Greedy interval partition: each lane is monophonic; chord events stay intact.
-separate :: [(Staff, Rational, Rational, [Int], Rational)] -> [[(Staff, Rational, Rational, [Int], Rational)]]
+separate :: [(Staff, Rational, Rational, [Int], Event)] -> [[(Staff, Rational, Rational, [Int], Event)]]
 separate = foldl insert []
   where
     insert [] e = [[e]]

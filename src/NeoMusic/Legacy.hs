@@ -116,7 +116,7 @@ render (FromPart p) = do
   let ds = map ((60 / bpm (tempo p) *) . fromRational) (rhythm p)
   unless (all positive ds) (Left "durations must be finite and positive")
   let times = scanl (+) 0 ds
-      ns = [Note t (freq (tuning p) x) d (patchOf (timbre p)) v 1 0 0
+      ns = [note t (freq (tuning p) x) d (patchOf (timbre p)) v 1 0 0
            | (t, d, v, Play xs) <- zip4 times ds (dynamics p) (voice p), x <- xs]
       total = last times
   unless (all (positive . hz) ns && (total == 0 || positive total))

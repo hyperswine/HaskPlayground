@@ -73,6 +73,17 @@ A `key` or `meter` header affects only the sheet view.
   beats, in every voice, so it doesn't matter which hand's line you write it in
   and the hands can't drift apart. Nested changes multiply. See
   `examples/neomusic/tempo.neomusic` and `neomusic-timemap.md`.
+- Curves shape each note *while it sounds*, over its sounding time from 0 to 1.
+  `bend a -> b [...]` moves each note's pitch from `a` to `b` steps (fractions
+  and negatives allowed); `bend {0:0 1/4:1 1:0} [...]` gives explicit
+  breakpoints `u:value`. Bends add when nested. `swell a -> b [...]` (or
+  `{...}`) scales each note's loudness, and swells multiply. `vibrato d [...]`
+  adds `d` steps of vibrato depth; its rate is the instrument's `vibrato-rate`
+  in Hz (default 5.5). `glide f [...]` makes each single note slide into the note
+  that directly follows it in the same instrument, over the last fraction `f` of
+  its sound; chords, rests, the last note, and a note with two possible
+  successors don't glide. See `examples/neomusic/curves.neomusic` and
+  `neomusic-curves.md`.
 - `rev` reverses durations and velocities with pitches. When reversing a parallel
   expression, shorter branches are delayed so the whole passage is mirrored.
 - Bindings may refer forward to other bindings. Functions have fixed positional
@@ -93,7 +104,8 @@ for tempo and levels; rhythmic durations use exact integer fractions.
 Presets: `piano`, `sine`, `saw`, `square`, `pluck`, `supersaw`, `reeseBass`,
 `subBass`, `kick`, `snare`, `hat`, `noiseSweep`. `piano` is a simple synthesized
 piano-like sound, not a sampled acoustic instrument. Attributes are `staff`
-(`treble`/`bass`), `gain` (nonnegative), `pan` (-1..1), and `send` (0..1).
+(`treble`/`bass`), `gain` (nonnegative), `pan` (-1..1), `send` (0..1), and
+`vibrato-rate` (Hz, positive).
 Custom patches, per-instrument tuning, and mix/reverb settings remain available
 in Haskell; this first text format does not serialize arbitrary patches or mixes.
 
@@ -147,6 +159,15 @@ and `tempoNodes` lists each node with its written start and length. `render`
 is the only place the clock meets `bpm`. `rev` reverses ramps and mirrors swing
 (exact when the swung extent is a whole number of periods); `stretch` scales a
 node's extent and swing period.
+
+`Event` also carries `bends` and `swells` (lists of `Curve`, breakpoints
+`(u, value)`) and a `vibrato` depth in steps; `bend`, `swell` and `addVibrato`
+add to them, and `glide :: Rational -> Score -> Score` works on a whole score
+so it can join notes that sit in separate lines. `Instrument` has
+`vibratoRate`. `render` merges an event's bends into one curve in octaves for
+the audio `Note`; the synthesiser applies bend and vibrato to the pitch and the
+swells to the amplitude every sample, and skips all of it for notes without
+curves, so those render exactly as before.
 
 `Score` has `Line name phrase`, `Silence beats`, sequential `:>>:` and parallel
 `:||:`. Sequential composition has `Semigroup`/`Monoid` instances with `Silence 0`
@@ -204,8 +225,10 @@ their own, so the annotation is directly above the music it shapes:
 ends (unless an earlier change is still going; a hold needs no end mark).
 This view accepts microtones and arbitrary rational rhythms because it displays
 the score without imposing a tuning or traditional notation. Gates show as a
-mark, not their exact ratio: `0'` sounds shorter than written and `0~` rings on,
-and the legend explains whichever marks the piece uses. Velocities are not
+mark, not their exact ratio: `0'` sounds shorter than written and `0~` rings on.
+Curves are marks too: `/`, `\` or `^` for a bend that ends higher, lower, or
+goes away and back; `w` for vibrato; `<`, `>` or `<>` for a swell that grows,
+fades, or both. The legend explains whichever marks the piece uses. Velocities are not
 shown, so this is a reading view rather than a lossless source serialization.
 
 **Numeric + bars (prototype):** `hybrid` writes `.html` with a flat double stroke
@@ -227,8 +250,12 @@ inside it and at least every 1/4 beat, each step lasting exactly as long as the
 clock says; integer microseconds per quarter are the only rounding, carried
 into the next step, so every note lands within a microsecond of the audio
 render (a test plays the tempo map back to check). Swing is two changes per
-beat;
-custom synth patches, gain/pan/reverb are not reproduced. Steps must use 12-EDO
+beat. A curved note (bend, vibrato or swell) gets a channel no overlapping note
+shares, because pitch bend and expression act on a whole channel; its channel
+sets the pitch-bend range (RPN 0) to the smallest whole number of semitones
+that covers its curves, and the bend wheel and expression (CC 11) are sampled
+every 1/64 beat, positioned through the tempo clock, then reset at the
+note-off. Expression above 1 is clipped to full. Custom synth patches, gain/pan/reverb are not reproduced. Steps must use 12-EDO
 with an exactly aligned 12-TET reference (floating-point tolerance applies).
 No pitch rounding. Notes must fit MIDI 0–127. Noise and pitch-drop percussion patches require a future
 percussion mapping and are rejected. Overlapping unisons get separate channels;
@@ -245,7 +272,10 @@ segment. A pedal therefore shows as let-ring ties on each note, not as a
 *Ped.* marking. Tempo changes are marks on a spacer line between the staves,
 so the notes stay as written: a speed is a metronome mark, a ramp "rit." or
 "accel." then "a tempo", swing "Swing" then "Straight", and a hold over a
-single onset a `\fermata` on its notes.
+single onset a `\fermata` on its notes. A bend that ends higher or lower draws
+a `\glissando` to the next note in its voice; other bends are marked "bend",
+vibrato "vib.", a growing or fading swell "cresc." or "dim.", and one that does
+both an `\espressivo`.
 Pitches must fit piano A0–C8. The initial supported rhythmic grid is 1/8 beat
 (32nd note) or larger; tuplets and finer dyadic durations fail explicitly.
 `sheetEvents` exposes the exact pre-engraving onsets/gates for comparison with

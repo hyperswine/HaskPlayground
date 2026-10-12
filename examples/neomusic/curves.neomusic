@@ -1,0 +1,14 @@
+-- Curves shape a note while it sounds: pitch (bend, glide, vibrato) and
+-- loudness (swell). Bends are in steps, so they follow the tuning.
+tempo 84
+tuning 12 at C4
+instrument lead = sine staff treble vibrato-rate 5.5
+instrument pad  = piano staff bass
+
+rise  = glide 1/3 [0 4 7 12]          -- each note slides into the next
+cry   = bend {0:0 1/4:1 1:0} [9:2]    -- up a step and back
+sing  = vibrato 1/4 [7:4]             -- a quarter-step vibrato
+bloom = swell 1/4 -> 1 [(-12 -5):4]   -- a chord that grows
+
+lead: rise cry sing _:2
+pad:  _:4 bloom bloom

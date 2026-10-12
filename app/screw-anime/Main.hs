@@ -24,7 +24,7 @@ import NeoMusic.Audio
   ( Envelope(..), Mix(..), Osc(..), Patch(..), Reverb(..), Wave(..)
   , basicPatch, hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass
   , supersaw, writeTimelineMix )
-import NeoMusic.Pitch (Step(..), Tuning(..))
+import NeoMusic.Pitch (Tuning(..))
 import NeoMusic.Score (Event(..), Instrument(..), Performance(..), Phrase, Score(..), hit, hush)
 import qualified NeoMusic.Score as S
 import System.Environment (getArgs)
@@ -348,7 +348,7 @@ groups =
   , ("fx", together
       [ at "air" 0 (hit [hatStep] 16 0.5)
       , at "sweep" 40 (hit [hatStep] 8 0.9)
-      , at "microRiser" 40 [Event (1/6) v [Step x] 1 | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)]
+      , at "microRiser" 40 (concat [hit [x] (1/6) v | (x, v) <- zip [24 .. 71] (ramp 0.2 1 48)])
       , glints ])
   ]
 
@@ -392,7 +392,7 @@ master = Mix
 performance :: Performance
 performance = Performance 144 (M.fromList registry) master
   where
-    inst name patch level side reverbSend = (name, Instrument d4 patch level side reverbSend)
+    inst name patch level side reverbSend = (name, Instrument d4 patch level side reverbSend (S.vibratoRate S.defaultInstrument))
     registry =
       [ inst "lead" lead 0.53 0 0.25, inst "leadEcho" lead 0.17 0.55 0.45
       , inst "bell" bell 0.35 (-0.3) 0.45
@@ -404,7 +404,7 @@ performance = Performance 144 (M.fromList registry) master
       , inst "snare" snare 0.42 0 0.2, inst "hat" hat 0.16 0.2 0.08, inst "openHat" openHat 0.12 0.2 0.1
       , inst "crash" crash 0.3 0 0.5
       , inst "air" noiseSweep 0.08 0 0.5, inst "sweep" noiseSweep 0.2 0 0.5
-      , ("microRiser", Instrument quarterTones pluck 0.14 0 0.4)
+      , ("microRiser", Instrument quarterTones pluck 0.14 0 0.4 (S.vibratoRate S.defaultInstrument))
       , inst "glint" glass 0.28 0 0.6, inst "glintEcho1" glass 0.14 (-0.7) 0.6
       , inst "glintEcho2" glass 0.08 0.7 0.6, inst "glintEcho3" glass 0.04 (-0.7) 0.6 ]
 

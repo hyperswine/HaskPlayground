@@ -135,7 +135,7 @@ numericPage perf score = do
 data Legend = Legend
   { legendTempo :: Double,
     legendGroups :: [([Name], String, Maybe [(Int, Int)])], -- names, tuning text, (step, MIDI) keys
-    legendMarks :: [String] -- explanations of the gate marks the piece uses
+    legendMarks :: [String] -- explanations of the marks the piece uses
   }
 
 legend :: Performance -> Score -> Either String Legend
@@ -159,10 +159,11 @@ legend perf score = do
           Left _ -> Right Nothing
           Right _ -> Just <$> mapM (\x -> (,) x <$> midiPitch t (A.Step x)) steps
         pure (names, describe t, keys)
-      marks = nub (filter (not . null) (map (gateMark . event) es))
-      explain m = if m == "'" then "' = detached: sounds shorter than written" else "~ = rings on past its written length"
+      present = concatMap (eventMarks . event) es
+      marks = [m | (m, _) <- markMeanings, m `elem` present]
+      explain m = m ++ " = " ++ maybe "" id (lookup m markMeanings)
   described <- mapM group groups
-  pure (Legend (bpm perf) described (map explain (sort marks)))
+  pure (Legend (bpm perf) described (map explain marks))
 
 legendText :: Legend -> [String]
 legendText (Legend speed groups marks) =
@@ -208,7 +209,31 @@ pitchText e = case pitches e of
   xs -> "(" ++ unwords [show x | A.Step x <- xs] ++ ")"
 
 eventText :: Event -> String
-eventText e = pitchText e ++ (if dur e == 1 then "" else ":" ++ rationalText (dur e)) ++ gateMark e
+eventText e = pitchText e ++ (if dur e == 1 then "" else ":" ++ rationalText (dur e)) ++ concat (eventMarks e)
+
+-- | Reading aids, not exact values, in this order after an event: gate, bend,
+-- vibrato, swell.
+eventMarks :: Event -> [String]
+eventMarks e
+  | null (pitches e) = []
+  | otherwise = filter (not . null)
+      [ gateMark e
+      , case bendMotion e of Rising -> "/"; Falling -> "\\"; Returning -> "^"; Flat -> ""
+      , if vibrato e > 0 then "w" else ""
+      , case swellMotion e of Rising -> "<"; Falling -> ">"; Returning -> "<>"; Flat -> "" ]
+
+-- | The legend line for each mark, in display order.
+markMeanings :: [(String, String)]
+markMeanings =
+  [ ("'", "detached: sounds shorter than written")
+  , ("~", "rings on past its written length")
+  , ("/", "pitch bends up")
+  , ("\\", "pitch bends down")
+  , ("^", "pitch bends away and back")
+  , ("w", "vibrato")
+  , ("<", "swells louder")
+  , (">", "fades")
+  , ("<>", "swells and fades") ]
 
 -- | A reading aid, not the exact ratio: ' sounds shorter than written, ~ rings on.
 gateMark :: Event -> String

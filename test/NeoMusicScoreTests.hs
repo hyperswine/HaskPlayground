@@ -9,6 +9,7 @@ import Data.List (sort, sortOn, isInfixOf, isPrefixOf)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
+import qualified Data.Vector.Unboxed as VU
 import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
@@ -293,11 +294,76 @@ scoreGroup = Group "NeoMusic score and views"
       -- A score without tempo changes prints no tempo lane.
       plain <- evalEither (numeric (Line "right" (n 0)))
       assert (not ("tempo" `isInfixOf` plain)))
+  , ("curves: bends add, swells multiply, glide joins successors", withTests 1 $ property $ do
+      let up = [(0, 0), (1, 2)]
+          scoop = [(0, -1), (1/2, 0)]
+          [single] = bend up (bend scoop (n 0))
+      bends single === [up, scoop]
+      merged <- evalEither (render perf (Line "right" [single]))
+      let near xs ys = length xs == length ys && and [abs (a - c) < 1e-9 && abs (b - d) < 1e-9 | ((a, b), (c, d)) <- zip xs ys]
+      -- One merged curve in octaves: the sum of both at every breakpoint.
+      assert (near [(u, y * 12) | v <- A.notes merged, (u, y) <- A.bend v] [(0, -1), (1/2, 1), (1, 2)])
+      quiet <- evalEither (render perf (Line "right" (swell [(0, 1/2), (1, 1/2)] (swell [(0, 1), (1, 1/2)] (n 0)))))
+      map (length . A.swells) (A.notes quiet) === [2]
+      -- glide: 0 slides to 4, 4 to 7, 7 has no successor; the chord and the rest stop it.
+      (_, es) <- evalEither (flatten (glide (1/4) (Line "right" (n 0 <> n 4 <> n 7 <> chord [0, 4] <> rest <> n 2))))
+      map (bends . event) es === [[[(0,0),(3/4,0),(1,4)]], [[(0,0),(3/4,0),(1,3)]], [], [], [], []]
+      -- Across separate lines too (the language makes one line per note), but not
+      -- when two parallel notes could follow.
+      (_, gs) <- evalEither (flatten (glide (1/2) (Line "right" (n 0) :>>: Line "right" (n 2))))
+      map (bends . event) gs === [[[(0,0),(1/2,0),(1,2)]], []]
+      (_, amb) <- evalEither (flatten (glide (1/2) (Line "right" (n 0) :>>: (Line "right" (n 2) :||: Line "right" (n 5)))))
+      map (bends . event) amb === [[], [], []]
+      assert (isLeft (render perf (Line "right" (swell [(0, -1)] (n 0)))))
+      assert (isLeft (render perf (Line "right" (bend [(1, 0), (0, 1)] (n 0))))))
+  , ("curves: a bend really moves the pitch", withTests 1 $ property $ do
+      -- A sine at C4 bending up an octave over 1 s: twice the zero crossings by the end.
+      let sinePerf = perf {bpm = 60, instruments = M.singleton "right" defaultInstrument {timbre = A.sinePatch}}
+      (l, _) <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (bend [(0, 0), (1, 12)] (n 0))))
+      let crossings a b = length [() | i <- [a .. b - 2], l VU.! i <= 0, l VU.! (i + 1) > 0]
+          early = crossings 0 800
+          late = crossings 7200 8000
+      assert (early >= 25 && early <= 29 && late >= 47 && late <= 53)
+      plain <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (n 0)))
+      vibrated <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (addVibrato (1/2) (n 0))))
+      assert (fst plain /= fst vibrated))
+  , ("curves in the language, MIDI, staff and numeric views", withTests 1 $ property $ do
+      doc <- evalEither (parseDocument (header++"instrument left = piano staff bass vibrato-rate 6\nright: glide 1/2 [0 4] bend {0:0 1/2:1 1:0} [7] swell 1 -> 1/2 [9]\nleft: vibrato 1/4 [-12:4]\n"))
+      (_, es) <- evalEither (flatten (score doc))
+      [bends (event e) | e <- es, instrument e == "right"] ===
+        [[[(0,0),(1/2,0),(1,4)]], [], [[(0,0),(1/2,1),(1,0)]], []]
+      [swells (event e) | e <- es, instrument e == "right"] === [[], [], [], [[(0,1),(1,1/2)]]]
+      [vibrato (event e) | e <- es, instrument e == "left"] === [1/4]
+      vibratoRate (instruments (performance doc) M.! "left") === 6
+      mapM_ (assert . isLeft . parseDocument . (header++))
+        ["right: glide 2 [0 4]", "right: bend 1 -> [0]", "right: bend {0:0 0} [0]", "right: vibrato 0 [0]"]
+      text <- evalEither (prettyScore (score doc))
+      again <- evalEither (parseDocument (header++"instrument left = piano staff bass vibrato-rate 6\n"++text))
+      (_, rs) <- evalEither (flatten (score again))
+      sort [(instrument e, onset e, bends (event e), swells (event e), vibrato (event e)) | e <- rs, not (null (pitches (event e)))]
+        === sort [(instrument e, onset e, bends (event e), swells (event e), vibrato (event e)) | e <- es]
+      -- MIDI: a bend sets the channel's range, then moves the bend wheel.
+      bent <- evalEither (midi perf (Line "right" (bend [(0, 0), (1, 2)] (n 0))))
+      let bytes = BL.toStrict bent
+      assert (BS.pack [0,0xb0,101,0,0,0xb0,100,0,0,0xb0,6,2] `BS.isInfixOf` bytes)
+      assert (BS.pack [0,0xe0,0,64,0,0x90,60,127] `BS.isInfixOf` bytes)
+      assert (BS.pack [1,0xe0,0,96] `BS.isInfixOf` bytes)  -- halfway: one semitone of two
+      -- A curved note never shares a channel with a note it overlaps.
+      shared <- evalEither (midi perf (Line "right" (bend [(0, 0), (1, 1)] (n 0)) :||: Line "right" (n 4)))
+      BL.take 2 (BL.drop 10 shared) === BL.pack [0,3]
+      plainBoth <- evalEither (midi perf (Line "right" (n 0) :||: Line "right" (n 4)))
+      BL.take 2 (BL.drop 10 plainBoth) === BL.pack [0,2]
+      sheet <- evalEither (engrave perf view (Line "right" (bend [(0,0),(1,4)] (n 0) <> n 4 <> addVibrato (1/4) (n 7) <> swell [(0,1),(1,1/2)] (n 9))))
+      assert (all (`isInfixOf` sheet) ["c'4\\glissando e'4", "g'4^\\markup \\italic \"vib.\"", "a'4_\\markup \\italic \"dim.\""])
+      numeric (Line "right" (bend [(0,0),(1,1)] (n 0) <> addVibrato (1/4) (n 2) <> swell [(0,1),(1,0)] (n 4) <> bend [(0,0),(1/2,1),(1,0)] (n 5)))
+        === Right "right: 0/ 2w 4> 5^\n"
+      page <- evalEither (numericPage perf (Line "right" (addVibrato (1/4) (n 2))))
+      assert ("w = vibrato" `isInfixOf` page && not ("/ = pitch" `isInfixOf` page)))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))
         doc <- evalEither (parseDocument source)
         actual <- evalEither (engrave (performance doc) (sheetView doc) (score doc))
         expected <- evalIO (readFile ("test/golden/neomusic/"++name++".ly"))
-        actual === expected) ["scale","twinkle","voices","ties","tempo"])
+        actual === expected) ["scale","twinkle","voices","ties","tempo","curves"])
   ]
