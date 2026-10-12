@@ -6,7 +6,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 
 | Design | Source | Build script | Clock |
 |---|---|---|---|
-| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh` | PLL, default 96 MHz |
+| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 93 MHz (placement mode 2) |
 | SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -304,6 +304,19 @@ vendor placement mode 0 through 4 (default 0).
 ```bash
 FREQ_MHZ=108 boards/tangnano20k/build_gowin.sh
 ```
+
+The current verified SimpleRisc build, with fetch overlap, the RAM
+load/store fast path, branch-target prefetch, decode-ahead and the register
+file in RAM ([REGFILE-2026-10-12.md](REGFILE-2026-10-12.md)), is:
+
+```bash
+GOWIN_PLACE_OPTION=2 FREQ_MHZ=93 boards/tangnano20k/build_gowin.sh
+```
+
+The UART then runs at 93,000,000 / 868 = 107,143 baud: pass `--freq-mhz 93`
+to the check scripts. Placement modes give very different results with this
+design (80-96 MHz at a 96 MHz target), and Gowin's license server refuses
+builds intermittently; retry those.
 
 The build checks the requested clock and rejects any internal setup or hold
 violation. Gowin can generate a bitstream even when timing fails; the separate

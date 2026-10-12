@@ -61,6 +61,25 @@ than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
 Next: recover CPU clock/throughput.
 See [the measured results](boards/tangnano20k/sdram/README.md).
 
+## Implementation status (2026-10-12): step 5 started
+
+Toward a pipeline, on the BRAM image:
+
+- fetch overlap;
+- a RAM load/store fast path;
+- branch-target prefetch;
+- decode-ahead (independent ALU instructions overlap: 4 cycles instead of
+  9);
+- the register file in RAM.
+
+CPI on four kernels fell from 12.98 to 8.82. The verified build is 93 MHz
+(10.5 million instructions per second against 7.4 for the serial core at
+96 MHz). The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
+with differential tests came first. See `boards/tangnano20k/` reports
+FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD and REGFILE
+(2026-10-12). The single phase state machine is now the timing limit; the
+next step is per-stage registers with forwarding.
+
 ## Implementation status (2026-10-11): step 2 complete
 
 The core has a CLINT at `0x0200_0000` (`mtime` counts core clocks), a
