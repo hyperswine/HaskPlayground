@@ -1371,8 +1371,15 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
         | otherwise = prefetched
       final = (if clearRegisters machine then targeted {cpuRegs = repeat 0, cpuRegValid = 0} else targeted)
         {cpuInterruptDue = isJust (interruptCause machine)}
-      -- (the pipeline chose its own read indices)
-   in (if cpuFast final && cpuFast machine then final else final {cpuReadIndices = registerReads final}, output)
+      -- The register file's next read: the pipeline's choice while it runs;
+      -- otherwise Decode's sources, which a pipelined machine (without the
+      -- phases' overlaps) always takes from the word FetchWait captures.
+      phasesReads = case cpuPhase machine of
+        FetchWait -> (instructionRs1 memoryWord, instructionRs2 memoryWord)
+        _ -> (instructionRs1 (cpuInstruction machine), instructionRs2 (cpuInstruction machine))
+   in ( if cpuFast final && cpuFast machine then final
+          else final {cpuReadIndices = if cpuPipelined machine then phasesReads else registerReads final},
+        output )
 
 -- | Keep time while an external memory holds the core (the SDRAM wrapper).
 tickHeld :: Machine -> Machine
@@ -1683,25 +1690,26 @@ pipeStep machine memoryWord =
       readPointer = pQueueRead pipe
       writePointer = pQueueWrite pipe
       queued = writePointer - readPointer
+      waiting = writePointer /= readPointer
       slot i = fromIntegral (i .&. 3) :: Index 4
       -- The arriving word is written at the write pointer regardless; it
       -- counts as queued unless it went straight to decode.
-      bypass = dFree && queued == 0
+      bypass = dFree && not waiting
       queue' = case arrival of
         Just a -> replace (slot writePointer) a (pQueue pipe)
         Nothing -> pQueue pipe
       writePointer' = if isJust arrival && not bypass then writePointer + 1 else writePointer
-      readPointer' = if dFree && queued /= 0 then readPointer + 1 else readPointer
+      readPointer' = if dFree && waiting then readPointer + 1 else readPointer
       nextD
         | not dFree = d
-        | queued /= 0 = Just (pQueue pipe !! slot readPointer)
+        | waiting = Just (pQueue pipe !! slot readPointer)
         | otherwise = arrival
       -- The register file is read for the word that would enter decode
       -- next (the queue head, else the arriving word), whether or not it
       -- does: no stall decision reaches the read address.
-      entering = if queued /= 0 then fWord (pQueue pipe !! slot readPointer) else memoryWord
+      entering = if waiting then fWord (pQueue pipe !! slot readPointer) else memoryWord
       enteringReads = (instructionRs1 entering, instructionRs2 entering)
-      leaving = (if dFree && queued /= 0 then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
+      leaving = (if dFree && waiting then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
       -- Words queued or in flight never exceed the queue (decided from
       -- registers); the port is free unless a store writes or a read waits.
       -- A redirect fetches its target from the next cycle.
@@ -1784,8 +1792,10 @@ cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyRes
   | not emergencyReset && cpuPipelined machine && cpuFast machine = pipeStep machine memoryWord
   -- Between instructions, with nothing for the phases to do, the pipeline
   -- takes over at the pc.
+  -- (The interrupt flag is a cycle late; the pipeline cannot commit in
+  -- its first cycles, and hands over once it is set.)
   | not emergencyReset && cpuPipelined machine && atFetch && not (cpuSlowOne machine)
-      && isNothing (interruptCause machine) =
+      && not (cpuInterruptDue machine) =
       (machine {cpuFast = True, cpuPipe = restartPipe (cpuPc machine) (cpuPipe machine)}, Nothing, (0, Nothing, Nothing))
   | otherwise =
       let (machine', write, (_, _, tx)) = cpuStepPhases decodeTarget machine memoryWord received txReady emergencyReset
