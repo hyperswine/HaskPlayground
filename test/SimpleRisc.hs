@@ -1312,7 +1312,18 @@ genProgram = do
 -- trap CSRs, scratch, mie, every RAM word either touched, and the
 -- instructions retired.
 prop_core_matches_reference_model :: Property
-prop_core_matches_reference_model = withTests 300 . property $ do
+prop_core_matches_reference_model = matchesReferenceModel P.id
+
+-- | The same with the pipeline running the ordinary instructions, as on the
+-- BRAM image.
+prop_pipeline_matches_reference_model :: Property
+prop_pipeline_matches_reference_model = matchesReferenceModel pipelined
+
+pipelined :: Machine -> Machine
+pipelined m = m {cpuPipelined = True, cpuLocalMemory = False}
+
+matchesReferenceModel :: (Machine -> Machine) -> Property
+matchesReferenceModel configure = withTests 300 . property $ do
   program <- forAll genProgram
   values <- forAll (Gen.list (Range.singleton 8) genValue)
   dataWords <- forAll (Gen.list (Range.singleton 256) (Gen.integral Range.linearBounded))
@@ -1324,10 +1335,11 @@ prop_core_matches_reference_model = withTests 300 . property $ do
       modelReg r = fromIntegral (IntMap.findWithDefault 0 r (Model.mRegs model)) :: Word32
       w :: (Integral a) => a -> Word32
       w = fromIntegral
-      (_, halted) = runUntilHalt 200000 (startSim (runningMachine [(fromIntegral r, v) | (r, v) <- regs]) (Ram 0 memory))
+      (_, halted) = runUntilHalt 200000 (startSim (configure (runningMachine [(fromIntegral r, v) | (r, v) <- regs])) (Ram 0 memory))
       -- the last register write and retirement land a cycle or two after
-      -- the pc enters the ROM; five cycles cannot commit a ROM instruction
-      drained = runInputs halted (P.replicate 5 Nothing)
+      -- the pc enters the ROM; three cycles cannot commit a ROM instruction
+      -- (the pipeline's first takes six)
+      drained = runInputs halted (P.replicate 3 Nothing)
       core = simMachine drained
       trapRegs = cpuTrapRegisters core
       coreMemory = ramWords (simRam halted)
@@ -1687,6 +1699,7 @@ simpleRiscGroup =
       ("A program reaches the I/O complex", prop_program_reaches_io_complex),
       ("SPI DMA moves blocks", prop_spi_dma_moves_blocks),
       ("Core matches the reference model on random programs", prop_core_matches_reference_model),
+      ("Pipeline matches the reference model on random programs", prop_pipeline_matches_reference_model),
       ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
       ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),
