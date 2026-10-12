@@ -1505,16 +1505,22 @@ data Pipe = Pipe
     pDFresh :: Bool,
     pE1 :: Maybe ExecuteOne,
     pE2 :: Maybe ExecuteTwo,
-    pM :: Maybe MemoryStage }
+    pM :: Maybe MemoryStage,
+    -- | A taken branch or jump left the second execute stage last cycle:
+    -- this cycle the younger stages are flushed and its target fetched.
+    pRedirect :: Maybe Word32 }
   deriving (Generic, NFDataX)
 
 emptyPipe :: Pipe
-emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing
+emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing Nothing
 
--- | Empty every stage, keeping the queue's contents (only its pointers
--- matter), and fetch from @pc@.
+-- | Empty every stage and fetch from @pc@. Only valid bits, pointers and
+-- the pc change: the stages' contents are don't-cares once empty.
 restartPipe :: Word32 -> Pipe -> Pipe
-restartPipe pc pipe = emptyPipe {pFetchPc = pc, pQueue = pQueue pipe}
+restartPipe pc pipe =
+  pipe
+    { pFetchPc = pc, pInflight = repeat Nothing, pQueueRead = 0, pQueueWrite = 0, pOutstanding = 0,
+      pD = Nothing, pDFresh = False, pE1 = Nothing, pE2 = Nothing, pM = Nothing, pRedirect = Nothing }
 
 -- | One cycle of the pipeline: fetch (up to four words outstanding), decode
 -- and register read with forwarding, two execute stages, and the commit
@@ -1602,12 +1608,14 @@ pipeStep machine memoryWord =
                 mShift = execShift control, mArith = execArithmeticShift control, mAmount = e2Op2 x,
                 mWait = if load || (store && not storeWord) then 2 else 0, mSlow = slow }
          in (stage, if not slow && taken then Just target else Nothing)
+      -- (in a redirect cycle the stage holds a wrong-path instruction)
+      flushing = pRedirect pipe
       e2Moved = case pE2 pipe of
-        Just x | e2Advance -> Just (e2Out x)
+        Just x | e2Advance && isNothing flushing -> Just (e2Out x)
         _ -> Nothing
       redirect = e2Moved >>= P.snd
       e2Reading = case pE2 pipe of
-        Just x -> e2Reads x
+        Just x -> e2Reads x && isNothing flushing
         Nothing -> False
       e2Index = maybe 0 (ramWordIndex . cAddress . e2Computed) (pE2 pipe)
       -- Execute one ------------------------------------------------------------
@@ -1698,14 +1706,19 @@ pipeStep machine memoryWord =
       -- registers); the port is free unless a store writes or a read waits.
       -- A redirect fetches its target from the next cycle.
       portBusy = mWriting || e2Reading
-      fetchPc = pFetchPc pipe
+      fetchPc = fromMaybe (pFetchPc pipe) flushing
       issue = not portBusy && pOutstanding pipe < 4
       issued = if issue then Just fetchPc else Nothing
       pipe'
         | handover = restartPipe 0 pipe
-        | otherwise = case redirect of
-            Just target -> (restartPipe target pipe) {pM = P.fst <$> e2Moved}
-            Nothing ->
+        | isJust flushing =
+            (restartPipe (if issue then fetchPc + 4 else fetchPc) pipe)
+              { pInflight = issued :> Nothing :> Nothing :> Nil,
+                pOutstanding = if issue then 1 else 0,
+                pM = case pM pipe of
+                  Just m | mHold -> Just m {mWait = mWait m - 1}
+                  _ -> Nothing }
+        | otherwise =
               Pipe
               { pFetchPc = if issue then fetchPc + 4 else fetchPc,
                 pInflight = issued :> init inflight,
@@ -1724,7 +1737,8 @@ pipeStep machine memoryWord =
                   _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
                 pM = case pM pipe of
                   Just m | mHold -> Just m {mWait = mWait m - 1}
-                  _ -> P.fst <$> e2Moved
+                  _ -> P.fst <$> e2Moved,
+                pRedirect = redirect
               }
       readAddress = if e2Reading then e2Index else memoryIndex fetchPc
       committed = case pM pipe of
