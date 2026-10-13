@@ -218,9 +218,45 @@ high-passed and shaped by `amp`, all under `pitch`; it can start only from a
 classic sound. `examples/neomusic/orchestral.neomusic` voices a whole cue this
 way.
 
+**Recorded instruments.** `sampled "file.sfz"` is a source made of recordings:
+an SFZ mapping chooses the recording for each note by its pitch, velocity and
+take (repeated notes rotate through takes). The recording is resampled to the
+pitch reaching it, so `bend`, glides and vibrato retune it, and every shaper
+works on it:
+
+```
+sound strings = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/strings.sfz"
+sound layered = sampled "vsco/violins.sfz" + gain 0.2 supersaw
+```
+
+The recordings already get louder with velocity (their layers), so apply only
+as much more as you want. Give the voice an envelope with a release, or the
+recording stops at note-off. A note outside every region is an error.
+
+- **The SFZ subset:** `<control>`, `<group>`, `<region>`; `sample`,
+  `default_path`, `pitch_keycenter`, `key`, `lokey`, `hikey`, `lovel`, `hivel`,
+  `tune`, `volume`, `loop_mode`, `loop_start`, `loop_end`, `seq_length`,
+  `seq_position`. Anything else is an error naming it.
+- **WAV formats:** 16-, 24- and 32-bit PCM or 32/64-bit float, any rate.
+- **Finding files:** an SFZ file or room is found next to the document, then
+  under each directory in `NEOMUSIC_SAMPLES` (colon-separated); its samples
+  next to the SFZ file, then the same way.
+- **Reading:** audio is read when a note first plays it, so keep the files in
+  place while rendering.
+- **The orchestra:** `examples/neomusic/vsco/` maps VSCO 2 Community Edition
+  (CC0) instruments: `strings`, `violins`, `violas`, `cellos`, `bass`,
+  `violin-pizz`, `cello-pizz`, `harp`, `flute`, `horn`, `timpani`. Its
+  `make-sfz.py` says how to get the library.
+  `examples/neomusic/orchestral-recorded.neomusic` is the orchestral cue
+  played by it.
+
 **Mix.** `reverb [hall|none] [room x] [damping x] [width x] [wet x]
 [predelay x]` sets the reverb, starting from none unless `hall` is named.
-`master [drive x] [peak x] [tail secs] [rate hz] [normalize on|off]` sets the
+`reverb space "impulse.wav" [wet x] [predelay x]` uses a recorded room
+instead: the reverb bus is convolved with the impulse response, normalised to
+unit energy, so `wet` (default 0.3) is the room's level against what is sent
+to it.
+`master [drive x] [peak x] [tail secs] [rate hz] [bits 16|24] [normalize on|off]` sets the
 master stage. Both are headers (once each) and are checked as the Haskell
 `Mix` is. Per-instrument tuning remains Haskell-only.
 
@@ -231,7 +267,8 @@ Modules, each depending only on the ones above it:
 | Module | Contents |
 |---|---|
 | `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
-| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `neomusic-voice.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
+| `NeoMusic.Recording` | WAV reading (`Recording`, read on first use) and SFZ instruments (`SampleSet`, `Region`, `parseSfz`, `readSampleSet`) |
+| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`, `Sampled`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `neomusic-voice.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names

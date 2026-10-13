@@ -14,8 +14,13 @@ import System.IO (hClose)
 import NeoMusic.Audio
   ( Contour(..), Mix(..), Mod(..), Osc(..), Patch(..), Note(..), Timeline(..), Voice(..), Wave(..)
   , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep
-  , pcmWav, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
-  , squarePatch, subBass, supersaw, validPatch, validVoice )
+  , pcmWav, pcmWavBits, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
+  , squarePatch, subBass, supersaw, validPatch, validVoice, Room(..) )
+import qualified Data.Map.Strict as Map
+import NeoMusic.Recording (Recording(..), Region(..), SampleSet(..), parseSfz, readRecording, readSampleSet)
+import Control.Exception (evaluate)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
 import NeoMusic.Pitch (Step(..), Tuning(..), equalTemperament, freq)
 import NeoMusic.Score
   ( Performance(..), Score(..), defaultInstrument, defaultPerformance, hit, n, render, rest )
@@ -28,11 +33,18 @@ perfWith t p speed = defaultPerformance
 
 -- | A dry, unnormalised render of single notes of a voice, straight from the engine.
 voiceRender :: Int -> Double -> [Note] -> Either String (VU.Vector Double, VU.Vector Double)
-voiceRender rate total = renderTimelineMix (Mix rate noReverb 0 0.8 0 False) . Timeline total
+voiceRender rate total = renderTimelineMix (Mix rate noReverb 0 0.8 0 False Nothing 16) . Timeline total
 
 -- | One note of a voice: start, Hz, seconds, velocity.
 voiceNote :: Voice -> Double -> Double -> Double -> Double -> Note
 voiceNote v t f d vel = Note t f d v vel 1 0 0 (Flat 0) (Flat 1)
+
+-- | A recording's audio is read on first use; these tests read it before
+-- their temporary files go.
+used :: Either String Recording -> IO (Either String Recording)
+used r = do
+  either (const (pure ())) (mapM_ (evaluate . VU.length) . recordingAudio) r
+  pure r
 
 -- | Mean square over a span of samples.
 meanSquare :: VU.Vector Double -> Int -> Int -> Double
@@ -228,4 +240,76 @@ neoMusicGroup = Group "NeoMusic audio engine"
       mapM_ (assert . isLeft . validVoice)
         [ Tone NoiseWave, Plucked 0 0.5, Plucked 1 2, Bandpass (K 1) 0 (Tone SineWave), Pan (K 2) Noise
         , Lowpass (K 1) 1 Noise, Unison 0 0 0 Noise, Gain (Linear 0 1 0) Noise, Classic sinePatch {resonance = 1} ])
+    , ("recordings: WAV, SFZ, layers, takes, rooms", withTests 1 $ property $ do
+      -- WAV at 16 and 24 bits reads back to within its step.
+      let tone amp f = VU.generate 11025 (\i -> amp * sin (2 * pi * f * fromIntegral i / 22050))
+          original = tone 0.8 220
+      back <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        pcmWavBits 16 (dir </> "a.wav") 22050 [original, VU.map negate original]
+        pcmWavBits 24 (dir </> "b.wav") 22050 [original]
+        a <- readRecording (dir </> "a.wav") >>= used
+        b <- readRecording (dir </> "b.wav") >>= used
+        pure (a, b)
+      (r16, r24) <- evalEither (either Left (\a -> (,) a <$> snd back) (fst back))
+      (recordingRate r16, recordingFrames r16, length (recordingAudio r16), recordingFrames r24) === (22050, 11025, 2, 11025)
+      let worst xs = VU.maximum (VU.zipWith (\x y -> abs (realToFrac x - y)) xs original)
+      case recordingAudio r16 of
+        (l : _) -> assert (worst l < 2 / 32767)   -- written at 32767 per unit, read at 32768
+        [] -> failure
+      case recordingAudio r24 of
+        (m : _) -> assert (worst m < 2 / 8388607)
+        [] -> failure
+      -- SFZ: values with spaces, headers inline, group opcodes inherited,
+      -- note names; anything outside the subset is an error naming it.
+      regions <- evalEither (parseSfz (unlines
+        [ "// a comment", "<control> default_path=My Folder/"
+        , "<group> lovel=1 hivel=64 <region> sample=a b.wav key=c4"
+        , "<region> sample=c.wav lokey=c#4 hikey=72 // trailing" ]))
+      regions === [ Map.fromList [("default_path", "My Folder/"), ("lovel", "1"), ("hivel", "64"), ("sample", "a b.wav"), ("key", "c4")]
+                  , Map.fromList [("default_path", "My Folder/"), ("lovel", "1"), ("hivel", "64"), ("sample", "c.wav"), ("lokey", "c#4"), ("hikey", "72")] ]
+      assert (either (elem "amp_veltrack" . words) (const False) (parseSfz "<region> sample=a.wav amp_veltrack=0"))
+      assert (isLeft (parseSfz "<curve> v=1"))
+      -- An instrument: a 220 Hz recording as A3, two velocity layers (soft and
+      -- loud), and two takes of the loud one.
+      set <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        pcmWavBits 16 (dir </> "soft.wav") 22050 [tone 0.1 220]
+        pcmWavBits 16 (dir </> "loud1.wav") 22050 [tone 0.6 220]
+        pcmWavBits 16 (dir </> "loud2.wav") 22050 [tone 0.9 220, tone 0.9 220]
+        writeFile (dir </> "inst.sfz") $ unlines
+          [ "<group> pitch_keycenter=57 lokey=50 hikey=64"
+          , "<region> sample=soft.wav lovel=1 hivel=63"
+          , "<region> sample=loud1.wav lovel=64 seq_length=2 seq_position=1"
+          , "<region> sample=loud2.wav lovel=64 seq_length=2 seq_position=2" ]
+        loaded <- readSampleSet [] (dir </> "inst.sfz")
+        mapM_ (mapM_ (used . Right . regionRecording) . setRegions) loaded
+        pure loaded
+      instrument <- evalEither set
+      length (setRegions instrument) === 3
+      let at t f v = voiceNote (Sampled instrument) t f 0.4 v
+          peak xs from = VU.maximum (VU.map abs (VU.slice from 4000 xs))
+      -- Retuned by resampling: B3 from the A3 recording.
+      (b3, _) <- evalEither (voiceRender 44100 0.5 [at 0 246.94 1])
+      assert (abs (44100 / fromIntegral (period b3 2000 4000 150 210) / 246.94 - 1) < 0.005)
+      -- Velocity picks the layer; repeats of a pitch rotate its takes.
+      (played, _) <- evalEither (voiceRender 22050 2 [at 0 220 0.2, at 0.5 220 0.9, at 1 220 0.9, at 1.5 220 0.9])
+      let peaks = [peak played (round (t * 22050) + 500) | t <- [0, 0.5, 1, 1.5 :: Double]]
+      annotateShow peaks
+      assert (and (zipWith (\x y -> abs (x - y) < 0.01) peaks [0.1, 0.9, 0.6, 0.9]))
+      -- A note no recording covers is an error, not silence.
+      assert (isLeft (voiceRender 22050 1 [at 0 1000 0.5]))
+      -- A recorded room: a delta (with a quieter echo 100 samples later)
+      -- normalised to unit energy, convolved with the send bus exactly.
+      impulse <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        pcmWavBits 16 (dir </> "room.wav") 8000 [VU.generate 200 (\i -> if i == 0 then 0.8 else if i == 100 then 0.4 else 0)]
+        readRecording (dir </> "room.wav") >>= used
+      room <- evalEither impulse
+      let sent = (voiceNote (Tone SineWave) 0 220 0.3 1) {send = 1}
+          mixWith r = Mix 8000 noReverb 0 0.8 0 False r 16
+      (dry, _) <- evalEither (renderTimelineMix (mixWith Nothing) (Timeline 0.5 [sent]))
+      (wet, _) <- evalEither (renderTimelineMix (mixWith (Just (Room room 1 0))) (Timeline 0.5 [sent]))
+      -- The taps are 2:1 after 16-bit rounding (26214 and 13107), so at unit energy 2/sqrt 5 and 1/sqrt 5.
+      let expected = VU.imap (\i x -> x + 2 / sqrt 5 * x + (if i >= 100 then VU.unsafeIndex dry (i - 100) / sqrt 5 else 0)) dry
+      annotateShow (VU.maximum (VU.map abs (VU.zipWith (-) wet expected)))
+      assert (VU.maximum (VU.map abs (VU.zipWith (-) wet expected)) < 1e-9)
+      assert (isLeft (renderTimelineMix (Mix 8000 hall 0 0.8 0 False (Just (Room room 1 0)) 16) (Timeline 0.5 [sent]))))
   ]

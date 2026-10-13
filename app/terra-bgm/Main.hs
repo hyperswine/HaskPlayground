@@ -156,7 +156,7 @@ performance = Performance 144 (M.fromList
  , inst "hat" hat 0.095 0.2 0
  , inst "cymbal" cymbal 0.12 (-0.35) 0.22
  , inst "bridgeKeys" piano 0.19 (-0.1) 0.3 ])
- (Mix 44100 (hall { roomSize=0.67, wet=0.23 }) 0.35 0.86 1.2 True)
+ (Mix 44100 (hall { roomSize=0.67, wet=0.23 }) 0.35 0.86 1.2 True Nothing 16)
  where inst name patch g p s = (name, defaultInstrument {S.tuning = tune, S.timbre = Classic patch, S.gain = g, S.pan = p, S.send = s})
 
 check :: IO ()

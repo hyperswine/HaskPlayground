@@ -5,7 +5,9 @@
 -- prelude of ordinary definitions ("NeoMusic.Prelude") is read before every
 -- document; a document's own definitions shadow it. See neomusic-prelude.md.
 module NeoMusic.Language
-  ( Document(..), SheetView(..), Staff(..), parseDocument, parseSounds, prettyScore, pitchNumber ) where
+  ( Document(..), SheetView(..), Staff(..), Assets(..), noAssets
+  , parseDocument, parseDocumentWith, documentAssets, loadDocument
+  , parseSounds, parseSoundsWith, prettyScore, pitchNumber ) where
 
 import Control.Monad (foldM, forM_, unless, void, when)
 import Data.Char (isSpace)
@@ -15,6 +17,8 @@ import Data.Ratio ((%), numerator, denominator)
 import qualified NeoMusic.Audio as A
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Prelude (preludeSource)
+import NeoMusic.Recording (Recording, SampleSet, findFile, readRecording, readSampleSet)
+import System.FilePath (takeDirectory)
 import NeoMusic.Score
 import Text.Parsec hiding (Line, label, token)
 import Text.Parsec.String (Parser)
@@ -230,12 +234,57 @@ data SoundPart = SOsc A.Osc | SAmp A.Mod | SPitch A.Mod | SCutoff A.Mod
 -- (neomusic-sounds.md), or a voice expression (neomusic-voice.md).
 data SoundDef = ClassicSound (Maybe Name) [SoundPart] | VoiceSound VoiceE
 
--- | A voice expression, with the sounds it names still to be looked up.
-data VoiceE = VLeaf A.Voice | VWrap (A.Voice -> A.Voice) VoiceE | VMix VoiceE VoiceE | VRef Name
+-- | A voice expression, with the sounds and recordings it names still to be
+-- looked up.
+data VoiceE = VLeaf A.Voice | VWrap (A.Voice -> A.Voice) VoiceE | VMix VoiceE VoiceE | VRef Name | VSampled FilePath
 
 -- | The words of a voice expression, which no sound may be named.
 voiceWords :: [String]
-voiceWords = ["tone","noise","plucked","gain","bend","lowpass","highpass","bandpass","unison","pan"]
+voiceWords = ["tone","noise","plucked","sampled","gain","bend","lowpass","highpass","bandpass","unison","pan"]
+
+-- | The recordings a document uses, loaded ('loadDocument'), by the paths it
+-- writes: instruments (SFZ files) and rooms (impulse responses).
+data Assets = Assets { sampleSets :: M.Map FilePath SampleSet, rooms :: M.Map FilePath Recording }
+
+noAssets :: Assets
+noAssets = Assets M.empty M.empty
+
+-- | A quoted path: @"halls/st george.wav"@.
+quoted :: Parser String
+quoted = lexeme (char '"' *> many1 (noneOf "\"\n") <* char '"')
+
+-- | The recordings a document names: SFZ files in sounds, impulse responses in
+-- @reverb space@.
+documentAssets :: String -> Either String ([FilePath], [FilePath])
+documentAssets input = do
+  let ls = sourceLines input
+  defs <- mapM (\(i, s) -> runLine i soundParser s) [(i, s) | (i, s) <- ls, takeWord s == "sound"]
+  roomPaths <- mapM (\(i, s) -> runLine i (keyword "reverb" *> optionMaybe (keyword "space" *> quoted) <* many anyChar) s)
+              [(i, s) | (i, s) <- ls, takeWord s == "reverb"]
+  let paths e = case e of
+        VSampled p -> [p]
+        VWrap _ x -> paths x
+        VMix a b -> paths a ++ paths b
+        _ -> []
+  pure (nub (concat [paths e | (_, VoiceSound e) <- defs]), nub [p | Just p <- roomPaths])
+
+-- | Read a document and the recordings it names. Each is found relative to
+-- the document, then under each search directory (neo-music passes
+-- @NEOMUSIC_SAMPLES@).
+loadDocument :: [FilePath] -> FilePath -> IO (Either String Document)
+loadDocument dirs path = do
+  input <- readFile path
+  case documentAssets input of
+    Left e -> pure (Left e)
+    Right (sets, roomFiles) -> do
+      let locate p = maybe (Left ("recording not found: " ++ p ++ " (searched next to the document and in NEOMUSIC_SAMPLES)")) Right
+                       <$> findFile (takeDirectory path) dirs p
+      loadedSets <- mapM (\p -> locate p >>= either (pure . Left) (readSampleSet dirs) >>= pure . fmap ((,) p)) sets
+      loadedRooms <- mapM (\p -> locate p >>= either (pure . Left) readRecording >>= pure . fmap ((,) p)) roomFiles
+      pure $ do
+        ss <- sequence loadedSets
+        rs <- sequence loadedRooms
+        parseDocumentWith (Assets (M.fromList ss) (M.fromList rs)) input
 
 -- | @sound NAME [from BASE] parts...@ or @sound NAME = voice@.
 soundParser :: Parser (Name, SoundDef)
@@ -271,6 +320,7 @@ voiceTerm = between (symbol "(") (symbol ")") voiceP
   <|> (keyword "tone" *> (VLeaf . A.Tone <$> waveP))
   <|> (VLeaf A.Noise <$ keyword "noise")
   <|> (keyword "plucked" *> (VLeaf <$> (A.Plucked <$> constant <*> constant)))
+  <|> (keyword "sampled" *> (VSampled <$> quoted))
   <|> (keyword "gain" *> (VWrap . A.Gain <$> modAtom <*> voiceTerm))
   <|> (keyword "bend" *> (VWrap . A.Bend <$> modAtom <*> voiceTerm))
   <|> (keyword "lowpass" *> ((\m r -> VWrap (A.Lowpass m r)) <$> modAtom <*> constant <*> voiceTerm))
@@ -334,8 +384,8 @@ constant = modAtom >>= \m -> case m of
 -- | Resolve a file's sounds: a classic sound from its base (another sound in
 -- the file or a preset; without @from@, the built-in @basic@), a voice from
 -- the sounds it names. In any order, but without cycles.
-resolveSounds :: [(Int, (Name, SoundDef))] -> Either String (M.Map Name A.Voice)
-resolveSounds defs = do
+resolveSounds :: Assets -> [(Int, (Name, SoundDef))] -> Either String (M.Map Name A.Voice)
+resolveSounds assets defs = do
   let names = [name | (_, (name, _)) <- defs]
   unless (length names == length (nub names)) (Left "duplicate sound")
   forM_ names $ \name -> when (name `elem` voiceWords) (Left ("a sound cannot be named " ++ name))
@@ -363,6 +413,8 @@ resolveSounds defs = do
         VWrap f x -> f <$> voiceOf lookupSound x
         VMix a b -> (A.:&) <$> voiceOf lookupSound a <*> voiceOf lookupSound b
         VRef other -> lookupSound other
+        VSampled p -> maybe (Left ("recordings are not loaded: " ++ p ++ " (read the document with loadDocument, as neo-music does)"))
+                        (Right . A.Sampled) (M.lookup p (sampleSets assets))
   M.fromList <$> mapM (\name -> (,) name <$> resolve [] name) names
 
 -- | A base sound with its parts replaced. Any @osc@ lines replace all the base's
@@ -388,10 +440,13 @@ applyParts base parts = do
 
 -- | The sounds a file defines (not the presets), by name.
 parseSounds :: String -> Either String (M.Map Name A.Voice)
-parseSounds input = do
+parseSounds = parseSoundsWith noAssets
+
+parseSoundsWith :: Assets -> String -> Either String (M.Map Name A.Voice)
+parseSoundsWith assets input = do
   let ls = sourceLines input
   defs <- mapM (\(i, s) -> (,) i <$> runLine i soundParser s) [(i, s) | (i, s) <- ls, takeWord s == "sound"]
-  resolveSounds defs
+  resolveSounds assets defs
 
 -- | Parse a file's definitions. @outer@ gives the kinds of functions defined
 -- outside it (the prelude, for a document); the file's own names shadow them.
@@ -416,12 +471,16 @@ parseDefinitions fromPrelude outer ls = do
 prelude :: Either String (M.Map Name Definition, M.Map Name [Bool])
 prelude = either (Left . ("prelude: " ++)) Right (parseDefinitions True M.empty (sourceLines preludeSource))
 
+-- | A document without recordings ('loadDocument' reads one with them).
 parseDocument :: String -> Either String Document
-parseDocument input = do
+parseDocument = parseDocumentWith noAssets
+
+parseDocumentWith :: Assets -> String -> Either String Document
+parseDocumentWith assets input = do
   (fromPreludeDefs, preludeKinds) <- prelude
   let ls = sourceLines input
   (defs, kinds) <- parseDefinitions False preludeKinds ls
-  sounds <- (`M.union` M.map A.Classic presets) <$> parseSounds input
+  sounds <- (`M.union` M.map A.Classic presets) <$> parseSoundsWith assets input
   let nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
       initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
       env = Env defs fromPreludeDefs False M.empty []
@@ -459,8 +518,8 @@ parseDocument input = do
         "sound" -> pure unchanged  -- read with all the sounds, before any instrument
         "reverb" -> do
           singleton first
-          rv <- runLine line reverbParser s >>= id
-          let m = (mix p) {A.mixReverb = rv}
+          (rv, room) <- runLine line reverbParser s >>= id
+          let m = (mix p) {A.mixReverb = rv, A.mixRoom = room}
           either (Left . (("line " ++ show line ++ ": ") ++)) Right (A.validMix m)
           pure (p {mix = m},v,t,vs,first:seen)
         "master" -> do
@@ -488,19 +547,31 @@ parseDocument input = do
         A.equalTemperament (440 * 2 ** (fromIntegral (midi-69)/12)) edo)
       <|> (do base <- number; keyword "hz"; r <- number; pure (Right (A.Tuning base r)))
     -- reverb [hall|none] [room x] [damping x] [width x] [wet x] [predelay x]
+    -- or: reverb space "impulse.wav" [wet x] [predelay x], a recorded room
     reverbParser = do
       keyword "reverb"
-      base <- option A.noReverb ((A.hall <$ keyword "hall") <|> (A.noReverb <$ keyword "none"))
+      recorded <- optionMaybe (keyword "space" *> quoted)
+      base <- if recorded /= Nothing then pure A.noReverb
+              else option A.noReverb ((A.hall <$ keyword "hall") <|> (A.noReverb <$ keyword "none"))
       fields <- many ((,) <$> ident <*> constant)
       pure $ do
         unless (length (map fst fields) == length (nub (map fst fields))) (Left "duplicate reverb setting")
-        foldM (\rv (field, x) -> case field of
-          "room" -> Right rv {A.roomSize = x}
-          "damping" -> Right rv {A.damping = x}
-          "width" -> Right rv {A.width = x}
-          "wet" -> Right rv {A.wet = x}
-          "predelay" -> Right rv {A.preDelay = x}
-          _ -> Left ("unknown reverb setting: " ++ field)) base fields
+        case recorded of
+          Nothing -> (\rv -> (rv, Nothing)) <$> foldM (\rv (field, x) -> case field of
+            "room" -> Right rv {A.roomSize = x}
+            "damping" -> Right rv {A.damping = x}
+            "width" -> Right rv {A.width = x}
+            "wet" -> Right rv {A.wet = x}
+            "predelay" -> Right rv {A.preDelay = x}
+            _ -> Left ("unknown reverb setting: " ++ field)) base fields
+          Just path -> do
+            impulse <- maybe (Left ("recordings are not loaded: " ++ path ++ " (read the document with loadDocument, as neo-music does)"))
+                         Right (M.lookup path (rooms assets))
+            room <- foldM (\r (field, x) -> case field of
+              "wet" -> Right r {A.roomWet = x}
+              "predelay" -> Right r {A.roomPreDelay = x}
+              _ -> Left ("a recorded room takes only wet and predelay, not " ++ field)) (A.Room impulse 0.3 0.02) fields
+            Right (A.noReverb, Just room)
     -- master [drive x] [peak x] [tail x] [rate n] [normalize on|off]
     masterParser m0 = do
       keyword "master"
@@ -512,6 +583,7 @@ parseDocument input = do
           "peak" -> (\x -> m {A.mixPeak = x}) <$> runLine 0 number value
           "tail" -> (\x -> m {A.mixTail = x}) <$> runLine 0 number value
           "rate" -> (\x -> m {A.mixRate = x}) <$> runLine 0 integer value
+          "bits" -> (\x -> m {A.mixBits = x}) <$> runLine 0 integer value
           "normalize" -> case value of
             "on" -> Right m {A.mixNormalize = True}
             "off" -> Right m {A.mixNormalize = False}

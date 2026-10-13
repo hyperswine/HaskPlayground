@@ -1,0 +1,55 @@
+-- "Old Kingdom" with recorded instruments: the same cue as orchestral.neomusic,
+-- played by VSCO 2 Community Edition (CC0) recordings of a real orchestra.
+-- Needs the library: see examples/neomusic/vsco/make-sfz.py, and set
+-- NEOMUSIC_SAMPLES to the directory that holds VSCO-2-CE.
+tempo 90
+tuning 12 at C4
+meter 4
+
+-- Each sound is its recordings, chosen by pitch and velocity, under an
+-- envelope that lets them ring into the room after note-off. The recordings
+-- already get louder and brighter with velocity (two to four layers); the
+-- gain adds a little more, so a crescendo also moves within a layer.
+sound strings = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.9) sampled "vsco/strings.sfz"
+sound pizz    = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1) sampled "vsco/cello-pizz.sfz"
+sound harp    = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/harp.sfz"
+sound flute   = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.4) sampled "vsco/flute.sfz"
+sound horn    = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.5) sampled "vsco/horn.sfz"
+sound timpani = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
+reverb hall room 0.9 wet 0.45 predelay 0.03
+master peak 0.89 tail 3 rate 48000 bits 24
+
+instrument strings = strings gain 0.95 send 0.6
+instrument pizz    = pizz gain 1.4 pan -0.2 send 0.4
+instrument harp    = harp gain 3.3 pan 0.35 send 0.5
+instrument flute   = flute gain 3 pan 0.2 send 0.45
+instrument horn    = horn gain 0.7 pan -0.15 send 0.55
+instrument timp    = timpani gain 3.6 send 0.5
+
+-- Chords, voiced around middle C (0).
+Dm = (-10 -3 2 5)
+Bb = (-14 -7 2 5)
+F  = (-7 0 5 9)
+C  = (-12 -5 4 7)
+Gm = (-17 -10 -2 2)
+A  = (-15 -8 1 4)
+prog1 = Dm:4 Bb:4 F:4 C:4
+prog2 = Gm:4 Dm:4 Bb:4 A:4
+
+pz #r = r _ r _
+arpm #r = [r [r + 7] [r + 12] [r + 15] [r + 19] [r + 15] [r + 12] [r + 7]]:1/2
+arpM #r = [r [r + 7] [r + 12] [r + 16] [r + 19] [r + 16] [r + 12] [r + 7]]:1/2
+
+tune = 14:2 [17 16]:1/2 14   17:3 14   21:2 19 17   16:3 12
+       14:2 [17 19]:1/2 21   22:2 21 19   21 [19 17]:1/2 16 17   16:4
+echo2 = vel 0.6 [21:2 19 17  16:4  17 16 14 13  14:4]
+hornTune = -5:2 -2 2   5:3 2   2:2 0 -2   1:4
+           -5:2 -2 2   5 7 9 5   4:2 1:2   2:4
+roll = cresc 0.3 0.9 [[-15:1/4]*16]      -- one crescendo across the whole roll
+
+strings: prog1 prog1 cresc 1/3 1 [prog2] rit 2/3 [Gm:4 Dm:4 A:4 hold 2 [Dm:4]]
+pizz:    [pz -22 pz -26 pz -19 pz -24]*2 pz -17 pz -22 pz -26 pz -15 pz -17 pz -22 pz -15 -22:4
+harp:    [arpm -10 arpM -14 arpM -7 arpM -12]*2 arpm -17 arpm -10 arpM -14 arpM -15 _:16
+flute:   tune _:16 echo2
+horn:    _:32 hornTune
+timp:    -22:4 _:12 -22:4 _:12 _:12 roll -22:4 _:4 -15:4 -22:4

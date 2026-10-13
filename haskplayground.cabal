@@ -87,6 +87,7 @@ library
       , NeoMusic.Numeric
       , NeoMusic.Pitch
       , NeoMusic.Prelude
+      , NeoMusic.Recording
       , NeoMusic.Score
       , NeoMusic.Sheet
       , NeoMusic.Signal

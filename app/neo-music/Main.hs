@@ -7,7 +7,7 @@ import NeoMusic.Midi (midi)
 import NeoMusic.Numeric (NumericView (..), numericHtml, numericPage, plain)
 import NeoMusic.Sheet (engrave)
 import qualified NeoMusic.Score as S
-import System.Environment (getArgs)
+import System.Environment (getArgs, lookupEnv)
 import System.Directory (findExecutable)
 import System.FilePath (dropExtension, takeExtension)
 import System.Process (callProcess)
@@ -29,8 +29,16 @@ main = do
       putStrLn (show (length (A.notes timeline))++" notes, "++show (A.seconds timeline)++" seconds")
     _ -> die "usage: neo-music {play|midi|sheet|hybrid|staff} song.neomusic -o output [sheet/hybrid: --marks] [staff: --pdf --no-numbers]\n       neo-music check song.neomusic"
 
+-- | A document with the recordings it names, found next to it or under each
+-- directory in NEOMUSIC_SAMPLES (separated by colons).
 readDocument :: FilePath -> IO Document
-readDocument path = readFile path >>= orDie . parseDocument
+readDocument path = do
+  dirs <- maybe [] (splitOn ':') <$> lookupEnv "NEOMUSIC_SAMPLES"
+  loadDocument dirs path >>= orDie
+  where
+    splitOn c xs = case break (== c) xs of
+      (a, []) -> [a | not (null a)]
+      (a, _ : rest) -> [a | not (null a)] ++ splitOn c rest
 orDie :: Either String a -> IO a
 orDie = either die pure
 run :: String -> FilePath -> FilePath -> [String] -> IO ()

@@ -185,7 +185,7 @@ score = together (map snd layers)
 mix :: Mix
 mix = Mix
   { mixRate = 44100, mixReverb = hall { roomSize = 0.82, wet = 0.45 }
-  , mixDrive = 1.8, mixPeak = 0.89, mixTail = 0, mixNormalize = True }
+  , mixDrive = 1.8, mixPeak = 0.89, mixTail = 0, mixNormalize = True, mixRoom = Nothing, mixBits = 16 }
 
 performance :: S.Performance
 performance = S.Performance 96 (M.fromList registry) mix

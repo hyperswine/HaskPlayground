@@ -4,6 +4,7 @@
 module NeoMusic.Audio
   ( -- * Voices
     Voice(..), validVoice, percussive, expandClassic
+  , Recording, SampleSet, Room(..)
     -- * Patches
   , Wave(..), Osc(..), Patch(..), validPatch
     -- * Modulation
@@ -14,10 +15,11 @@ module NeoMusic.Audio
   , Note(..), Timeline(..), Contour(..), note, contourAt, contourBounds
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
-  , renderTimelineMix, writeTimelineMix, pcmWav, exportAs
+  , renderTimelineMix, writeTimelineMix, pcmWav, pcmWavBits, exportAs
   ) where
 
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM, forM_, unless, when)
+import Data.List (sortOn)
 import Control.Monad.ST (ST, runST)
 import Data.STRef (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Bits (shiftL, shiftR, xor)
@@ -32,6 +34,9 @@ import System.FilePath (takeExtension)
 import System.IO (hClose)
 import System.IO.Temp (withSystemTempFile)
 import System.Process (callProcess)
+import Data.Bits ((.&.), (.|.), countTrailingZeros)
+import qualified Data.Map.Strict as M
+import NeoMusic.Recording (Recording (..), Region (..), SampleSet (..), chooseRegions, recordedPitch)
 
 data Wave = SineWave | SawWave | SquareWave | TriangleWave | NoiseWave deriving (Eq, Show)
 
@@ -321,6 +326,7 @@ data Voice
   | Pan Mod Voice                  -- ^ stereo position, -1..1
   | Voice :& Voice                 -- ^ mixed
   | Classic Patch                  -- ^ the subtractive voice: see 'expandClassic'
+  | Sampled SampleSet              -- ^ recordings, chosen by pitch, velocity and take
   deriving (Eq, Show)
 infixl 6 :&
 
@@ -329,10 +335,10 @@ infixl 6 :&
 -- amplitude, all under the patch's pitch. The engine plays 'Classic' patches by
 -- a faster route that a test holds to this expansion.
 expandClassic :: Patch -> Voice
-expandClassic p = bent (Gain (amp p) (highpassed (Lowpass (cutoff p) (resonance p) mixed)))
+expandClassic p = bent (Gain (amp p) (withHighpass (Lowpass (cutoff p) (resonance p) mixed)))
   where
     bent v = if pitch p == K 0 then v else Bend (pitch p) v
-    highpassed v = if highpass p > 0 then Highpass (cutoffHz (highpass p)) v else v
+    withHighpass v = if highpass p > 0 then Highpass (cutoffHz (highpass p)) v else v
     mixed = case map oscillator (oscillators p) of
       [] -> Gain (K 0) (Tone SineWave)
       vs -> foldr1 (:&) vs
@@ -368,6 +374,7 @@ validVoice voice = case voice of
     validVoice v
   a :& b -> validVoice a >> validVoice b
   Classic p -> validPatch p
+  Sampled set -> unless (not (null (setRegions set))) (Left (setPath set ++ ": no regions"))
   where modOk m = unless (validMod m) (Left "voice modulations need finite values and positive times")
 
 -- | Unpitched: every part is. Noise is unpitched, and so is everything under a
@@ -387,6 +394,7 @@ percussive voice = case voice of
   Pan _ v -> percussive v
   a :& b -> percussive a && percussive b
   Classic p -> percussive (expandClassic p)
+  Sampled _ -> False
 
 -- | How long a voice sounds after note-off: its longest amplitude release
 -- (at least 2 ms, so a note never stops on a click).
@@ -495,7 +503,15 @@ data Reverb = Reverb
 -- 'mixTail' seconds are appended after the last release, for reverb decay.
 data Mix = Mix
   { mixRate :: Int, mixReverb :: Reverb, mixDrive :: Double
-  , mixPeak :: Double, mixTail :: Double, mixNormalize :: Bool }
+  , mixPeak :: Double, mixTail :: Double, mixNormalize :: Bool
+  , mixRoom :: Maybe Room   -- ^ a recorded room, in place of the algorithmic reverb
+  , mixBits :: Int }        -- ^ export depth, 16 or 24
+  deriving (Eq, Show)
+
+-- | A recorded room: the send bus is convolved with its impulse response,
+-- normalised to unit energy per channel, so 'roomWet' is the room's level
+-- against the sound sent to it.
+data Room = Room { roomImpulse :: Recording, roomWet :: Double, roomPreDelay :: Double }
   deriving (Eq, Show)
 
 noReverb :: Reverb
@@ -514,10 +530,17 @@ validMix mix = do
     (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
   unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
     (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
+  unless (mixBits mix `elem` [16, 24]) (Left "export depth must be 16 or 24 bits")
+  case mixRoom mix of
+    Nothing -> pure ()
+    Just room -> do
+      unless (wet rv == 0) (Left "a mix has one reverb: a recorded room or the algorithmic reverb, not both")
+      unless (nonNegative (roomWet room) && nonNegative (roomPreDelay room)) (Left "room wet and pre-delay must be nonnegative")
+      unless (recordingFrames (roomImpulse room) > 0) (Left "a room's impulse response is empty")
 
 -- | Dry, normalised to a 0.8 peak, no tail.
 defaultMix :: Int -> Mix
-defaultMix rate = Mix rate noReverb 0 0.8 0 True
+defaultMix rate = Mix rate noReverb 0 0.8 0 True Nothing 16
 
 
 -- | Stereo render. Each note is synthesised only over its own span into
@@ -544,17 +567,24 @@ renderTimelineMix mix (Timeline total ns) = do
   let end = maximum (total : [start v + duration v + voiceTail (sound v) | v <- ns]) + mixTail mix
   unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
     (Left "rendered sample count exceeds platform range")
+  let takes = takeNumbers ns
+  forM_ (zip takes ns) $ \(k, v) -> forM_ (reaching (duration v) (velocity v) (hz v) (sound v)) $ \(set, f) ->
+    when (null (chooseRegions set k (velocity v) f)) (Left (setPath set ++ ": nothing recorded for key "
+      ++ show (round (69 + 12 * logBase 2 (f / 440)) :: Int) ++ " at velocity " ++ show (max 1 (round (velocity v * 127)) :: Int)))
   let len = ceiling (end * fr) :: Int
       (outL, outR) = runST $ do
         left <- MV.replicate len 0
         right <- MV.replicate len 0
         sends <- MV.replicate len 0
-        forM_ (zip [1 ..] ns) $ \(seed, v) -> renderNote fr seed v left right sends
+        forM_ (zip3 [1 ..] takes ns) $ \(seed, k, v) -> renderNote fr seed k v left right sends
         dryL <- VU.unsafeFreeze left
         dryR <- VU.unsafeFreeze right
         sendBus <- VU.unsafeFreeze sends
-        let (wetL, wetR) = freeverb fr rv sendBus
-            withWet dry w = if wet rv > 0 then VU.zipWith (+) dry w else dry
+        let (wetL, wetR) = case mixRoom mix of
+              Nothing -> freeverb fr rv sendBus
+              Just room -> roomReverb fr room sendBus
+            reverbOn = wet rv > 0 || maybe False ((> 0) . roomWet) (mixRoom mix)
+            withWet dry w = if reverbOn then VU.zipWith (+) dry w else dry
         pure (master mix (withWet dryL wetL) (withWet dryR wetR))
   when (VU.any (not . finite) outL || VU.any (not . finite) outR) (Left "synthesis produced a nonfinite sample")
   pure (outL, outR)
@@ -573,10 +603,39 @@ sampleRange :: Double -> Int -> Double -> Double -> (Int, Int)
 sampleRange fr len t0 t1 = (max 0 (ceiling (t0 * fr)), min len (ceiling (t1 * fr)))
 
 -- | A classic patch takes the fast path; any other voice, the general one.
-renderNote :: Double -> Word32 -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
-renderNote fr seed v = case sound v of
+renderNote :: Double -> Word32 -> Int -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderNote fr seed takeNumber v = case sound v of
   Classic p -> renderSynth fr seed v p
-  voice -> renderVoice fr seed v voice
+  voice -> renderVoice fr seed takeNumber v voice
+
+-- | Each note's take: how many notes at its pitch (to the nearest key) began
+-- before it, so repeated notes rotate through a recording's takes.
+takeNumbers :: [Note] -> [Int]
+takeNumbers ns = map snd (sortOn fst (snd (foldl count (M.empty, []) (sortOn (start . snd) (zip [0 :: Int ..] ns)))))
+  where
+    count (seen, acc) (i, v) =
+      let key = round (12 * logBase 2 (hz v / 440)) :: Int
+          k = M.findWithDefault 0 key seen
+      in (M.insert key (k + 1) seen, (i, k) : acc)
+
+-- | Every recorded instrument in a voice, with the frequency reaching it at
+-- note-on (through the bends and unison copies above it).
+reaching :: Double -> Double -> Double -> Voice -> [(SampleSet, Double)]
+reaching gate vel = go
+  where
+    go f voice = case voice of
+      Sampled set -> [(set, f)]
+      Gain _ v -> go f v
+      Bend m v -> go (f * 2 ** (evalPrepared gate (prepare gate vel m) 0 (keyOf f) / 12)) v
+      Lowpass _ _ v -> go f v
+      Highpass _ v -> go f v
+      Bandpass _ _ v -> go f v
+      Unison n c _ v
+        | n <= 1 -> go f v
+        | otherwise -> concat [go (f * 2 ** (c * (fromIntegral j / fromIntegral (n - 1) - 0.5) / 100 / 12)) v | j <- [0 .. n - 1]]
+      Pan _ v -> go f v
+      a :& b -> go f a ++ go f b
+      _ -> []
 
 renderSynth :: Double -> Word32 -> Note -> Patch -> Buffer s -> Buffer s -> Buffer s -> ST s ()
 renderSynth fr seed v p left right sends = do
@@ -670,7 +729,13 @@ data Node s
   | NFilter !Int !Coefficient !Double !Bool !(MV.MVector s Double) (Node s)  -- low/high/band, cutoff, k, mono, state
   | NPan !Prepared !Bool (Node s)
   | NAdd (Node s) (Node s)
+  | NSampled ![Playing s] !Bool                       -- the regions playing, mono?
 
+-- | One recording playing: its channels, how far to move per sample per Hz
+-- reaching it, its gain and loop, and the playback position in frames.
+data Playing s = Playing
+  { playChannels :: [VU.Vector Float], playStep :: !Double, playGain :: !Double
+  , playLoop :: !(Maybe (Int, Int)), playSustainLoop :: !Bool, playPosition :: !(MV.MVector s Double) }
 -- | A filter's cutoff: fixed (its tan-warped gain, computed once) or moving.
 data Coefficient = Fixed !Double | Moving !Prepared !Bool
 
@@ -684,6 +749,7 @@ monoNode node = case node of
   NFilter _ _ _ mono _ _ -> mono
   NPan _ _ _ -> False
   NAdd a b -> monoNode a && monoNode b
+  NSampled _ mono -> mono
   _ -> True
 
 constantOf :: Prepared -> Maybe Double
@@ -782,9 +848,9 @@ stepString fr st f = do
 -- | Compile a voice for one note: @gate@ and @vel@ are its note-off and
 -- velocity, @f0@ the frequency reaching this part at note-on, @phase@ the
 -- starting phase (spread by unison copies), @seeds@ counts the strings.
-compileVoice :: Double -> Double -> Double -> Word32 -> MV.MVector s Word32 -> STRef s Word32
+compileVoice :: Double -> Double -> Double -> Word32 -> Int -> MV.MVector s Word32 -> STRef s Word32
              -> Double -> Double -> Voice -> ST s (Node s)
-compileVoice fr gate vel seed rng seeds = build
+compileVoice fr gate vel seed takeNumber rng seeds = build
   where
     prep = prepare gate vel
     build !phase !f0 voice = case voice of
@@ -818,6 +884,14 @@ compileVoice fr gate vel seed rng seeds = build
       Pan m v -> NPan (prep m) (usesKey m) <$> build phase f0 v
       a :& b -> NAdd <$> build phase f0 a <*> build phase f0 b
       Classic p -> build phase f0 (expandClassic p)
+      Sampled set -> do
+        let regions = chooseRegions set takeNumber vel f0
+        playing <- forM regions $ \r -> do
+          position <- MV.replicate 1 0
+          let recording = regionRecording r
+          pure (Playing (take 2 (recordingAudio recording)) (recordingRate recording / (fr * recordedPitch r))
+                  (regionGain r) (regionLoop r) (regionSustainLoop r) position)
+        pure (NSampled playing (all ((== 1) . length . playChannels) playing))
     filterNode kind m k phase f0 v = do
       child <- build phase f0 v
       state <- MV.replicate 4 0
@@ -877,6 +951,44 @@ stepVoice fr gate = go
         (a, b) <- go x t f
         (c, d) <- go y t f
         pure (a + c, b + d)
+      NSampled playing _ -> foldPlaying playing t f 0 0
+    foldPlaying [] _ _ !l !r = pure (l, r)
+    foldPlaying (p : ps) t f !l !r = do
+      (a, b) <- playStepAt gate p t f
+      foldPlaying ps t f (l + a) (r + b)
+
+-- | One sample of a recording, read between frames by a cubic (Catmull-Rom)
+-- through the four nearest, then moved on in proportion to the pitch reaching
+-- it. Past its end it is silent; inside a loop it wraps (a sustain loop only
+-- until note-off).
+playStepAt :: Double -> Playing s -> Double -> Double -> ST s (Double, Double)
+playStepAt gate p t f = do
+  pos <- MV.unsafeRead (playPosition p) 0
+  case playChannels p of
+    [] -> pure (0, 0)
+    channels@(first : _) -> do
+      let frames = VU.length first
+      if pos >= fromIntegral (frames - 1) then pure (0, 0) else do
+        let i = floor pos :: Int
+            x = pos - fromIntegral i
+            at ch k = realToFrac (VU.unsafeIndex ch (max 0 (min (frames - 1) k))) :: Double
+            sampleOf ch =
+              let y0 = at ch (i - 1); y1 = at ch i; y2 = at ch (i + 1); y3 = at ch (i + 2)
+                  c1 = 0.5 * (y2 - y0)
+                  c2 = y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3
+                  c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2)
+              in ((c3 * x + c2) * x + c1) * x + y1
+            g = playGain p
+            (l, r) = case channels of
+              [mono] -> let y = sampleOf mono in (y, y)
+              (a : b : _) -> (sampleOf a, sampleOf b)
+            moved = pos + f * playStep p
+            next = case playLoop p of
+              Just (s0, e0) | moved >= fromIntegral (e0 + 1), not (playSustainLoop p) || t < gate ->
+                moved - fromIntegral (e0 - s0 + 1)
+              _ -> moved
+        MV.unsafeWrite (playPosition p) 0 next
+        pure (g * l, g * r)
 
 filterStep :: Int -> Double -> Double -> MV.MVector s Double -> Int -> Double -> ST s Double
 filterStep kind g k state at x = do
@@ -891,13 +1003,13 @@ filterStep kind g k state at x = do
     _ -> k * band
 {-# INLINE filterStep #-}
 
-renderVoice :: Double -> Word32 -> Note -> Voice -> Buffer s -> Buffer s -> Buffer s -> ST s ()
-renderVoice fr seed v voice left right sends = do
+renderVoice :: Double -> Word32 -> Int -> Note -> Voice -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderVoice fr seed takeNumber v voice left right sends = do
   rng <- MV.replicate 1 (noteSeed seed)
   seeds <- newSTRef 0
   let curved = pitchMod v /= Flat 0
       freqAt u = if curved then hz v * 2 ** contourAt (pitchMod v) u else hz v
-  node <- compileVoice fr (duration v) (velocity v) seed rng seeds 0 (freqAt 0) voice
+  node <- compileVoice fr (duration v) (velocity v) seed takeNumber rng seeds 0 (freqAt 0) voice
   let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail voice)
       (gl, gr) = panGains (pan v)
       go !i
@@ -1028,6 +1140,102 @@ allpass size xs = VU.create $ do
             go (i + 1) (if idx + 1 == size then 0 else idx + 1)
   go 0 0
 
+-- | A recorded room: the send bus, delayed, convolved with the impulse
+-- response (resampled to the mix rate if needed, each channel at unit energy;
+-- a mono response feeds both sides), scaled by the room's wet.
+roomReverb :: Double -> Room -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
+roomReverb fr room input = (side 0, side (min 1 (length responses - 1)))
+  where
+    impulse = roomImpulse room
+    responses = [unitEnergy (resampled (VU.map realToFrac ch)) | ch <- take 2 (recordingAudio impulse)]
+    ratio = recordingRate impulse / fr
+    resampled ch
+      | ratio == 1 = ch
+      | otherwise = VU.generate (max 1 (floor (fromIntegral (VU.length ch - 1) / ratio))) $ \k ->
+          let pos = fromIntegral k * ratio
+              i = floor pos :: Int
+              x = pos - fromIntegral i
+              at j = VU.unsafeIndex ch (max 0 (min (VU.length ch - 1) j))
+              y0 = at (i - 1); y1 = at i; y2 = at (i + 1); y3 = at (i + 2)
+          in ((((0.5 * (y3 - y0) + 1.5 * (y1 - y2)) * x + (y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3)) * x + 0.5 * (y2 - y0)) * x) + y1
+    unitEnergy ch = let e = VU.sum (VU.map (^ (2 :: Int)) ch) in if e > 0 then VU.map (/ sqrt e) ch else ch
+    delay = round (roomPreDelay room * fr) :: Int
+    delayed = VU.generate (VU.length input) $ \i -> if i >= delay then VU.unsafeIndex input (i - delay) else 0
+    side c = VU.map (* roomWet room) (VU.take (VU.length input) (convolve delayed (responses !! c)))
+
+-- | Linear convolution by overlapping FFT blocks (exact up to rounding).
+convolve :: VU.Vector Double -> VU.Vector Double -> VU.Vector Double
+convolve xs h
+  | VU.null xs || VU.null h = VU.replicate (max 0 (VU.length xs + VU.length h - 1)) 0
+  | otherwise = runST $ do
+      let m = VU.length h
+          size = until (>= 2 * m) (* 2) (4096 :: Int)
+          block = size - m + 1
+          total = VU.length xs + m - 1
+      out <- MV.replicate total 0
+      hr <- VU.thaw (h VU.++ VU.replicate (size - m) 0)
+      hi <- MV.replicate size 0
+      fft False hr hi
+      spectrumR <- VU.freeze hr
+      spectrumI <- VU.freeze hi
+      xr <- MV.new size
+      xi <- MV.new size
+      forM_ [0, block .. VU.length xs - 1] $ \from -> do
+        let count = min block (VU.length xs - from)
+        forM_ [0 .. size - 1] $ \i -> do
+          MV.unsafeWrite xr i (if i < count then VU.unsafeIndex xs (from + i) else 0)
+          MV.unsafeWrite xi i 0
+        fft False xr xi
+        forM_ [0 .. size - 1] $ \i -> do
+          a <- MV.unsafeRead xr i
+          b <- MV.unsafeRead xi i
+          let c = VU.unsafeIndex spectrumR i
+              d = VU.unsafeIndex spectrumI i
+          MV.unsafeWrite xr i (a * c - b * d)
+          MV.unsafeWrite xi i (a * d + b * c)
+        fft True xr xi
+        forM_ [0 .. min size (total - from) - 1] $ \i -> MV.unsafeRead xr i >>= \y -> MV.unsafeModify out (+ y) (from + i)
+      VU.unsafeFreeze out
+
+-- | In-place radix-2 FFT of a power-of-two length (the inverse scaled by 1/n).
+fft :: Bool -> MV.MVector s Double -> MV.MVector s Double -> ST s ()
+fft inverse re im = do
+  let n = MV.length re
+      levels = countTrailingZeros n
+      reverseBits x = foldl (\acc b -> (acc `shiftL` 1) .|. ((x `shiftR` b) .&. 1)) 0 [0 .. levels - 1]
+      sign = if inverse then 1 else -1
+      twiddles = VU.generate (n `div` 2) $ \k -> 2 * pi * fromIntegral k / fromIntegral n :: Double
+      cosines = VU.map cos twiddles
+      sines = VU.map ((* sign) . sin) twiddles
+  forM_ [0 .. n - 1] $ \i -> do
+    let j = reverseBits i
+    when (j > i) $ do
+      MV.unsafeSwap re i j
+      MV.unsafeSwap im i j
+  let stage size = when (size <= n) $ do
+        let half = size `div` 2
+            stride = n `div` size
+        forM_ [0, size .. n - 1] $ \from -> forM_ [0 .. half - 1] $ \k -> do
+          let wr = VU.unsafeIndex cosines (k * stride)
+              wi = VU.unsafeIndex sines (k * stride)
+              a = from + k
+              b = a + half
+          br <- MV.unsafeRead re b
+          bi <- MV.unsafeRead im b
+          ar <- MV.unsafeRead re a
+          ai <- MV.unsafeRead im a
+          let tr = br * wr - bi * wi
+              ti = br * wi + bi * wr
+          MV.unsafeWrite re a (ar + tr)
+          MV.unsafeWrite im a (ai + ti)
+          MV.unsafeWrite re b (ar - tr)
+          MV.unsafeWrite im b (ai - ti)
+        stage (size * 2)
+  stage 2
+  when inverse $ forM_ [0 .. n - 1] $ \i -> do
+    MV.unsafeModify re (/ fromIntegral n) i
+    MV.unsafeModify im (/ fromIntegral n) i
+
 master :: Mix -> VU.Vector Double -> VU.Vector Double -> (VU.Vector Double, VU.Vector Double)
 master mix l r
   | not (mixNormalize mix) = (VU.map saturate l, VU.map saturate r)
@@ -1042,27 +1250,37 @@ master mix l r
 
 -- Export ----------------------------------------------------------------------
 
--- | Interleaved little-endian PCM16 WAV, one vector per channel.
+-- | Interleaved little-endian 16-bit PCM WAV, one vector per channel.
 pcmWav :: FilePath -> Int -> [VU.Vector Double] -> IO ()
-pcmWav path rate channels = do
+pcmWav = pcmWavBits 16
+
+-- | Interleaved little-endian PCM WAV at 16 or 24 bits.
+pcmWavBits :: Int -> FilePath -> Int -> [VU.Vector Double] -> IO ()
+pcmWavBits bits path rate channels = do
   let chans = length channels
+      bytesPer = bits `div` 8
       frames = if null channels then 0 else minimum (map VU.length channels)
-      size = toInteger frames * toInteger chans * 2
+      size = toInteger frames * toInteger chans * toInteger bytesPer
+  when (bits `notElem` [16, 24]) (ioError (userError "WAV export supports 16 or 24 bits"))
   when (size > 4294967259) (ioError (userError "audio exceeds RIFF WAV size limit"))
   let header = string8 "RIFF" <> word32LE (fromInteger (36 + size)) <> string8 "WAVEfmt "
         <> word32LE 16 <> word16LE 1 <> word16LE (fromIntegral chans) <> word32LE (fromIntegral rate)
-        <> word32LE (fromIntegral (rate * chans * 2)) <> word16LE (fromIntegral (chans * 2))
-        <> word16LE 16 <> string8 "data" <> word32LE (fromInteger size)
-      pcm x = int16LE (round (max (-1) (min 1 x) * 32767) :: Int16)
+        <> word32LE (fromIntegral (rate * chans * bytesPer)) <> word16LE (fromIntegral (chans * bytesPer))
+        <> word16LE (fromIntegral bits) <> string8 "data" <> word32LE (fromInteger size)
+      clamp x = max (-1) (min 1 x)
+      pcm x
+        | bits == 16 = int16LE (round (clamp x * 32767) :: Int16)
+        | otherwise = let v = round (clamp x * 8388607) :: Int
+                          u = if v < 0 then v + 16777216 else v
+                      in word8 (fromIntegral (u .&. 255)) <> word8 (fromIntegral ((u `shiftR` 8) .&. 255)) <> word8 (fromIntegral (u `shiftR` 16))
       frame i = foldMap (\ch -> pcm (VU.unsafeIndex ch i)) channels
   BL.writeFile path (toLazyByteString (header <> foldMap frame [0 .. frames - 1]))
-
 
 -- | Stereo timeline export for the unitless score API.
 writeTimelineMix :: FilePath -> Mix -> Timeline -> IO ()
 writeTimelineMix path mix timeline = exportAs path $ \out -> do
   (l, r) <- either (ioError . userError) pure (renderTimelineMix mix timeline)
-  pcmWav out (mixRate mix) [l, r]
+  pcmWavBits (mixBits mix) out (mixRate mix) [l, r]
 
 
 

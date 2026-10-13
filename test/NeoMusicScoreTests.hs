@@ -11,6 +11,10 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
 import qualified Data.Vector.Unboxed as VU
 import qualified NeoMusic.Audio as A
+import System.Directory (createDirectoryIfMissing)
+import System.FilePath ((</>))
+import System.IO.Temp (withSystemTempDirectory)
+import Control.Exception (evaluate)
 import qualified NeoMusic.Pitch as A
 import NeoMusic.Score
 import NeoMusic.Language
@@ -582,7 +586,7 @@ scoreGroup = Group "NeoMusic score and views"
       A.amp glass === (A.Velocity A.:* A.adsr 0.001 0.7 0 0.6)
       (A.cutoff glass, A.resonance glass, A.stereoWidth glass) === (A.cutoff A.pluck, A.resonance A.pluck, A.stereoWidth A.pluck)
       A.pitch (timbreOf "left") === (A.K 0.2 A.:* A.Lfo A.SineWave 5.5)
-      mix (performance doc) === A.Mix 48000 A.hall {A.wet = 0.5} 1.5 0.89 2 True
+      mix (performance doc) === A.Mix 48000 A.hall {A.wet = 0.5} 1.5 0.89 2 True Nothing 16
       -- With a reverb, send means something: the wet render rings on after a dry one stops.
       let blip extra = parseDocument (unlines ["tempo 60", extra, "instrument right = sine send 1", "right: 0"])
       dryDoc <- evalEither (blip "master tail 1 rate 8000")
@@ -645,6 +649,47 @@ scoreGroup = Group "NeoMusic score and views"
       drums <- evalEither (parseDocument (unlines
         [ "tempo 120", "tuning 12 at C4", "sound a = noise", "instrument drums = a", "drums: 0" ]))
       assert (isLeft (midi (performance drums) (score drums))))
+  , ("recordings in .neomusic", withTests 1 $ property $ do
+      -- A document names its recordings; loadDocument finds them next to it
+      -- or in a search directory, and they play under the voice's shapers.
+      let tone amp = VU.generate 8000 (\i -> amp * sin (2 * pi * 220 * fromIntegral i / 16000))
+          document extra = unlines
+            [ "tempo 120", "tuning 12 at C4"
+            , "sound s = gain (adsr 0.001 0 1 0.2) pan -0.5 sampled \"inst.sfz\""
+            , "reverb space \"rooms/room.wav\" wet 0.5 predelay 0.01"
+            , "master bits 24 rate 16000 tail 0.5" ++ extra
+            , "instrument x = s send 1", "x: -3 -3 -2" ]
+      (loaded, rendered, unloaded, missing, badRoom, outside) <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        createDirectoryIfMissing True (dir </> "library" </> "rooms")
+        A.pcmWavBits 24 (dir </> "library" </> "a3.wav") 16000 [tone 0.5, tone 0.5]
+        A.pcmWavBits 16 (dir </> "library" </> "rooms" </> "room.wav") 16000 [VU.generate 8000 (\i -> exp (negate (fromIntegral i) / 1500))]
+        writeFile (dir </> "inst.sfz") "<region> sample=a3.wav pitch_keycenter=57 lokey=55 hikey=60\n"
+        writeFile (dir </> "song.neomusic") (document "")
+        writeFile (dir </> "far.neomusic") (unlines ["tempo 120", "tuning 12 at C4", "sound s = sampled \"inst.sfz\"", "instrument x = s", "x: 12"])
+        writeFile (dir </> "bad.neomusic") (replace "wet 0.5" "room 0.5" (document ""))
+        loaded <- loadDocument [dir </> "library"] (dir </> "song.neomusic")
+        missing <- loadDocument [] (dir </> "song.neomusic")
+        badRoom <- loadDocument [dir </> "library"] (dir </> "bad.neomusic")
+        outside <- loadDocument [dir </> "library"] (dir </> "far.neomusic")
+        -- Rendered here: recordings are read on first use, so they must still exist.
+        let rendered = loaded >>= \d -> render (performance d) (score d) >>= A.renderTimelineMix (mix (performance d))
+        either (const (pure ())) (\(a, b) -> () <$ evaluate (VU.length a + VU.length b)) rendered
+        pure (loaded, rendered, parseDocument (document ""), missing, badRoom, outside)
+      doc <- evalEither loaded
+      (A.mixBits (mix (performance doc)), fmap A.roomWet (A.mixRoom (mix (performance doc)))) === (24, Just 0.5)
+      case timbre (instruments (performance doc) M.! "x") of
+        A.Gain _ (A.Pan _ (A.Sampled _)) -> success
+        other -> annotateShow other >> failure
+      (l, r) <- evalEither rendered
+      -- Panned left, and the room rings on after the notes.
+      assert (VU.sum (VU.map abs l) > VU.sum (VU.map abs r))
+      assert (VU.all (== 0) (VU.slice 24100 100 r) == False && VU.any ((> 1e-3) . abs) (VU.slice 28000 1000 l))
+      -- Recorded instruments are pitched: they go to MIDI.
+      _ <- evalEither (midi (performance doc) (score doc))
+      assert (isLeft unloaded && isLeft missing && isLeft badRoom)
+      -- A note outside every region is an error when rendering.
+      far <- evalEither outside
+      assert (isLeft (render (performance far) (score far) >>= A.renderTimelineMix (mix (performance far)))))
   , ("phrase signals: across a group, not each note", withTests 1 $ property $ do
       let events src = do
             d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))
@@ -691,3 +736,9 @@ scoreGroup = Group "NeoMusic score and views"
         expected <- evalIO (readFile ("test/golden/neomusic/"++name++".ly"))
         actual === expected) ["scale","twinkle","voices","ties","tempo","curves","cents"])
   ]
+
+-- | Replace the first occurrence of a substring.
+replace :: String -> String -> String -> String
+replace old new s = case [i | i <- [0 .. length s - length old], take (length old) (drop i s) == old] of
+  (i : _) -> take i s ++ new ++ drop (i + length old) s
+  [] -> s

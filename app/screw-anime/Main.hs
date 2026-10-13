@@ -388,7 +388,7 @@ crash = hat { amp = Velocity :* adsr 0.001 2.2 0 0.5, highpass = 3500, cutoff = 
 master :: Mix
 master = Mix
   { mixRate = 44100, mixReverb = hall { roomSize = 0.78, wet = 0.38 }
-  , mixDrive = 2.0, mixPeak = 0.89, mixTail = 0, mixNormalize = True }
+  , mixDrive = 2.0, mixPeak = 0.89, mixTail = 0, mixNormalize = True, mixRoom = Nothing, mixBits = 16 }
 
 performance :: Performance
 performance = Performance 144 (M.fromList registry) master
