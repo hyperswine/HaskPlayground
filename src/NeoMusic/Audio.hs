@@ -374,7 +374,11 @@ validVoice voice = case voice of
     validVoice v
   a :& b -> validVoice a >> validVoice b
   Classic p -> validPatch p
-  Sampled set -> unless (not (null (setRegions set))) (Left (setPath set ++ ": no regions"))
+  Sampled set -> do
+    unless (not (null (setRegions set))) (Left (setPath set ++ ": no regions"))
+    forM_ (setRegions set) $ \r -> let recording = regionRecording r in
+      unless (length (recordingAudio recording) `elem` [1, 2])
+        (Left (recordingPath recording ++ ": a recording must be mono or stereo"))
   where modOk m = unless (validMod m) (Left "voice modulations need finite values and positive times")
 
 -- | Unpitched: every part is. Noise is unpitched, and so is everything under a
@@ -537,6 +541,8 @@ validMix mix = do
       unless (wet rv == 0) (Left "a mix has one reverb: a recorded room or the algorithmic reverb, not both")
       unless (nonNegative (roomWet room) && nonNegative (roomPreDelay room)) (Left "room wet and pre-delay must be nonnegative")
       unless (recordingFrames (roomImpulse room) > 0) (Left "a room's impulse response is empty")
+      unless (length (recordingAudio (roomImpulse room)) `elem` [1, 2])
+        (Left "a room's impulse response must be mono or stereo (convert others first, e.g. examples/neomusic/rooms/make-room.py)")
 
 -- | Dry, normalised to a 0.8 peak, no tail.
 defaultMix :: Int -> Mix
@@ -1149,19 +1155,31 @@ roomReverb fr room input = (side 0, side (min 1 (length responses - 1)))
     impulse = roomImpulse room
     responses = [unitEnergy (resampled (VU.map realToFrac ch)) | ch <- take 2 (recordingAudio impulse)]
     ratio = recordingRate impulse / fr
-    resampled ch
-      | ratio == 1 = ch
-      | otherwise = VU.generate (max 1 (floor (fromIntegral (VU.length ch - 1) / ratio))) $ \k ->
-          let pos = fromIntegral k * ratio
-              i = floor pos :: Int
-              x = pos - fromIntegral i
-              at j = VU.unsafeIndex ch (max 0 (min (VU.length ch - 1) j))
-              y0 = at (i - 1); y1 = at i; y2 = at (i + 1); y3 = at (i + 2)
-          in ((((0.5 * (y3 - y0) + 1.5 * (y1 - y2)) * x + (y0 - 2.5 * y1 + 2 * y2 - 0.5 * y3)) * x + 0.5 * (y2 - y0)) * x) + y1
+    resampled ch = if ratio == 1 then ch else resample ratio ch
     unitEnergy ch = let e = VU.sum (VU.map (^ (2 :: Int)) ch) in if e > 0 then VU.map (/ sqrt e) ch else ch
     delay = round (roomPreDelay room * fr) :: Int
     delayed = VU.generate (VU.length input) $ \i -> if i >= delay then VU.unsafeIndex input (i - delay) else 0
     side c = VU.map (* roomWet room) (VU.take (VU.length input) (convolve delayed (responses !! c)))
+
+-- | A response at another rate, by windowed-sinc interpolation (Blackman, 16
+-- zero crossings each side), low-passed below the lower Nyquist frequency, so
+-- nothing folds back when the rate drops. @ratio@ is the source rate over the
+-- target rate.
+resample :: Double -> VU.Vector Double -> VU.Vector Double
+resample ratio ch = VU.generate frames $ \k ->
+  let centre = fromIntegral k * ratio
+      i0 = floor centre - reach
+      tap j =
+        let d = centre - fromIntegral j
+            x = d * cut
+            sinc = if abs x < 1e-12 then 1 else sin (pi * x) / (pi * x)
+            w = let p = d / (fromIntegral reach + 1) in if abs p >= 1 then 0 else 0.42 + 0.5 * cos (pi * p) + 0.08 * cos (2 * pi * p)
+        in if j < 0 || j >= VU.length ch then 0 else cut * sinc * w * VU.unsafeIndex ch j
+  in sum [tap j | j <- [i0 .. i0 + 2 * reach + 1]]
+  where
+    frames = max 1 (floor (fromIntegral (VU.length ch - 1) / ratio) + 1)
+    cut = min 1 (1 / ratio)                         -- cutoff, as a fraction of the source Nyquist
+    reach = ceiling (16 / cut) :: Int
 
 -- | Linear convolution by overlapping FFT blocks (exact up to rounding).
 convolve :: VU.Vector Double -> VU.Vector Double -> VU.Vector Double

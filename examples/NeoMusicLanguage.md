@@ -248,7 +248,10 @@ recording stops at note-off. A note outside every region is an error.
   `violin-pizz`, `cello-pizz`, `harp`, `flute`, `horn`, `timpani`. Its
   `make-sfz.py` says how to get the library.
   `examples/neomusic/orchestral-recorded.neomusic` is the orchestral cue
-  played by it.
+  played by it, in a recorded concert hall made by
+  `examples/neomusic/rooms/make-room.py`.
+- **Rooms:** a room's impulse response must be mono or stereo; convert other
+  layouts first.
 
 **Mix.** `reverb [hall|none] [room x] [damping x] [width x] [wet x]
 [predelay x]` sets the reverb, starting from none unless `hall` is named.

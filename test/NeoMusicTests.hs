@@ -311,5 +311,18 @@ neoMusicGroup = Group "NeoMusic audio engine"
       let expected = VU.imap (\i x -> x + 2 / sqrt 5 * x + (if i >= 100 then VU.unsafeIndex dry (i - 100) / sqrt 5 else 0)) dry
       annotateShow (VU.maximum (VU.map abs (VU.zipWith (-) wet expected)))
       assert (VU.maximum (VU.map abs (VU.zipWith (-) wet expected)) < 1e-9)
-      assert (isLeft (renderTimelineMix (Mix 8000 hall 0 0.8 0 False (Just (Room room 1 0)) 16) (Timeline 0.5 [sent]))))
+      assert (isLeft (renderTimelineMix (Mix 8000 hall 0 0.8 0 False (Just (Room room 1 0)) 16) (Timeline 0.5 [sent])))
+      -- A room recorded at twice the rate is resampled without folding: a delta
+      -- at its frame 200 lands exactly at frame 100. Four channels are refused.
+      others <- evalIO $ withSystemTempDirectory "neomusic" $ \dir -> do
+        pcmWavBits 16 (dir </> "fast.wav") 16000 [VU.generate 400 (\i -> if i == 200 then 0.5 else 0)]
+        pcmWavBits 16 (dir </> "four.wav") 8000 (replicate 4 (VU.generate 100 (\i -> if i == 0 then 0.5 else 0)))
+        (,) <$> (readRecording (dir </> "fast.wav") >>= used) <*> (readRecording (dir </> "four.wav") >>= used)
+      fast <- evalEither (fst others)
+      four <- evalEither (snd others)
+      (shifted, _) <- evalEither (renderTimelineMix (mixWith (Just (Room fast 1 0))) (Timeline 0.5 [sent]))
+      let echo = VU.imap (\i x -> x + (if i >= 100 then VU.unsafeIndex dry (i - 100) else 0)) dry
+      annotateShow (VU.maximum (VU.map abs (VU.zipWith (-) shifted echo)))
+      assert (VU.maximum (VU.map abs (VU.zipWith (-) shifted echo)) < 1e-9)
+      assert (isLeft (renderTimelineMix (mixWith (Just (Room four 1 0))) (Timeline 0.5 [sent]))))
   ]

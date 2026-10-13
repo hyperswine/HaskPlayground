@@ -36,9 +36,20 @@ below:
 
   `strings.sfz` combines the sections as one staff spreads a chord: cellos to
   E3, violas F3 to B3, violins from C4.
-- **No room recording yet.** Downloading an impulse response waits on the
-  user's choice of file and license, so `orchestral-recorded.neomusic` uses
-  the hall for now. `reverb space` is implemented and tested.
+- **The room** (added after the user chose OpenAIR) is the Jack Lyons Concert
+  Hall, University of York, from the central seats. It's licensed CC BY 4.0
+  and credited in the example. OpenAIR publishes it as four-channel B-format
+  at 96 kHz, with each channel normalised on its own, so
+  `examples/neomusic/rooms/make-room.py` makes it stereo:
+  - the stereo pair is the omni channel and the left-right channel at equal
+    energy;
+  - the direct sound is removed (the dry signal is already in the mix);
+  - the noise floor is cut off.
+
+  The engine refuses responses and recordings with more than two channels
+  rather than taking two of them silently. It resamples a room at another
+  rate by windowed sinc (Blackman, 16 zero crossings), filtered below the
+  lower Nyquist frequency.
 
 Tests: `test/NeoMusicTests.hs` ("recordings: WAV, SFZ, layers, takes, rooms")
 and `test/NeoMusicScoreTests.hs` ("recordings in .neomusic"). Neither needs

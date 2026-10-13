@@ -1,7 +1,8 @@
 -- "Old Kingdom" with recorded instruments: the same cue as orchestral.neomusic,
 -- played by VSCO 2 Community Edition (CC0) recordings of a real orchestra.
--- Needs the library: see examples/neomusic/vsco/make-sfz.py, and set
--- NEOMUSIC_SAMPLES to the directory that holds VSCO-2-CE.
+-- Needs the library and the room: see examples/neomusic/vsco/make-sfz.py and
+-- examples/neomusic/rooms/make-room.py, and set NEOMUSIC_SAMPLES to the
+-- directory that holds VSCO-2-CE and rooms/.
 tempo 90
 tuning 12 at C4
 meter 4
@@ -16,7 +17,11 @@ sound harp    = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco
 sound flute   = gain ((0.5 + 0.5 * velocity) * adsr 0.01 0 1 0.4) sampled "vsco/flute.sfz"
 sound horn    = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.5) sampled "vsco/horn.sfz"
 sound timpani = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
-reverb hall room 0.9 wet 0.45 predelay 0.03
+-- The room: the Jack Lyons Concert Hall, University of York, heard from the
+-- central seats. Impulse response from OpenAIR (openairlib.net), Audiolab,
+-- University of York, CC BY 4.0; made stereo, without its direct sound and
+-- noise floor, by examples/neomusic/rooms/make-room.py.
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.6 predelay 0
 master peak 0.89 tail 3 rate 48000 bits 24
 
 instrument strings = strings gain 0.95 send 0.6
