@@ -11,7 +11,7 @@ module NeoMusic.Audio
     -- * Physical timeline
   , Note(..), Timeline(..), Contour(..), note, contourAt, contourBounds
     -- * Mixing and export
-  , Reverb(..), Mix(..), noReverb, hall, defaultMix
+  , Reverb(..), Mix(..), noReverb, hall, defaultMix, validMix
   , renderTimelineMix, writeTimelineMix, pcmWav, exportAs
   ) where
 
@@ -402,6 +402,17 @@ noReverb = Reverb 0.5 0.5 1 0 0
 hall :: Reverb
 hall = Reverb { roomSize = 0.85, damping = 0.4, width = 1, wet = 0.4, preDelay = 0.02 }
 
+-- | The checks every mix must pass before rendering.
+validMix :: Mix -> Either String ()
+validMix mix = do
+  let rv = mixReverb mix
+  unless (mixRate mix >= 8000 && mixRate mix <= 192000) (Left "sample rate must be 8000..192000")
+  unless (all unitRange [roomSize rv, damping rv, width rv]
+          && nonNegative (wet rv) && nonNegative (preDelay rv))
+    (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
+  unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
+    (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
+
 -- | Dry, normalised to a 0.8 peak, no tail.
 defaultMix :: Int -> Mix
 defaultMix rate = Mix rate noReverb 0 0.8 0 True
@@ -427,12 +438,7 @@ renderTimelineMix mix (Timeline total ns) = do
   let rate = mixRate mix
       fr = fromIntegral rate :: Double
       rv = mixReverb mix
-  unless (rate >= 8000 && rate <= 192000) (Left "sample rate must be 8000..192000")
-  unless (all unitRange [roomSize rv, damping rv, width rv]
-          && nonNegative (wet rv) && nonNegative (preDelay rv))
-    (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
-  unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
-    (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
+  validMix mix
   let highest v = hz v * 2 ** max 0 (snd (contourBounds (pitchMod v)))
   unless (all ((< fr / 2) . highest) ns) (Left "pitch reaches Nyquist frequency")
   let end = maximum (total : [start v + duration v + tailOf (sound v) | v <- ns]) + mixTail mix

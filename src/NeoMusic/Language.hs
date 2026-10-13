@@ -5,7 +5,7 @@
 -- prelude of ordinary definitions ("NeoMusic.Prelude") is read before every
 -- document; a document's own definitions shadow it. See neomusic-prelude.md.
 module NeoMusic.Language
-  ( Document(..), SheetView(..), Staff(..), parseDocument, prettyScore, pitchNumber ) where
+  ( Document(..), SheetView(..), Staff(..), parseDocument, parseSounds, prettyScore, pitchNumber ) where
 
 import Control.Monad (foldM, unless, void, when)
 import Data.Char (isSpace)
@@ -193,17 +193,22 @@ pitchNumber = runLine 0 $ do
 
 presets :: M.Map String A.Patch
 presets = M.fromList
-  [("piano",A.pianoPatch),("sine",A.sinePatch),("saw",A.sawPatch),("square",A.squarePatch)
+  [("basic",A.basicPatch),("piano",A.pianoPatch),("sine",A.sinePatch),("saw",A.sawPatch),("square",A.squarePatch)
   ,("pluck",A.pluck),("supersaw",A.supersaw),("reeseBass",A.reeseBass),("subBass",A.subBass)
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","glide","sine","square"]
+reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","glide","sine","square"]
 
--- | Source lines without comments or blank lines, numbered from 1.
+-- | Source lines without comments or blank lines, numbered from 1. A line
+-- that starts with whitespace continues the statement above it.
 sourceLines :: String -> [(Int, String)]
-sourceLines input = [(i, s') | (i, s) <- zip [1..] (lines input), let s' = stripComment s, not (all isSpace s')]
+sourceLines input = reverse (foldl add [] [(i, stripComment s) | (i, s) <- zip [1..] (lines input)])
   where
+    add acc (i, s)
+      | all isSpace s = acc
+      | c : _ <- s, isSpace c, (j, prev) : earlier <- acc = (j, prev ++ " " ++ dropWhile isSpace s) : earlier
+      | otherwise = (i, s) : acc
     stripComment [] = []
     stripComment ('-':'-':_) = []
     stripComment (x:xs) = x : stripComment xs
@@ -212,7 +217,135 @@ takeWord :: String -> String
 takeWord = takeWhile (not . isSpace) . dropWhile isSpace
 
 isBinding :: String -> Bool
-isBinding s = '=' `elem` s && takeWord s /= "instrument"
+isBinding s = '=' `elem` s && takeWord s `notElem` ["instrument", "sound"]
+
+-- Sounds --------------------------------------------------------------------
+
+-- | One part of a @sound@ definition.
+data SoundPart = SOsc A.Osc | SAmp A.Mod | SPitch A.Mod | SCutoff A.Mod
+  | SResonance Double | SHighpass Double | SWidth Double
+
+-- | @sound NAME [from BASE] parts...@ (see neomusic-sounds.md).
+soundParser :: Parser (Name, Maybe Name, [SoundPart])
+soundParser = do
+  keyword "sound"
+  name <- ident
+  base <- optionMaybe (keyword "from" *> ident)
+  parts <- many part
+  pure (name, base, parts)
+  where
+    part = (keyword "osc" *> (SOsc <$> oscP))
+      <|> (keyword "amp" *> (SAmp <$> modP))
+      <|> (keyword "pitch" *> (SPitch <$> modP))
+      <|> (keyword "cutoff" *> (SCutoff <$> modP))
+      <|> (keyword "resonance" *> (SResonance <$> constant))
+      <|> (keyword "highpass" *> (SHighpass <$> constant))
+      <|> (keyword "width" *> (SWidth <$> constant))
+    oscP = do
+      w <- waveP
+      opts <- many ((\x o -> o {A.semitones = x}) <$> (keyword "up" *> constant)
+                <|> (\x o -> o {A.oscGain = x}) <$> (keyword "gain" *> constant)
+                <|> (\x o -> o {A.unison = x}) <$> (keyword "unison" *> integer)
+                <|> (\x o -> o {A.detuneCents = x}) <$> (keyword "detune" *> constant))
+      pure (foldl (flip ($)) (A.Osc w 0 1 1 0) opts)
+
+waveP :: Parser A.Wave
+waveP = (A.SineWave <$ keyword "sine") <|> (A.SawWave <$ keyword "saw") <|> (A.SquareWave <$ keyword "square")
+  <|> (A.TriangleWave <$ keyword "triangle") <|> (A.NoiseWave <$ keyword "noise")
+
+-- | A modulation expression, in the sound's physical units. Constant
+-- arithmetic folds, so a written sound builds exactly what Haskell would.
+modP :: Parser A.Mod
+modP = chainl1 modTerm addOp
+  where
+    addOp = (addM <$ symbol "+") <|> ((\a b -> addM a (negM b)) <$ try (lexeme (char '-' <* lookAhead (oneOf " \t"))))
+    addM (A.K x) (A.K y) = A.K (x + y)
+    addM a b = A.plusM a b
+
+modTerm :: Parser A.Mod
+modTerm = modAtom >>= more
+  where
+    more acc = (symbol "*" *> modAtom >>= more . mulM acc)
+      <|> (do _ <- symbol "/"
+              b <- modAtom
+              case (acc, b) of
+                (A.K x, A.K y) | y /= 0 -> more (A.K (x / y))
+                (_, A.K y) | y /= 0 -> more (mulM acc (A.K (1 / y)))
+                _ -> fail "a sound can only divide by a nonzero number")
+      <|> pure acc
+    mulM (A.K x) (A.K y) = A.K (x * y)
+    mulM a b = A.timesM a b
+
+negM :: A.Mod -> A.Mod
+negM (A.K x) = A.K (negate x)
+negM m = A.K (-1) A.:* m
+
+modAtom :: Parser A.Mod
+modAtom = between (symbol "(") (symbol ")") modP
+  <|> try (A.K . fromRational <$> decimal)
+  <|> (A.Velocity <$ keyword "velocity") <|> (A.Key <$ keyword "key")
+  <|> (keyword "adsr" *> (A.adsr <$> constant <*> constant <*> constant <*> constant))
+  <|> (keyword "linear" *> (A.Linear <$> constant <*> constant <*> constant))
+  <|> (keyword "approach" *> (A.Approach <$> constant <*> constant <*> constant))
+  <|> (keyword "then" *> (A.Then <$> constant <*> modAtom <*> modAtom))
+  <|> (keyword "release" *> (A.Release <$> constant <*> modAtom))
+  <|> (keyword "lfo" *> (A.Lfo <$> waveP <*> constant))
+  <|> (keyword "hz" *> (A.cutoffHz <$> constant))
+  <|> (keyword "filter" *> (A.filterCutoff <$> constant <*> constant <*> modAtom <*> constant <*> constant))
+  <|> (negM <$> (try (char '-' <* lookAhead (letter <|> char '(')) *> modAtom))
+
+-- | A number in a sound: a literal or constant arithmetic in parentheses.
+constant :: Parser Double
+constant = modAtom >>= \m -> case m of
+  A.K x -> pure x
+  _ -> fail "expected a number"
+
+-- | Resolve a file's sounds, each from its base (another sound in the file or
+-- a preset; without @from@, the built-in @basic@), in any order but without
+-- cycles.
+resolveSounds :: [(Int, (Name, Maybe Name, [SoundPart]))] -> Either String (M.Map Name A.Patch)
+resolveSounds defs = do
+  let names = [name | (_, (name, _, _)) <- defs]
+  unless (length names == length (nub names)) (Left "duplicate sound")
+  let table = M.fromList [(name, (i, base, parts)) | (i, (name, base, parts)) <- defs]
+      resolve visiting name = case M.lookup name table of
+        Nothing -> maybe (Left ("unknown sound: " ++ name)) Right (M.lookup name presets)
+        Just (i, base, parts) -> do
+          unless (name `notElem` visiting) (Left ("sounds defined in a cycle: " ++ intercalate " -> " (reverse (name : visiting))))
+          -- Without "from", a sound starts from the built-in basic sound.
+          start <- maybe (Right A.basicPatch) (resolve (name : visiting)) base
+          patch <- either (Left . (("line " ++ show i ++ ", sound " ++ name ++ ": ") ++)) Right (applyParts start parts)
+          either (Left . (("sound " ++ name ++ ": ") ++)) Right (A.validPatch patch)
+          pure patch
+  M.fromList <$> mapM (\name -> (,) name <$> resolve [] name) names
+
+-- | A base sound with its parts replaced. Any @osc@ lines replace all the base's
+-- oscillators; every other part may appear once.
+applyParts :: A.Patch -> [SoundPart] -> Either String A.Patch
+applyParts base parts = do
+  let tag part = case part of
+        SOsc _ -> "osc"; SAmp _ -> "amp"; SPitch _ -> "pitch"; SCutoff _ -> "cutoff"
+        SResonance _ -> "resonance"; SHighpass _ -> "highpass"; SWidth _ -> "width"
+      tags = [tag x | x <- parts, tag x /= "osc"]
+  unless (length tags == length (nub tags)) (Left "a sound part is given twice")
+  let oscs = [o | SOsc o <- parts]
+      start = if null oscs then base else base {A.oscillators = oscs}
+      set patch part = case part of
+        SOsc _ -> patch
+        SAmp m -> patch {A.amp = m}
+        SPitch m -> patch {A.pitch = m}
+        SCutoff m -> patch {A.cutoff = m}
+        SResonance r -> patch {A.resonance = r}
+        SHighpass h -> patch {A.highpass = h}
+        SWidth w -> patch {A.stereoWidth = w}
+  pure (foldl set start parts)
+
+-- | The sounds a file defines (not the presets), by name.
+parseSounds :: String -> Either String (M.Map Name A.Patch)
+parseSounds input = do
+  let ls = sourceLines input
+  defs <- mapM (\(i, s) -> (,) i <$> runLine i soundParser s) [(i, s) | (i, s) <- ls, takeWord s == "sound"]
+  resolveSounds defs
 
 -- | Parse a file's definitions. @outer@ gives the kinds of functions defined
 -- outside it (the prelude, for a document); the file's own names shadow them.
@@ -242,16 +375,17 @@ parseDocument input = do
   (fromPreludeDefs, preludeKinds) <- prelude
   let ls = sourceLines input
   (defs, kinds) <- parseDefinitions False preludeKinds ls
+  sounds <- (`M.union` presets) <$> parseSounds input
   let nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
       initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
       env = Env defs fromPreludeDefs False M.empty []
-  (perf,view,_,voices,_) <- foldM (readStatement kinds) initial nonbindings
+  (perf,view,_,voices,_) <- foldM (readStatement kinds sounds) initial nonbindings
   scores <- mapM (\(name,expr) -> evaluate env name expr) voices
   let result = foldr (:||:) (Silence 0) scores
   validate perf result
   pure (Document perf view result)
   where
-    readStatement kinds (p,v,t,vs,seen) (line,s) = do
+    readStatement kinds sounds (p,v,t,vs,seen) (line,s) = do
       let first = takeWord s
           singleton label = unless (label `notElem` seen) (Left ("duplicate header: "++label))
           unchanged = (p,v,t,vs,seen)
@@ -276,10 +410,22 @@ parseDocument input = do
           unless (M.null (instruments p)) (Left "global tuning must precede instrument declarations")
           t' <- runLine line (keyword "tuning" *> tuningParser) s >>= id
           pure (p,v,t',vs,first:seen)
+        "sound" -> pure unchanged  -- read with all the sounds, before any instrument
+        "reverb" -> do
+          singleton first
+          rv <- runLine line reverbParser s >>= id
+          let m = (mix p) {A.mixReverb = rv}
+          either (Left . (("line " ++ show line ++ ": ") ++)) Right (A.validMix m)
+          pure (p {mix = m},v,t,vs,first:seen)
+        "master" -> do
+          singleton first
+          m <- runLine line (masterParser (mix p)) s >>= id
+          either (Left . (("line " ++ show line ++ ": ") ++)) Right (A.validMix m)
+          pure (p {mix = m},v,t,vs,first:seen)
         "instrument" -> do
           (name,preset,attrs) <- runLine line instrumentParser s
           unless (M.notMember name (instruments p)) (Left ("duplicate instrument: "++name))
-          patch <- maybe (Left ("unknown preset: "++preset)) Right (M.lookup preset presets)
+          patch <- maybe (Left ("unknown sound: "++preset)) Right (M.lookup preset sounds)
           (inst,staff) <- foldM applyAttr (defaultInstrument {tuning=t,timbre=patch},Treble) attrs
           unless (length (map fst attrs) == length (nub (map fst attrs))) (Left "duplicate instrument attribute")
           pure (p {instruments=M.insert name inst (instruments p)},v {staves=M.insert name staff (staves v)},t,vs,seen)
@@ -295,6 +441,36 @@ parseDocument input = do
         midi <- pitchNumber name
         A.equalTemperament (440 * 2 ** (fromIntegral (midi-69)/12)) edo)
       <|> (do base <- number; keyword "hz"; r <- number; pure (Right (A.Tuning base r)))
+    -- reverb [hall|none] [room x] [damping x] [width x] [wet x] [predelay x]
+    reverbParser = do
+      keyword "reverb"
+      base <- option A.noReverb ((A.hall <$ keyword "hall") <|> (A.noReverb <$ keyword "none"))
+      fields <- many ((,) <$> ident <*> constant)
+      pure $ do
+        unless (length (map fst fields) == length (nub (map fst fields))) (Left "duplicate reverb setting")
+        foldM (\rv (field, x) -> case field of
+          "room" -> Right rv {A.roomSize = x}
+          "damping" -> Right rv {A.damping = x}
+          "width" -> Right rv {A.width = x}
+          "wet" -> Right rv {A.wet = x}
+          "predelay" -> Right rv {A.preDelay = x}
+          _ -> Left ("unknown reverb setting: " ++ field)) base fields
+    -- master [drive x] [peak x] [tail x] [rate n] [normalize on|off]
+    masterParser m0 = do
+      keyword "master"
+      fields <- many ((,) <$> ident <*> lexeme (many1 (noneOf " \t\r")))
+      pure $ do
+        unless (length (map fst fields) == length (nub (map fst fields))) (Left "duplicate master setting")
+        foldM (\m (field, value) -> case field of
+          "drive" -> (\x -> m {A.mixDrive = x}) <$> runLine 0 number value
+          "peak" -> (\x -> m {A.mixPeak = x}) <$> runLine 0 number value
+          "tail" -> (\x -> m {A.mixTail = x}) <$> runLine 0 number value
+          "rate" -> (\x -> m {A.mixRate = x}) <$> runLine 0 integer value
+          "normalize" -> case value of
+            "on" -> Right m {A.mixNormalize = True}
+            "off" -> Right m {A.mixNormalize = False}
+            _ -> Left "normalize must be on or off"
+          _ -> Left ("unknown master setting: " ++ field)) m0 fields
     instrumentParser = do
       keyword "instrument"
       name <- ident

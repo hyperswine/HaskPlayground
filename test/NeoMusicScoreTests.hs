@@ -549,6 +549,57 @@ scoreGroup = Group "NeoMusic score and views"
       assert ("speed cycle {1:1 1:1/2}" `isInfixOf` generalPage && "a tempo" `isInfixOf` generalPage)
       sheet <- evalEither (engrave perf view (score general))
       assert ("\"cycling tempo\"" `isInfixOf` sheet && "\"a tempo\"" `isInfixOf` sheet))
+  , ("sounds and mix in .neomusic", withTests 1 $ property $ do
+      -- The presets file writes every built-in sound; each equals its preset exactly.
+      presetText <- evalIO (readFile "examples/neomusic/presets.neomusic")
+      written <- evalEither (parseSounds presetText)
+      let builtIn = [ ("basic", A.basicPatch), ("piano", A.pianoPatch), ("sine", A.sinePatch), ("saw", A.sawPatch)
+                    , ("square", A.squarePatch), ("pluck", A.pluck), ("supersaw", A.supersaw), ("reeseBass", A.reeseBass)
+                    , ("subBass", A.subBass), ("kick", A.kick), ("snare", A.snare), ("hat", A.hat), ("noiseSweep", A.noiseSweep) ]
+      [(name, M.lookup name written == Just patch) | (name, patch) <- builtIn] === [(name, True) | (name, _) <- builtIn]
+      -- Indented lines continue the statement above, music included.
+      one <- evalEither (parseDocument (header ++ "right: 0 2 4 5 7\n"))
+      wrapped <- evalEither (parseDocument (header ++ "right: 0 2\n   4 5\n\t7\n"))
+      score wrapped === score one
+      -- A sound from a preset: parts given replace, the rest is kept; osc lines replace the set.
+      doc <- evalEither (parseDocument (unlines
+        [ "tempo 120", "tuning 12 at C4"
+        , "sound glass from pluck"
+        , "  osc triangle"
+        , "  osc sine up 12 gain 0.5"
+        , "  amp velocity * adsr 0.001 0.7 0 0.6"
+        , "sound wobble from sine pitch 0.2 * lfo sine 5.5"
+        , "reverb hall wet 0.5"
+        , "master drive 1.5 peak 0.89 tail 2 rate 48000"
+        , "instrument right = glass send 0.4"
+        , "instrument left = wobble"
+        , "right: 0", "left: 7" ]))
+      let timbreOf name = timbre (instruments (performance doc) M.! name)
+          glass = timbreOf "right"
+      A.oscillators glass === [A.Osc A.TriangleWave 0 1 1 0, A.Osc A.SineWave 12 0.5 1 0]
+      A.amp glass === (A.Velocity A.:* A.adsr 0.001 0.7 0 0.6)
+      (A.cutoff glass, A.resonance glass, A.stereoWidth glass) === (A.cutoff A.pluck, A.resonance A.pluck, A.stereoWidth A.pluck)
+      A.pitch (timbreOf "left") === (A.K 0.2 A.:* A.Lfo A.SineWave 5.5)
+      mix (performance doc) === A.Mix 48000 A.hall {A.wet = 0.5} 1.5 0.89 2 True
+      -- With a reverb, send means something: the wet render rings on after a dry one stops.
+      let blip extra = parseDocument (unlines ["tempo 60", extra, "instrument right = sine send 1", "right: 0"])
+      dryDoc <- evalEither (blip "master tail 1 rate 8000")
+      wetDoc <- evalEither (blip "reverb hall\nmaster tail 1 rate 8000")
+      (dryL, _) <- evalEither (render (performance dryDoc) (score dryDoc) >>= A.renderTimelineMix (mix (performance dryDoc)))
+      (wetL, _) <- evalEither (render (performance wetDoc) (score wetDoc) >>= A.renderTimelineMix (mix (performance wetDoc)))
+      assert (VU.all (== 0) (VU.drop 8200 dryL) && VU.any ((> 1e-3) . abs) (VU.drop 8400 wetL))
+      mapM_ (assert . isLeft . parseDocument . (header ++))
+        -- Each fails for its own reason: sounds are checked even when unused.
+        [ "sound a from nowhere\nright: 0"
+        , "sound a from b\nsound b from a\nright: 0"
+        , "sound a amp 1 amp 2\nright: 0"
+        , "sound a amp lfo sine 3\nright: 0"
+        , "sound a cutoff hz 400 / key\nright: 0"
+        , "sound a colour 3\nright: 0"
+        , "sound a\nsound a\nright: 0"
+        , "instrument x = nothing\nright: 0"
+        , "reverb wet -1", "reverb hall loud 1", "master peak 2", "master rate 4000"
+        , "master normalize maybe", "reverb hall\nreverb none" ])
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))

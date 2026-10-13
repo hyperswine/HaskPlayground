@@ -42,7 +42,8 @@ right: answer [x] & [12:4 _:4]
 left: (-12 -5):4 (-7 -3):4 (-12 -5):4 (-7 -3):4
 ```
 
-Statements occupy one line; `--` starts a comment. Headers, bindings and voice
+Statements occupy one line, and a line that starts with whitespace continues
+the statement above it; `--` starts a comment. Headers, bindings and voice
 statements can be interleaved, except global tuning must precede instruments.
 `tempo` defaults to 120, tuning to 12-EDO at C4, meter to 4 quarter-note beats,
 and the key hint to C major. Instrument declarations are required for voices.
@@ -148,12 +149,37 @@ Haskell API support other references. Header and instrument values (tempo,
 gain, pan, send, vibrato rate, raw tuning) are decimals; everything in the music
 is an exact number expression.
 
-Presets: `piano`, `sine`, `saw`, `square`, `pluck`, `supersaw`, `reeseBass`,
-`subBass`, `kick`, `snare`, `hat`, `noiseSweep`. `piano` is a simple synthesized
-piano-like sound, not a sampled acoustic instrument. Attributes are `staff`
-(`treble`/`bass`), `gain` (nonnegative), `pan` (-1..1), and `send` (0..1).
-Custom patches, per-instrument tuning, and mix/reverb settings remain available
-in Haskell; this first text format does not serialize arbitrary patches or mixes.
+Built-in sounds: `basic`, `piano`, `sine`, `saw`, `square`, `pluck`,
+`supersaw`, `reeseBass`, `subBass`, `kick`, `snare`, `hat`, `noiseSweep`.
+`examples/neomusic/presets.neomusic` writes each one as a `sound` definition
+that equals it exactly (a test checks), so that file is what they mean. `piano`
+is a simple synthesized piano-like sound, not a sampled acoustic instrument.
+Instrument attributes are `staff` (`treble`/`bass`), `gain` (nonnegative), `pan`
+(-1..1), and `send` (0..1, the reverb send).
+
+**Sounds.** `sound NAME [from BASE]` defines a sound, starting from another
+sound in the file or a built-in (without `from`, from `basic`). Its parts,
+each on its own indented line or on the same line, replace the base's:
+`osc WAVE [up n] [gain g] [unison u] [detune c]` (wave: sine, saw, square,
+triangle, noise; any `osc` lines replace all the base's oscillators), `amp`,
+`pitch` (semitones) and `cutoff` (octaves above C4) as modulation expressions,
+and `resonance`, `highpass` (Hz), `width`. A modulation expression is in the
+sound's physical units, seconds and Hz: numbers, `velocity`, `key` (the
+note's pitch, octaves above C4), `adsr a d s r`, `linear a b secs`,
+`approach a b secs` (99% of the way after secs), `then secs x y`,
+`release secs x`, `lfo WAVE hz`, `hz f` (a frequency as a cutoff),
+`filter base keytrack env amount velocity` (the classic cutoff), and
+`+ - * /` (dividing by a constant). Velocity is applied only where `amp` says
+so. Sounds may refer to each other in any order, but not in a cycle, and a
+sound named like a built-in replaces it in that file. Every sound is checked
+even if unused. See `examples/neomusic/forest.neomusic` and
+`neomusic-sounds.md`.
+
+**Mix.** `reverb [hall|none] [room x] [damping x] [width x] [wet x]
+[predelay x]` sets the reverb, starting from none unless `hall` is named.
+`master [drive x] [peak x] [tail secs] [rate hz] [normalize on|off]` sets the
+master stage. Both are headers (once each) and are checked as the Haskell
+`Mix` is. Per-instrument tuning remains Haskell-only.
 
 ## Haskell model
 

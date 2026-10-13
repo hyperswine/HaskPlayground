@@ -1,0 +1,54 @@
+-- "Forest Path": a 24-second game field theme in A minor, sound and mix included.
+tempo 132
+tuning 12 at C4
+meter 4
+
+-- The sound: two sounds of its own, a hall, and a little drive.
+sound flute from sine
+  osc triangle
+  osc sine up 12 gain 0.3
+  amp velocity * adsr 0.03 0.2 0.8 0.25
+  pitch 0.12 * lfo sine 5            -- a breath of vibrato at 5 Hz, whatever the tempo
+sound warmPad from supersaw
+  amp velocity * adsr 0.6 1 0.8 1.5
+  cutoff filter 700 0.3 (adsr 0.8 2 0.5 1.5) 1.2 1
+reverb hall wet 0.35
+master drive 1.2 peak 0.89 tail 2
+
+instrument lead  = flute staff treble gain 0.5 pan 0.15 send 0.35
+instrument pad   = warmPad staff treble gain 0.22 send 0.5
+instrument bass  = reeseBass staff bass gain 0.5
+instrument kick  = kick gain 0.9
+instrument snare = snare gain 0.35 send 0.2
+instrument hat   = hat gain 0.18 pan -0.3
+
+-- Harmony: Am F C G, one bar each.
+Am = (-3 0 4)
+F  = (-7 -3 0)
+C  = (-8 -5 0)
+G  = (-10 -5 -1)
+prog = Am:4 F:4 C:4 G:4
+
+-- Bass: root eighths with an octave jump, per chord root.
+pump #r = [r r [r + 12] r r r [r + 12] r]:1/2
+bassline = pump -15 pump -19 pump -12 pump -17
+
+-- Drums, one bar each: kick at A1, snare body at C3, accented hats.
+kicks  = -27 _ -27 _
+snares = _ -12 _ -12
+hats   = vel 0.5 [[12 vel 0.6 [12]]*4]:1/2
+
+-- Lead: A section in A minor pentatonic; B a fourth up, detached, then a held climax.
+a1 = [16 14 12 9]:1/2 12:2
+a2 = [14 12 9 7]:1/2 9:2
+a3 = [12 14 16 19]:1/2 16:2
+a4 = [14 12]:1/2 bend {0:0 1/2:0 1:-2} [9:3]
+tuneA = a1 a2 a3 a4
+tuneB = staccato [up 5 [a1 a2]] a3 rit 3/4 [hold 2 [21:4]]
+
+lead:  _:16 tuneA tuneB
+pad:   swell 1/3 -> 1 [prog] prog prog
+bass:  _:16 bassline bassline
+kick:  _:16 [kicks]*8
+snare: _:16 [snares]*8
+hat:   [hats]*12

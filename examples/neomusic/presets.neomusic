@@ -1,0 +1,82 @@
+-- The built-in sounds, written as .neomusic sound definitions. Each one here
+-- equals the preset of the same name exactly (a test checks), so this file is
+-- what the presets mean. Times are seconds, frequencies Hz, pitches semitones,
+-- cutoffs octaves above C4 (hz f converts). velocity is applied only where amp says so.
+
+sound basic
+  osc saw
+  amp velocity * adsr 0.005 0 1 0.05
+  pitch 0
+  cutoff hz 20000
+  resonance 0  highpass 0  width 0
+
+-- Bright plucked saw; velocity opens the filter.
+sound pluck from basic
+  osc saw unison 3 detune 14
+  osc square up 12 gain 0.25
+  amp velocity * adsr 0.002 0.4 0 0.3
+  cutoff filter 450 0.5 (adsr 0.001 0.2 0 0.2) 3.5 1.2
+  resonance 0.3  width 0.6
+
+-- Seven detuned saws plus a sub-octave, slow attack, wide stereo.
+sound supersaw from basic
+  osc saw unison 7 detune 38
+  osc saw up -12 gain 0.35
+  amp velocity * adsr 0.4 0.6 0.8 1.2
+  cutoff filter 900 0.3 (adsr 0.5 1.5 0.4 1) 1.5 2
+  resonance 0.15  width 1
+
+-- Two slowly beating saws over a sine sub, low-passed.
+sound reeseBass from basic
+  osc saw unison 2 detune 22
+  osc sine up -12 gain 0.8
+  amp velocity * adsr 0.005 0.3 0.8 0.08
+  cutoff filter 160 0 (adsr 0.002 0.25 0 0.1) 2.5 1
+  resonance 0.25  width 0.3
+
+sound subBass from basic
+  osc sine
+  osc triangle gain 0.12
+  amp velocity * adsr 0.01 0 1 0.1
+
+-- Sine with a fast pitch drop: tune the note to the body (about 40-60 Hz).
+sound kick from basic
+  osc sine
+  amp velocity * adsr 0.001 0.35 0 0.05
+  pitch approach 36 0 (4.6 * 0.035)
+
+-- Noise burst over a pitched triangle body.
+sound snare from basic
+  osc noise unison 2
+  osc triangle gain 0.6
+  amp velocity * adsr 0.001 0.22 0 0.08
+  pitch approach 7 0 (4.6 * 0.03)
+  cutoff hz 8000  highpass 180  width 0.3
+
+-- Closed hi-hat: short high-passed noise.
+sound hat from basic
+  osc noise unison 2
+  amp velocity * adsr 0.001 0.05 0 0.03
+  highpass 7000  width 0.4
+
+-- Noise swell whose resonant filter sweeps up over about four seconds.
+sound noiseSweep from basic
+  osc noise unison 2
+  amp velocity * adsr 3 0 1 0.3
+  cutoff filter 250 0 (adsr 4 0 1 0.3) 5.5 0
+  resonance 0.55  highpass 120  width 1
+
+sound sine from basic
+  osc sine
+  amp velocity * adsr 0.005 0 1 0.015
+sound saw from sine
+  osc saw
+sound square from sine
+  osc square
+
+-- A synthesized piano-like tone, not a sampled piano.
+sound piano from basic
+  osc sine
+  osc sine up 12 gain 0.35
+  osc sine up 19 gain 0.12
+  amp velocity * adsr 0.002 1.2 0.15 0.15
