@@ -1729,10 +1729,12 @@ pipeStep machine memoryWord =
                 mAction = action, mWord = e2Word x, mA = e2A x, mB = e2B x, mAddress = address }
             actual = if taken then target else cLink comp
             control' = case kind of KindBranch -> True; KindJump -> True; _ -> False
-            -- a taken branch or jump teaches the buffer; a branch not taken
-            -- clears its entry
-            training = if not slow && control' then Just (e2Pc x, taken, target) else Nothing
-         in (stage, if not slow && actual /= e2Predicted x then Just actual else Nothing, training)
+            -- A taken branch or jump teaches the buffer; a branch not taken
+            -- clears its entry. Neither waits on the action: an
+            -- instruction that leaves for the phases flushes the pipeline
+            -- at commit anyway, and a wrong entry only costs a redirect.
+            training = if control' then Just (e2Pc x, taken, target) else Nothing
+         in (stage, if actual /= e2Predicted x then Just actual else Nothing, training)
       -- (in a redirect cycle the stage holds a wrong-path instruction)
       flushing = pRedirect pipe
       -- the result a forwarding instruction selects in this stage
