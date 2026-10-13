@@ -35,16 +35,16 @@ int main(void) {
     check(READ(mcycleh) == 0xabcde && READ(0xc80) == 0xabcde);
     __asm__ volatile("csrr %0, mcycle\n csrr %1, 0xc00\n nop\n csrr %2, mcycle\n"
                      : "=r"(a), "=r"(b), "=r"(c) :: "memory");
-    /* On the BRAM image a CSR read hands over from the pipeline to the
-     * phases: it takes 11 clocks there, then the pipeline restarts and
-     * fetches the next instruction (which reaches the commit stage 9 clocks
-     * later): 20 between two reads. A NOP between them commits in the
-     * pipeline on the way: 21. (The SDRAM image runs the phases alone.) */
+    /* On the BRAM image a CSR read reaches the pipeline's commit stage,
+     * which flushes the pipeline and runs the read and write as two
+     * phases; then the pipeline restarts at the next instruction: 11 clocks
+     * between two reads, 12 with a NOP between them (it commits in the
+     * pipeline on the way). (The SDRAM image runs the phases alone.) */
 #ifdef SIMPLE_RISC_SDRAM
     /* Fetch waits and refresh add variable clocks; mcycle must count them. */
     check(b - a > 11 && b - a < 256); check(c - b > 20 && c - b < 512);
 #else
-    check(b - a == 20); check(c - b == 21);
+    check(b - a == 11); check(c - b == 12);
 #endif
     __asm__ volatile("csrw minstreth, zero\n li t0, -1\n csrw minstret, t0\n"
                      "addi t1, zero, 1\n csrr %0, minstret\n csrr %1, minstreth\n"
