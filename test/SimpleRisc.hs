@@ -1367,6 +1367,23 @@ matchesReferenceModel configure = withTests 300 . property $ do
   [IntMap.findWithDefault 0 k coreMemory | k <- touched] === [IntMap.findWithDefault 0 k modelMemory | k <- touched]
   counterValue (cpuInstret (simMachine drained)) === fromIntegral (Model.mRetired model)
 
+-- | The pipeline's multiplier (four partial products, then a sum) gives
+-- exactly the word MUL, MULH, MULHSU and MULHU define.
+prop_pipeline_multiplier_is_exact :: Property
+prop_pipeline_multiplier_is_exact = withTests 2000 . property $ do
+  a <- forAll genValue
+  b <- forAll genValue
+  funct3 <- forAll (Gen.element [0, 1, 2, 3])
+  let signedOf v = P.toInteger (bitCoerce v :: Signed 32)
+      unsignedOf = P.toInteger
+      (x, y) = case funct3 of
+        1 -> (signedOf a, signedOf b)
+        2 -> (signedOf a, unsignedOf b)
+        _ -> (unsignedOf a, unsignedOf b)
+      product64 = (x P.* y) `P.mod` (2 P.^ (64 :: Int))
+      expected = if funct3 == 0 then product64 `P.mod` (2 P.^ (32 :: Int)) else product64 `P.div` (2 P.^ (32 :: Int))
+  P.toInteger (productHalf funct3 (partialProducts funct3 a b)) === expected
+
 -- Interpret the pipelined carry in the independent test reference only.
 counterValue :: Counter64 -> Unsigned 64
 counterValue Counter64 {..} =
@@ -1700,6 +1717,7 @@ simpleRiscGroup =
       ("SPI DMA moves blocks", prop_spi_dma_moves_blocks),
       ("Core matches the reference model on random programs", prop_core_matches_reference_model),
       ("Pipeline matches the reference model on random programs", prop_pipeline_matches_reference_model),
+      ("The pipeline's multiplier is exact", prop_pipeline_multiplier_is_exact),
       ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
       ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),

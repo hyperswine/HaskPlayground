@@ -1476,6 +1476,9 @@ data ExecuteTwo = ExecuteTwo
   { e2Pc :: Word32, e2Control :: ExecuteControl, e2Computed :: Computed,
     e2Candidates :: Vec 8 Word32, e2AluCompare :: CompareResults, e2BranchCompare :: CompareResults,
     e2B :: Word32, e2Op2 :: Word32, e2Imm :: Word32,
+    -- | A multiply's four 17 x 17 partial products (DSP blocks), summed in
+    -- the second execute stage.
+    e2Products :: Vec 4 (Signed 34),
     e2Rd :: Index 32, e2Writes :: Bool, e2Slow :: Bool }
   deriving (Generic, NFDataX)
 
@@ -1540,6 +1543,31 @@ restartPipe pc pipe =
     { pFetchPc = pc, pInflight = repeat Nothing, pQueueRead = 0, pQueueWrite = 0, pOutstanding = 0,
       pD = Nothing, pDFresh = False, pE1 = Nothing, pE2 = Nothing, pM = Nothing, pRedirect = Nothing }
 
+-- | A multiply's operands as 33-bit signed values (sign- or zero-extended
+-- as MUL, MULH, MULHSU or MULHU needs), split into a signed high 17 bits
+-- and an unsigned low 16, multiplied pairwise: four 17 x 17 products, each
+-- one DSP block.
+partialProducts :: BitVector 3 -> Word32 -> Word32 -> Vec 4 (Signed 34)
+partialProducts funct3 a b =
+  let extend signed value
+        | signed = resize (bitCoerce value :: Signed 32) :: Signed 33
+        | otherwise = bitCoerce (resize value :: Unsigned 33)
+      a33 = extend (funct3 == 1 || funct3 == 2) a
+      b33 = extend (funct3 == 1) b
+      high v = resize (v `shiftR` 16) :: Signed 17
+      low v = resize (v .&. 0xffff) :: Signed 17
+   in (high a33 `mul` high b33) :> (high a33 `mul` low b33) :> (low a33 `mul` high b33) :> (low a33 `mul` low b33) :> Nil
+
+-- | The partial products summed: MUL's low word, else the high word.
+productHalf :: BitVector 3 -> Vec 4 (Signed 34) -> Word32
+productHalf funct3 products =
+  let wide v = resize v :: Signed 66
+      total = (wide (products !! (0 :: Index 4)) `shiftL` 32)
+        + ((wide (products !! (1 :: Index 4)) + wide (products !! (2 :: Index 4))) `shiftL` 16)
+        + wide (products !! (3 :: Index 4))
+      bits = bitCoerce total :: BitVector 66
+   in if funct3 == 0 then unpack (slice d31 d0 bits) else unpack (slice d63 d32 bits)
+
 -- | One cycle of the pipeline: fetch (up to four words outstanding), decode
 -- and register read with forwarding, two execute stages, and the commit
 -- stage. ALU instructions, jumps, branches, and aligned RAM loads and
@@ -1597,6 +1625,7 @@ pipeStep machine memoryWord =
             kind = execKind control
             funct3 = execFunct3 control
             aluResult
+              | execMulDiv control = Just (productHalf funct3 (e2Products x))
               | execLui control = Just (e2Imm x)
               | execAuipc control = Just (cTarget comp)
               | execAluOp control = selectedAlu control (e2Candidates x) (e2AluCompare x)
@@ -1615,15 +1644,17 @@ pipeStep machine memoryWord =
             store = not slow && case kind of KindStore -> True; _ -> False
             storeWord = store && funct3 == 2
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
+            -- (MULH shares SLL's funct3; execShift marks it too)
+            shift = execShift control && not (execMulDiv control)
             stage = MemoryStage
               { mPc = e2Pc x, mNext = if taken then target else cLink comp,
                 mValue = value, mRd = e2Rd x, mWrites = e2Writes x && not slow,
-                mFinal = not load && not (execShift control),
+                mFinal = not load && not shift,
                 mLoad = load, mStore = store, mStoreWord = storeWord,
                 mFunct3 = funct3, mOffset = resize address,
                 mIndex = ramWordIndex address, mData = storeLanes funct3 (resize address) (e2B x),
                 mMask = storeMask funct3 (resize address),
-                mShift = execShift control, mArith = execArithmeticShift control, mAmount = e2Op2 x,
+                mShift = shift, mArith = execArithmeticShift control, mAmount = e2Op2 x,
                 mWait = if load || (store && not storeWord) then 2 else 0, mSlow = slow }
          in (stage, if not slow && taken then Just target else Nothing)
       -- (in a redirect cycle the stage holds a wrong-path instruction)
@@ -1650,6 +1681,7 @@ pipeStep machine memoryWord =
                 e2AluCompare = compareOperands a op2,
                 e2BranchCompare = compareOperands a b,
                 e2B = b, e2Op2 = op2, e2Imm = imm,
+                e2Products = partialProducts (execFunct3 control) a b,
                 e2Rd = e1Rd x, e2Writes = e1Writes x, e2Slow = e1Slow x }
       e1Advance = isNothing (pE2 pipe) || e2Advance
       -- Decode and register read ---------------------------------------------
@@ -1665,7 +1697,9 @@ pipeStep machine memoryWord =
               KindAlu -> True; KindJump -> True; KindBranch -> True
               KindLoad -> True; KindStore -> True; KindFence -> True
               _ -> False
-            slow = not (romAddress pc || validMemoryAddress pc) || execMulDiv control || not fastKind
+            -- (MUL, MULH, MULHSU, MULHU run here; division in the phases)
+            slow = not (romAddress pc || validMemoryAddress pc) || (execMulDiv control && testBit (execFunct3 control) 2)
+              || not fastKind
             rs1 = instructionRs1 word
             rs2 = instructionRs2 word
             rd = instructionRd word
