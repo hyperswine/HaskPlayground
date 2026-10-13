@@ -83,10 +83,14 @@ A `key` or `meter` header affects only the sheet view.
   See `examples/neomusic/articulation.neomusic`.
 - `speed r [...]` performs the group at `r` times the written tempo (`speed 3/4`
   is slower); `speed a -> b [...]` changes smoothly from `a` to `b` across the
-  group, as a ritardando or accelerando; `swing s [...]` plays each beat's two
-  halves long-short, the first taking share `s` of the beat (`swing 2/3` is
-  triplet swing); `hold k [...]` (from the prelude: `speed 1/k`) holds the group
-  `k` times as long, a fermata when it covers one note. The written notes never change: these shape the
+  group, as a ritardando or accelerando; `speed cycle {len:shape ...} [...]`
+  lays those segments (written beats, each a constant, `(a -> b)` or a nested
+  `(cycle {...})`) end to end and repeats them across the group. The prelude
+  names the common ones: `swing s [...]` plays each beat's two halves
+  long-short, the first taking share `s` of the beat (`swing 2/3` is triplet
+  swing), `swingPer p s` does the same over `p` beats, and `hold k [...]`
+  (`speed 1/k`) holds the group `k` times as long, a fermata when it covers
+  one note. The written notes never change: these shape the
   performance only. A tempo change acts on everything sounding during its
   beats, in every voice, so it doesn't matter which hand's line you write it in
   and the hands can't drift apart. Nested changes multiply. See
@@ -191,14 +195,17 @@ patterns. `scaleGate` (what `gate` does), `withGate`, `staccato` (gate ×
 `scoreLength` gives a score's length in beats.
 
 `Tempo shape score` shapes how fast `score` is performed; `Shape` is
-`Speed r`, `Ramp a b` or `Swing period share`, all exact rationals, and
-`hold k = Tempo (Speed (1/k))`. Every shape changes tempo by an equal ratio per
+`Ramp a b` (from factor a to b; constant when equal) or `Cycle segments`
+(written-beat lengths and shapes, repeated), all exact rationals.
+`steady r = Ramp r r`, `swung period share` is a two-segment cycle,
+`speedOf`/`swingOf` recognise them, and `hold k = Tempo (steady (1/k))`. Every shape changes tempo by an equal ratio per
 beat, so nested shapes multiply into the same family. `timeMap` builds the one
 shared clock from all tempo nodes, `performed` maps written beats through it,
 and `tempoNodes` lists each node with its written start and length. `render`
-is the only place the clock meets `bpm`. `rev` reverses ramps and mirrors swing
-(exact when the swung extent is a whole number of periods); `stretch` scales a
-node's extent and swing period.
+is the only place the clock meets `bpm`. `rev` reverses ramps and runs a
+cycle's segments backwards, each mirrored, so swing becomes short-long (exact
+when the extent is a whole number of periods); `stretch` scales a node's
+extent and its cycle lengths.
 
 `pitchShift` and `level` are `Signal`s (`NeoMusic.Signal`, re-exported by
 `Score`): `Const`, `Points`, `Osc Sine|Square rate`, `:+:`, `:*:` and `Cents`.
@@ -317,7 +324,8 @@ Gates become articulation: at most 1/2 is staccato (`-.`), below 1 portato
 segment. A pedal therefore shows as let-ring ties on each note, not as a
 *Ped.* marking. Tempo changes are marks on a spacer line between the staves,
 so the notes stay as written: a speed is a metronome mark, a ramp "rit." or
-"accel." then "a tempo", swing "Swing" then "Straight", and a hold over a
+"accel." then "a tempo", swing "Swing" then "Straight", any other cycle
+"cycling tempo" then "a tempo", and a hold over a
 single onset a `\fermata` on its notes. A bend that ends higher or lower draws
 a `\glissando` to the next note in its voice; other bends are marked "bend",
 vibrato "vib.", a growing or fading swell "cresc." or "dim.", and one that does

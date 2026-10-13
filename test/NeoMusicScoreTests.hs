@@ -229,17 +229,17 @@ scoreGroup = Group "NeoMusic score and views"
           close (s1, n1) (s2, n2) = abs (s1 - s2) < 1e-9 && length n1 == length n2
             && and [abs (x - y) < 1e-9 && abs (u - w) < 1e-9 | ((x, u), (y, w)) <- zip n1 n2]
       plain <- times line
-      same <- times (Tempo (Speed 1) line)
+      same <- times (Tempo (steady 1) line)
       assert (close plain same)
-      nested <- times (Tempo (Speed a) (Tempo (Speed b) line))
-      product' <- times (Tempo (Speed (a * b)) line)
+      nested <- times (Tempo (steady a) (Tempo (steady b) line))
+      product' <- times (Tempo (steady (a * b)) line)
       assert (close nested product')
       -- Log-linear ramps over the same span multiply into one ramp.
       ramps <- times (Tempo (Ramp 1 a) (Tempo (Ramp b 1) line))
       oneRamp <- times (Tempo (Ramp b a) line)
       assert (close ramps oneRamp)
       -- Audio can't tell a constant speed from rewritten durations.
-      slower <- times (Tempo (Speed (1 / a)) line)
+      slower <- times (Tempo (steady (1 / a)) line)
       stretched <- times (mapPhrases (stretch a) line)
       assert (close slower stretched)
       (whole, _) <- times (Tempo (Ramp 1 (1/2)) (Line "right" (hit [0] 4 1)))
@@ -248,13 +248,13 @@ scoreGroup = Group "NeoMusic score and views"
       xs <- forAll (Gen.list (Range.linear 2 16) (Gen.int (Range.linear (-12) 12)))
       let eighths = Line "right" (concatMap (\x -> hit [x] (1/2) 1) xs)
       straight <- evalEither (render perf eighths)
-      swung <- evalEither (render perf (Tempo (Swing 1 (2/3)) eighths))
-      let pairs = zip3 [0 :: Int ..] (A.notes straight) (A.notes swung)
+      swingRender <- evalEither (render perf (Tempo (swung 1 (2/3)) eighths))
+      let pairs = zip3 [0 :: Int ..] (A.notes straight) (A.notes swingRender)
       assert (and [abs (A.start u - A.start v) < 1e-12 | (i, u, v) <- pairs, even i])
       assert (and [abs (A.start v - (A.start u - 0.25 + 0.5 * 2/3)) < 1e-12 | (i, u, v) <- pairs, odd i])
       -- Whole pairs keep the total; an unpaired last eighth is played long.
-      if even (length xs) then assert (abs (A.seconds swung - A.seconds straight) < 1e-12)
-        else assert (abs (A.seconds swung - (A.seconds straight - 0.25 + 0.5 * 2/3)) < 1e-12)
+      if even (length xs) then assert (abs (A.seconds swingRender - A.seconds straight) < 1e-12)
+        else assert (abs (A.seconds swingRender - (A.seconds straight - 0.25 + 0.5 * 2/3)) < 1e-12)
       -- A slowed middle section leaves earlier notes alone and shifts later ones evenly.
       let before = Line "right" (n 0 <> n 1)
           middle = Line "right" (n 2 <> n 3 <> n 4)
@@ -266,8 +266,8 @@ scoreGroup = Group "NeoMusic score and views"
       take 2 (starts warped) === take 2 (starts flat)
       assert (and [abs (w - f - extra) < 1e-9 | (w, f) <- drop 5 (zip (starts warped) (starts flat))])
       -- Nested and overlapping shapes still give a strictly increasing clock.
-      shape1 <- forAll (Gen.element [Speed 1, Speed (1/3), Ramp 2 (1/2), Swing 1 (3/5)])
-      shape2 <- forAll (Gen.element [Speed 3, Ramp (1/4) 1, Swing (1/2) (1/3)])
+      shape1 <- forAll (Gen.element [steady 1, steady (1/3), Ramp 2 (1/2), swung 1 (3/5)])
+      shape2 <- forAll (Gen.element [steady 3, Ramp (1/4) 1, swung (1/2) (1/3)])
       clocked <- evalEither (render perf (Tempo shape1 (eighths :||: Tempo shape2 (Line "right" (concatMap n xs)))))
       let ordered = sortOn fst [(A.start v, ()) | v <- A.notes clocked]
       assert (all (\(u, w) -> fst u <= fst w) (zip ordered (drop 1 ordered))))
@@ -275,7 +275,7 @@ scoreGroup = Group "NeoMusic score and views"
       xs <- forAll (Gen.list (Range.linear 1 12) (Gen.int (Range.linear (-12) 12)))
       ds <- forAll (Gen.list (Range.singleton (length xs)) (Gen.element [1/4, 1/2, 3/4, 1, 2]))
       g <- forAll (Gen.element [1/2, 1, 3/2])
-      shape <- forAll (Gen.element [Speed (2/3), Ramp 1 (1/2), Ramp (1/2) (3/2), Swing 1 (2/3)])
+      shape <- forAll (Gen.element [steady (2/3), Ramp 1 (1/2), Ramp (1/2) (3/2), swung 1 (2/3), Cycle [(1, Ramp 1 (1/2)), (1/2, steady 2)]])
       let line = Line "right" (withGate g (concat (zipWith (\x d -> hit [x] d 1) xs ds)))
           music = Line "right" (n 0) :>>: Tempo shape line :>>: Line "right" (n 7)
       changes <- evalEither (tempoChanges perf music)
@@ -291,11 +291,11 @@ scoreGroup = Group "NeoMusic score and views"
   , ("tempo in the language, staff and numeric views", withTests 1 $ property $ do
       doc <- evalEither (parseDocument (header++"right: 0 speed 1 -> 3/4 [2 4] swing 2/3 [5:1/2 7:1/2] hold 2 [9] 0\n"))
       map (\(t0, len, shape) -> (t0, len, shape)) (tempoNodes (score doc)) ===
-        [(1, 2, Ramp 1 (3/4)), (3, 1, Swing 1 (2/3)), (4, 1, Speed (1/2))]
+        [(1, 2, Ramp 1 (3/4)), (3, 1, swung 1 (2/3)), (4, 1, steady (1/2))]
       mapM_ (assert . isLeft . parseDocument . (header++))
         ["right: speed 0 [0]", "right: swing 3/2 [0]", "right: swing 1 [0]", "right: hold 0 [0]", "right: speed 1 -> [0]"]
       reversed <- evalEither (parseDocument (header++"right: rev [speed 1 -> 1/2 [0 2] swing 1/3 [4:1/2 5:1/2]]\n"))
-      map (\(_, _, shape) -> shape) (tempoNodes (score reversed)) === [Swing 1 (2/3), Ramp (1/2) 1]
+      map (\(_, _, shape) -> shape) (tempoNodes (score reversed)) === [swung 1 (2/3), Ramp (1/2) 1]
       -- Canonical source keeps the clock: tempo nodes are written over rests.
       text <- evalEither (prettyScore (score doc))
       again <- evalEither (parseDocument (header++text))
@@ -494,7 +494,7 @@ scoreGroup = Group "NeoMusic score and views"
             pure es
       -- hold is no longer a keyword: it is speed 1/k from the prelude.
       held <- evalEither (parseDocument (header ++ "right: hold 3 [0:2] 4\n"))
-      tempoNodes (score held) === [(0, 2, Speed (1/3))]
+      tempoNodes (score held) === [(0, 2, steady (1/3))]
       gs <- events "right: staccato [0 2] legato [4]\n"
       map (gate . event) gs === [1/2, 1/2, 3/2]
       echoes <- events "right: echo 2 1/2 [0]\n"
@@ -509,6 +509,46 @@ scoreGroup = Group "NeoMusic score and views"
       map (pitches . event) lexical === [[A.Step 12], [A.Step 0]]
       -- A duplicate binding within one file is still an error.
       assert (isLeft (parseDocument (header ++ "a = 1\na = 2\nright: a\n"))))
+  , ("tempo cycles: segments repeat; swing is one; source round-trips", withTests 1 $ property $ do
+      let starts sc = do
+            t <- evalEither (render perf sc)
+            pure (A.seconds t, map A.start (A.notes t))
+      -- One beat as written, one at half speed, repeated (120 bpm: 0.5 s a beat).
+      (total, onsets) <- starts (Tempo (Cycle [(1, steady 1), (1, steady (1/2))]) (Line "right" (concatMap n [0, 2, 4, 5])))
+      (total, onsets) === (3, [0, 0.5, 1.5, 2])
+      -- A ramp inside a segment ramps over the segment, each period.
+      (ramped, _) <- starts (Tempo (Cycle [(2, Ramp 1 (1/2))]) (Line "right" (hit [0] 4 1)))
+      assert (abs (ramped - 2 * 0.5 * 2 / log 2) < 1e-12)
+      -- swing and swingPer are cycles from the prelude.
+      let nodes src = do
+            d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))
+            pure (d, [shape | (_, _, shape) <- tempoNodes (score d)])
+      (_, written) <- nodes "speed cycle {1/2:3/4 1/2:3/2} [0:1/2 2:1/2]"
+      written === [swung 1 (2/3)]
+      (perDoc, per) <- nodes "swingPer 1/2 2/3 [0:1/4 2:1/4 4:1/4 5:1/4]"
+      per === [swung (1/2) (2/3)]
+      swingOf (swung (1/2) (2/3)) === Just (1/2, 2/3)
+      speedOf (steady (3/4)) === Just (3/4)
+      -- Swing at any period, and nested cycles, now have a source form.
+      text <- evalEither (prettyScore (score perDoc))
+      again <- evalEither (parseDocument (header ++ text))
+      [shape | (_, _, shape) <- tempoNodes (score again)] === per
+      (nestedDoc, nested) <- nodes "speed cycle {2:(cycle {1/2:2 1/2:1}) 1:(1 -> 1/2)} [0:3]"
+      nested === [Cycle [(2, Cycle [(1/2, steady 2), (1/2, steady 1)]), (1, Ramp 1 (1/2))]]
+      nestedText <- evalEither (prettyScore (score nestedDoc))
+      nestedAgain <- evalEither (parseDocument (header ++ nestedText))
+      [shape | (_, _, shape) <- tempoNodes (score nestedAgain)] === nested
+      mapM_ (assert . isLeft . parseDocument . (header++))
+        [ "right: speed cycle {} [0]", "right: speed cycle {0:1} [0]", "right: speed cycle {1:0} [0]"
+        , "right: speed cycle {1:(sine 1)} [0]", "cycle x = x\nright: cycle [0]" ]
+      -- Views: swing at another period, and a general cycle.
+      perPage <- evalEither (numeric plain (score perDoc))
+      assert ("swingPer 1/2 2/3" `isInfixOf` perPage)
+      general <- evalEither (parseDocument (header ++ "right: speed cycle {1:1 1:1/2} [0 2 4 5] 7\n"))
+      generalPage <- evalEither (numeric plain (score general))
+      assert ("speed cycle {1:1 1:1/2}" `isInfixOf` generalPage && "a tempo" `isInfixOf` generalPage)
+      sheet <- evalEither (engrave perf view (score general))
+      assert ("\"cycling tempo\"" `isInfixOf` sheet && "\"a tempo\"" `isInfixOf` sheet))
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))

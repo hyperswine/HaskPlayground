@@ -82,8 +82,7 @@ engrave perf view score = do
     nodes = [node | node@(_, len, _) <- tempoNodes score, len > 0]
     pitchedOnsets = nub (sort [t | (_, t, _, ps, _) <- events, not (null ps)])
     -- A constant slow-down covering exactly one onset, starting on it, is a fermata.
-    isFermata (t0, len, Speed r) = r < 1 && [t | t <- pitchedOnsets, t0 <= t, t < t0 + len] == [t0]
-    isFermata _ = False
+    isFermata (t0, len, shape) = maybe False (< 1) (speedOf shape) && [t | t <- pitchedOnsets, t0 <= t, t < t0 + len] == [t0]
     fermatas = [t0 | node@(t0, _, _) <- nodes, isFermata node]
     -- Inside a tempo change that began earlier (one starting here doesn't count).
     active x = any (\(t0, len, _) -> t0 < x && x < t0 + len) nodes
@@ -93,17 +92,19 @@ engrave perf view score = do
       [ (t0, startText shape, startFactor shape)
           : [(t0 + len, endText shape, Just 1) | t0 + len < lastBeat, not (active (t0 + len))]
       | node@(t0, len, shape) <- nodes, not (isFermata node) ]
-    startText (Ramp a b)
-      | b < a = Just "rit."
-      | b > a = Just "accel."
-    startText (Swing _ _) = Just "Swing"
-    startText _ = Nothing
-    startFactor (Speed r) = Just r
-    startFactor (Ramp a b) | a == b = Just a
-    startFactor _ = Nothing
-    endText (Ramp _ _) = Just "a tempo"
-    endText (Swing _ _) = Just "Straight"
-    endText _ = Nothing
+    -- A constant speed is a metronome mark (and ends with one); a ramp is rit.
+    -- or accel. then "a tempo"; swing is "Swing" then "Straight".
+    startText shape
+      | swingOf shape /= Nothing = Just "Swing"
+      | Ramp a b <- shape, b < a = Just "rit."
+      | Ramp a b <- shape, b > a = Just "accel."
+      | Cycle _ <- shape = Just "cycling tempo"
+      | otherwise = Nothing
+    startFactor = speedOf
+    endText shape
+      | swingOf shape /= Nothing = Just "Straight"
+      | speedOf shape /= Nothing = Nothing
+      | otherwise = Just "a tempo"
     marks
       | null rawMarks = []
       | otherwise =

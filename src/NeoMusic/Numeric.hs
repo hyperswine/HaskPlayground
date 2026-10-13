@@ -81,14 +81,13 @@ tempoMarks score = do
       onsets = nub (sort [onset e | e <- es, not (null (pitches (event e)))])
       single (t0, len, _) = [t | t <- onsets, t0 <= t, t < t0 + len] == [t0]
       active x = any (\(t0, len, _) -> t0 < x && x < t0 + len) nodes
-      startText node@(_, _, shape) = case shape of
-        Speed r | r < 1 && single node -> "hold " ++ rationalText (1 / r)
-        Speed r -> "speed " ++ rationalText r
-        Ramp a b -> "speed " ++ rationalText a ++ " -> " ++ rationalText b
-        Swing p sh -> "swing " ++ rationalText sh ++ (if p == 1 then "" else " per " ++ rationalText p)
-      isHold node@(_, _, shape) = case shape of Speed r -> r < 1 && single node; _ -> False
-      endText (Swing _ _) = "straight"
-      endText _ = "a tempo"
+      -- Source-like text, naming the prelude's forms where the shape is one.
+      startText node@(_, _, shape)
+        | isHold node, Just r <- speedOf shape = "hold " ++ rationalText (1 / r)
+        | Just (p, sh) <- swingOf shape = if p == 1 then "swing " ++ rationalText sh else "swingPer " ++ rationalText p ++ " " ++ rationalText sh
+        | otherwise = "speed " ++ shapeSource shape
+      isHold node@(_, _, shape) = maybe False (< 1) (speedOf shape) && single node
+      endText shape = if swingOf shape /= Nothing then "straight" else "a tempo"
       -- Ends sort before starts at the same beat: "a tempo, swing 2/3".
       raw = [(t0 + len, 0 :: Int, endText shape) | node@(t0, len, shape) <- nodes, not (isHold node), t0 + len < total, not (active (t0 + len))]
             ++ [(t0, 1, startText node) | node@(t0, _, _) <- nodes]

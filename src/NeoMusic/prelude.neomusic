@@ -15,6 +15,8 @@ cents #c x    = pitch (cents c) [x]    -- a fine offset in cents, any tuning
 hold #k x     = speed 1/k [x]          -- a fermata: held k times as long
 rit #r x      = speed 1 -> r [x]       -- slow to r times the tempo
 accel #r x    = speed 1 -> r [x]       -- speed up to r times the tempo
+swing #s x       = speed cycle {1/2:(1/(2*s)) 1/2:(1/(2*(1 - s)))} [x]       -- long-short eighths, share s
+swingPer #p #s x = speed cycle {(p/2):(1/(2*s)) (p/2):(1/(2*(1 - s)))} [x]   -- swing over p beats
 staccato x    = gate 1/2 [x]           -- each note sounds half its length
 legato x      = gate 3/2 [x]           -- each note rings into the next
 

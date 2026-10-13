@@ -1,6 +1,7 @@
 -- | Unitless music. Interpretation is supplied once, outside the score tree.
 module NeoMusic.Score
   ( Event(..), Phrase, Name, Score(..), Shape(..), Instrument(..), Performance(..)
+  , steady, swung, speedOf, swingOf, shapeSource
   , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
   , module NeoMusic.Signal
   , addPitch, scaleLevel, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
@@ -12,6 +13,7 @@ module NeoMusic.Score
 
 import Control.Monad (unless, forM_)
 import qualified Data.Map.Strict as M
+import Data.Ratio (denominator, numerator)
 import qualified NeoMusic.Audio as A
 import NeoMusic.Pitch (Step(..), Tuning(..), freq)
 import NeoMusic.Signal
@@ -41,12 +43,41 @@ data Score = Line Name Phrase | Silence Rational | Score :>>: Score | Score :||:
 
 -- | A tempo factor over a node's written extent: 1 is as written, 1/2 half speed.
 -- Every shape is piecewise log-linear (equal tempo ratio per beat), so nested
--- shapes multiply into the same family.
+-- shapes multiply into the same family. See neomusic-cycle.md.
 data Shape
-  = Speed Rational             -- ^ constant factor
-  | Ramp Rational Rational     -- ^ from factor a at the start to b at the end
-  | Swing Rational Rational    -- ^ period p beats; the first half of each period takes share s
+  = Ramp Rational Rational        -- ^ from factor a at the start to b at the end (a == b: constant)
+  | Cycle [(Rational, Shape)]     -- ^ these segments (written beats, shape), repeated from the start
   deriving (Eq, Show)
+
+-- | A constant speed.
+steady :: Rational -> Shape
+steady r = Ramp r r
+
+-- | Swing: in each period of @p@ beats, the first half takes share @s@ of the time.
+swung :: Rational -> Rational -> Shape
+swung p s = Cycle [(p / 2, steady (1 / (2 * s))), (p / 2, steady (1 / (2 * (1 - s))))]
+
+-- | A shape as the argument of @speed@ in .neomusic source.
+shapeSource :: Shape -> String
+shapeSource (Ramp a b) = if a == b then fraction a else fraction a ++ " -> " ++ fraction b
+shapeSource (Cycle segs) = "cycle {" ++ unwords [fraction l ++ ":" ++ segment sub | (l, sub) <- segs] ++ "}"
+  where segment sub = if speedOf sub /= Nothing then shapeSource sub else "(" ++ shapeSource sub ++ ")"
+
+fraction :: Rational -> String
+fraction x = show (numerator x) ++ (if denominator x == 1 then "" else "/" ++ show (denominator x))
+
+-- | The factor of a constant speed.
+speedOf :: Shape -> Maybe Rational
+speedOf (Ramp a b) | a == b = Just a
+speedOf _ = Nothing
+
+-- | Period and long share of a swing: two equal constant halves whose times
+-- add up to the period.
+swingOf :: Shape -> Maybe (Rational, Rational)
+swingOf (Cycle [(h1, Ramp a a'), (h2, Ramp b b')])
+  | h1 == h2 && a == a' && b == b' && a > 0 && b > 0 && 1 / a + 1 / b == 2
+  = Just (2 * h1, 1 / (2 * a))
+swingOf _ = Nothing
 infixr 5 :>>:
 infixr 4 :||:
 instance Semigroup Score where (<>) = (:>>:)
@@ -159,10 +190,10 @@ glide f score = fst (go 0 score)
     go at (a :||: b) = let (a', ta) = go at a; (b', tb) = go at b in (a' :||: b', max ta tb)
     go at (Tempo shape s) = let (s', t) = go at s in (Tempo shape s', t)
 
--- | A fermata: the music inside is held @k@ times as long ('Speed' (1/k)).
+-- | A fermata: the music inside is held @k@ times as long ('steady' (1/k)).
 -- The staff view prints a fermata when this covers a single onset.
 hold :: Rational -> Score -> Score
-hold k = Tempo (Speed (1 / k))
+hold k = Tempo (steady (1 / k))
 
 -- | Sustain pedal held down for the whole score: every note rings until the
 -- score's end. Onsets and lengths are unchanged; only gates grow. Rests stay rests.
@@ -228,10 +259,11 @@ flatten = go 0
       (db, nb) <- go at b
       pure (max da db, na++nb)
     go at (Tempo shape s) = validShape shape >> go at s
-    validShape (Speed r) = unless (r > 0) (Left "speed must be positive")
-    validShape (Ramp a b) = unless (a > 0 && b > 0) (Left "tempo ramp factors must be positive")
-    validShape (Swing p sh) = unless (p > 0 && sh > 0 && sh < 1)
-      (Left "swing needs a positive period and a long share strictly between 0 and 1")
+    validShape (Ramp a b) = unless (a > 0 && b > 0) (Left "tempo factors must be positive")
+    validShape (Cycle segs) = do
+      unless (not (null segs) && all ((> 0) . fst) segs)
+        (Left "a tempo cycle needs segments of positive length")
+      mapM_ (validShape . snd) segs
 
 -- | Every tempo node with its written start and length, outermost first.
 tempoNodes :: Score -> [(Rational, Rational, Shape)]
@@ -253,13 +285,18 @@ timeMap :: Score -> TimeMap
 timeMap score = TimeMap (M.fromList (scan 0 0 merged))
   where
     pieces = concatMap nodePieces (tempoNodes score)
-    nodePieces (t0, len, shape) = filter (\(u, v, _, _) -> u < v) $ case shape of
-      Speed r -> [(t0, t0 + len, ln r, 0)]
-      Ramp a b -> [(t0, t0 + len, ln a, ln (b / a) / fromRational len) | len > 0]
-      Swing p sh ->
-        let end = t0 + len
-        in concat [ [(t, min (t + p / 2) end, ln (1 / (2 * sh)), 0), (t + p / 2, min (t + p) end, ln (1 / (2 * (1 - sh))), 0)]
-                  | t <- takeWhile (< end) [t0, t0 + p ..] ]
+    nodePieces (t0, len, shape) = filter (\(u, v, _, _) -> u < v) (shapePieces t0 len (t0 + len) shape)
+    -- A shape spanning [start, start + len), cut off at @clip@. A cycle lays
+    -- its segments end to end and repeats them; each segment's shape spans
+    -- the segment.
+    shapePieces start len clip shape = case shape of
+      Ramp a b -> [(start, min (start + len) clip, ln a, ln (b / a) / fromRational len) | len > 0]
+      Cycle segs ->
+        let end = min (start + len) clip
+            period = sum (map fst segs)
+        in concat [ shapePieces (t + offset) l end sub
+                  | period > 0, t <- takeWhile (< end) [start, start + period ..]
+                  , (offset, (l, sub)) <- zip (scanl (+) 0 (map fst segs)) segs, t + offset < end ]
     ln = log . fromRational
     breaks = M.keys (M.fromList [(x, ()) | (u, v, _, _) <- pieces, x <- [u, v]])
     -- Factors multiply where nodes overlap, so log factors and slopes add.

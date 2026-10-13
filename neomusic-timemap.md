@@ -1,7 +1,9 @@
 # NeoMusic time maps: design note
 
 **Status:** implemented 2026-10-12, with all five recommendations in section 9
-accepted. Item 2 of the primitives list (after the gate). Where the code
+accepted. On 2026-10-14 the shape set was revised to `Ramp` and `Cycle`, with
+swing a prelude definition (`neomusic-cycle.md`); the clock, semantics and
+views below are unchanged. Item 2 of the primitives list (after the gate). Where the code
 differs from this note:
 
 - Shape parameters are exact `Rational`s, not `Double`s; they become `Double`

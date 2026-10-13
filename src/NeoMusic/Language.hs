@@ -34,7 +34,9 @@ data NumE = NLit Rational | NVar Name | NBin Char NumE NumE | NNeg NumE
   deriving (Eq, Show)
 data Param = MusicParam Name | NumberParam Name deriving (Eq, Show)
 data Arg = MusicArg Expr | NumberArg NumE deriving (Eq, Show)
-data ShapeE = SpeedS NumE | SwingS NumE deriving (Eq, Show)
+-- | A tempo shape as written: a signal (a constant, or a -> b), or a cycle of
+-- segments (written beats, shape).
+data ShapeE = SignalShape NumE | CycleShape [(NumE, ShapeE)] deriving (Eq, Show)
 data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr Expr
   | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr
   | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
@@ -144,8 +146,8 @@ expression kinds numberNames = parallel
       <|> (keyword "gate" *> (Gate <$> numExpr <*> term))
       <|> (keyword "pedal" *> (Pedal <$> term))
       -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
-      <|> (keyword "speed" *> (TempoE . SpeedS <$> numExpr <*> term))
-      <|> (keyword "swing" *> (TempoE . SwingS <$> numExpr <*> term))
+      -- speed r; speed a -> b (rit. or accel.); speed cycle {len:shape ...}.
+      <|> (keyword "speed" *> (TempoE <$> shapeP <*> term))
       <|> (keyword "pitch" *> (PitchE <$> numExpr <*> term))
       <|> (keyword "level" *> (LevelE <$> numExpr <*> term))
       <|> (keyword "glide" *> (GlideE <$> numExpr <*> term))
@@ -165,6 +167,16 @@ expression kinds numberNames = parallel
       <|> (try (lexeme (char '-' <* lookAhead (oneOf " \t"))) *> numAtom >>= suffix . (\k -> Trans (NNeg k) e))
       <|> (symbol "*" *> numAtom >>= suffix . (`Repeat` e))
       <|> pure e
+
+-- | A tempo shape: @cycle {len:shape ...}@, or a signal (a constant or @a -> b@).
+-- Inside a cycle, a segment's shape is a number atom, or a parenthesised
+-- @(a -> b)@ or @(cycle {...})@.
+shapeP :: Parser ShapeE
+shapeP = (keyword "cycle" *> (CycleShape <$> between (symbol "{") (symbol "}") (many1 segment)))
+  <|> (SignalShape <$> numExpr)
+  where
+    segment = (,) <$> numAtom <* symbol ":" <*> segmentShape
+    segmentShape = try (between (symbol "(") (symbol ")") shapeP) <|> (SignalShape <$> numAtom)
 
 runLine :: Int -> Parser a -> String -> Either String a
 runLine line p input = either (Left . show) Right (parse (white *> p <* eof) (".neomusic line "++show line) input)
@@ -186,7 +198,7 @@ presets = M.fromList
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","gate","pedal","speed","swing","pitch","level","glide","sine","square"]
+reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","glide","sine","square"]
 
 -- | Source lines without comments or blank lines, numbered from 1.
 sourceLines :: String -> [(Int, String)]
@@ -378,14 +390,7 @@ evaluate env name expr = case expr of
   Gate g e -> do g' <- num g >>= positiveNumber "a gate"; mapPhrases (scaleGate g') <$> recur e
   Pedal e -> pedal <$> recur e
   TempoE shape e -> do
-    s <- case shape of
-      SpeedS r -> do
-        sig <- signalValue env r
-        case (constantValue sig, sig) of
-          (Just k, _) -> Speed <$> positiveNumber "a speed" k
-          (_, Points [(0, a), (1, b)]) -> Ramp <$> positiveNumber "a speed" a <*> positiveNumber "a speed" b
-          _ -> Left "speed takes a constant or a -> b"
-      SwingS sh -> Swing 1 <$> num sh
+    s <- tempoShape shape
     Tempo s <$> recur e
   PitchE p e -> do sig <- signalValue env p; mapPhrases (addPitch sig) <$> recur e
   LevelE l e -> do sig <- signalValue env l; mapPhrases (scaleLevel sig) <$> recur e
@@ -410,6 +415,14 @@ evaluate env name expr = case expr of
   where
     recur = evaluate env name
     num = numberValue env
+    tempoShape shape = case shape of
+      SignalShape r -> do
+        sig <- signalValue env r
+        case (constantValue sig, sig) of
+          (Just k, _) -> steady <$> positiveNumber "a speed" k
+          (_, Points [(0, a), (1, b)]) -> Ramp <$> positiveNumber "a speed" a <*> positiveNumber "a speed" b
+          _ -> Left "speed takes a constant, a -> b, or cycle {...}"
+      CycleShape segs -> Cycle <$> mapM (\(l, sub) -> (,) <$> (num l >>= positiveNumber "a cycle segment's length") <*> tempoShape sub) segs
     argument (MusicArg e) = MusicV <$> recur e
     argument (NumberArg e) = SignalV <$> signalValue env e
 
@@ -420,19 +433,19 @@ scaleScore k (a :>>: b) = scaleScore k a :>>: scaleScore k b
 scaleScore k (a :||: b) = scaleScore k a :||: scaleScore k b
 scaleScore k (Tempo shape s) = Tempo (scaled shape) (scaleScore k s)
   where
-    scaled (Swing p sh) = Swing (k * p) sh
+    scaled (Cycle segs) = Cycle [(k * l, scaled sub) | (l, sub) <- segs]
     scaled other = other
 reverseScore :: Score -> Score
 reverseScore (Line name xs) = Line name (retro xs)
 reverseScore (Silence d) = Silence d
 reverseScore (a :>>: b) = reverseScore b :>>: reverseScore a
--- A ramp runs backwards; swing becomes short-long (exact when the extent is a
--- whole number of periods, since periods are counted from the node's start).
+-- A ramp runs backwards; a cycle's segments run in reverse order, each mirrored,
+-- so swing becomes short-long (exact when the extent is a whole number of
+-- periods, since periods are counted from the node's start).
 reverseScore (Tempo shape s) = Tempo (mirrored shape) (reverseScore s)
   where
     mirrored (Ramp a b) = Ramp b a
-    mirrored (Swing p sh) = Swing p (1 - sh)
-    mirrored other = other
+    mirrored (Cycle segs) = Cycle (reverse [(l, mirrored sub) | (l, sub) <- segs])
 reverseScore (a :||: b) =
   let da = scoreLength a
       db = scoreLength b
@@ -447,19 +460,13 @@ prettyScore s = do
   (total,events) <- flatten s
   let carrier = case events of e:_ -> instrument e; [] -> "silent"
   -- The clock is shared, so each tempo node can stand alone over rests.
-  tempos <- mapM (\(t0,len,shape) -> do
-      text <- shapeText shape
-      pure (carrier ++ ": " ++ silence t0 ++ text ++ " [_:" ++ rat len ++ "]"))
-    [node | node@(_,len,_) <- tempoNodes s, len > 0]
+  let tempos = [ carrier ++ ": " ++ silence t0 ++ "speed " ++ shapeSource shape ++ " [_:" ++ rat len ++ "]"
+               | (t0,len,shape) <- tempoNodes s, len > 0 ]
   pure (unlines ([instrument e ++ ": " ++ silence (onset e) ++ token (event e)
                   ++ silence (total-onset e-dur (event e)) | e <- events] ++
                 (if null events then ["instrument silent = sine", "silent: "++if total == 0 then "[0]*0" else "_:"++rat total] else [])
                 ++ tempos))
   where
-    shapeText (Speed r) = Right ("speed "++rat r)
-    shapeText (Ramp a b) = Right ("speed "++rat a++" -> "++rat b)
-    shapeText (Swing 1 sh) = Right ("swing "++rat sh)
-    shapeText (Swing _ _) = Left "swing with a period other than one beat has no text form yet"
     rat = ratText
     -- Every compound is parenthesised, so it reads back as one atom.
     signalText sig = case sig of
