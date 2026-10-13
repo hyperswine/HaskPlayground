@@ -1453,19 +1453,21 @@ systemReset cause machine =
 -- | A fetched word and its pc.
 -- | A fetched word and its pc, with which source registers it reads
 -- (decoded as it arrives, so decode's hazard check is only compares).
-data Fetched = Fetched {fPc :: Word32, fWord :: Word32, fUsesRs1 :: Bool, fUsesRs2 :: Bool}
+data Fetched = Fetched {fPc :: Word32, fWord :: Word32, fUsesRs1 :: Bool, fUsesRs2 :: Bool,
+  -- | The pc fetched after it (the branch target buffer's prediction).
+  fPredicted :: Word32}
   deriving (Generic, NFDataX, Show, Eq)
 
-fetchedWord :: Word32 -> Word32 -> Fetched
-fetchedWord pc word =
+fetchedWord :: (Word32, Word32) -> Word32 -> Fetched
+fetchedWord (pc, predicted) word =
   let opcode = word .&. 0x7f
    in Fetched pc word (opcode /= 0x37 && opcode /= 0x17 && opcode /= 0x6f)
-        (opcode == 0x33 || opcode == 0x23 || opcode == 0x63)
+        (opcode == 0x33 || opcode == 0x23 || opcode == 0x63) predicted
 
 -- | Decode/register read to the first execute stage: operands (forwarded),
 -- the immediate and the decoded control.
 data ExecuteOne = ExecuteOne
-  { e1Pc :: Word32, e1Word :: Word32, e1Control :: ExecuteControl,
+  { e1Pc :: Word32, e1Predicted :: Word32, e1Word :: Word32, e1Control :: ExecuteControl,
     e1A :: Word32, e1B :: Word32, e1Imm :: Word32, e1Op2 :: Word32,
     e1Rd :: Index 32, e1Writes :: Bool, e1Slow :: Bool }
   deriving (Generic, NFDataX)
@@ -1473,7 +1475,7 @@ data ExecuteOne = ExecuteOne
 -- | The first execute stage's registered adders, comparisons and ALU
 -- candidates (as in Execute), for the second to select from.
 data ExecuteTwo = ExecuteTwo
-  { e2Pc :: Word32, e2Control :: ExecuteControl, e2Computed :: Computed,
+  { e2Pc :: Word32, e2Predicted :: Word32, e2Control :: ExecuteControl, e2Computed :: Computed,
     e2Candidates :: Vec 8 Word32, e2AluCompare :: CompareResults, e2BranchCompare :: CompareResults,
     e2B :: Word32, e2Op2 :: Word32, e2Imm :: Word32,
     -- | A multiply's four 17 x 17 partial products (DSP blocks), summed in
@@ -1507,12 +1509,24 @@ data MemoryStage = MemoryStage
     mSlow :: Bool }
   deriving (Generic, NFDataX)
 
+-- | A branch target buffer entry: a taken branch or jump at the tagged pc
+-- went to the target last time.
+data BtbEntry = BtbEntry {bValid :: Bool, bTag :: Unsigned 27, bTarget :: Word32}
+  deriving (Generic, NFDataX, Show, Eq)
+
+btbIndex :: Word32 -> Index 8
+btbIndex pc = fromIntegral (resize (pc `shiftR` 2) :: Unsigned 3)
+
+btbTag :: Word32 -> Unsigned 27
+btbTag pc = resize (pc `shiftR` 5)
+
 data Pipe = Pipe
   { -- | The next pc to fetch.
     pFetchPc :: Word32,
     -- | Reads in flight, newest first; the last one's word is on the
     -- memory bus this cycle.
-    pInflight :: Vec 3 (Maybe Word32),
+    -- (each with the pc predicted to follow it)
+    pInflight :: Vec 3 (Maybe (Word32, Word32)),
     -- | Fetched words waiting for decode: a ring, read at pQueueRead and
     -- written at pQueueWrite (each modulo 4; the difference is the count).
     pQueue :: Vec 4 Fetched,
@@ -1532,11 +1546,15 @@ data Pipe = Pipe
     pM :: Maybe MemoryStage,
     -- | A taken branch or jump left the second execute stage last cycle:
     -- this cycle the younger stages are flushed and its target fetched.
-    pRedirect :: Maybe Word32 }
+    pRedirect :: Maybe Word32,
+    -- | Eight entries, indexed by pc bits 4..2: fetch follows a hit's
+    -- target; the second execute stage corrects a wrong guess.
+    pBtb :: Vec 8 BtbEntry }
   deriving (Generic, NFDataX)
 
 emptyPipe :: Pipe
-emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing Nothing
+emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False 0)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing Nothing
+  (repeat (BtbEntry False 0 0))
 
 -- | Empty every stage and fetch from @pc@. Only valid bits, pointers and
 -- the pc change: the stages' contents are don't-cares once empty.
@@ -1552,14 +1570,14 @@ restartPipe pc pipe =
 -- one DSP block.
 partialProducts :: BitVector 3 -> Word32 -> Word32 -> Vec 4 (Signed 34)
 partialProducts funct3 a b =
-  let extend signed value
+  let widen signed value
         | signed = resize (bitCoerce value :: Signed 32) :: Signed 33
         | otherwise = bitCoerce (resize value :: Unsigned 33)
-      a33 = extend (funct3 == 1 || funct3 == 2) a
-      b33 = extend (funct3 == 1) b
-      high v = resize (v `shiftR` 16) :: Signed 17
-      low v = resize (v .&. 0xffff) :: Signed 17
-   in (high a33 `mul` high b33) :> (high a33 `mul` low b33) :> (low a33 `mul` high b33) :> (low a33 `mul` low b33) :> Nil
+      a33 = widen (funct3 == 1 || funct3 == 2) a
+      b33 = widen (funct3 == 1) b
+      upper v = resize (v `shiftR` 16) :: Signed 17
+      lower v = resize (v .&. 0xffff) :: Signed 17
+   in (upper a33 `mul` upper b33) :> (upper a33 `mul` lower b33) :> (lower a33 `mul` upper b33) :> (lower a33 `mul` lower b33) :> Nil
 
 -- | The partial products summed: MUL's low word, else the high word.
 productHalf :: BitVector 3 -> Vec 4 (Signed 34) -> Word32
@@ -1648,18 +1666,23 @@ pipeStep machine memoryWord =
             storeWord = store && funct3 == 2
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
             -- (MULH shares SLL's funct3; execShift marks it too)
-            shift = execShift control && not (execMulDiv control)
+            shifting = execShift control && not (execMulDiv control)
             stage = MemoryStage
               { mPc = e2Pc x, mNext = if taken then target else cLink comp,
                 mValue = value, mRd = e2Rd x, mWrites = e2Writes x && not slow,
-                mFinal = not load && not shift,
+                mFinal = not load && not shifting,
                 mLoad = load, mStore = store, mStoreWord = storeWord,
                 mFunct3 = funct3, mOffset = resize address,
                 mIndex = ramWordIndex address, mData = storeLanes funct3 (resize address) (e2B x),
                 mMask = storeMask funct3 (resize address),
-                mShift = shift, mArith = execArithmeticShift control, mAmount = e2Op2 x,
+                mShift = shifting, mArith = execArithmeticShift control, mAmount = e2Op2 x,
                 mWait = if load || (store && not storeWord) then 2 else 0, mSlow = slow }
-         in (stage, if not slow && taken then Just target else Nothing)
+            actual = if taken then target else cLink comp
+            control' = case kind of KindBranch -> True; KindJump -> True; _ -> False
+            -- a taken branch or jump teaches the buffer; a branch not taken
+            -- clears its entry
+            training = if not slow && control' then Just (e2Pc x, taken, target) else Nothing
+         in (stage, if not slow && actual /= e2Predicted x then Just actual else Nothing, training)
       -- (in a redirect cycle the stage holds a wrong-path instruction)
       flushing = pRedirect pipe
       -- the result a forwarding instruction selects in this stage
@@ -1674,7 +1697,11 @@ pipeStep machine memoryWord =
       e2Moved = case pE2 pipe of
         Just x | e2Advance && isNothing flushing -> Just (e2Out x)
         _ -> Nothing
-      redirect = e2Moved >>= P.snd
+      redirect = e2Moved >>= (\(_, r, _) -> r)
+      btb = pBtb pipe
+      btb' = case e2Moved >>= (\(_, _, t) -> t) of
+        Just (pc, taken, target) -> replace (btbIndex pc) (BtbEntry taken (btbTag pc) target) btb
+        Nothing -> btb
       e2Reading = case pE2 pipe of
         Just x -> e2Reads x && isNothing flushing
         Nothing -> False
@@ -1687,7 +1714,7 @@ pipeStep machine memoryWord =
             op2 = e1Op2 x
             control = e1Control x
          in ExecuteTwo
-              { e2Pc = e1Pc x, e2Control = control,
+              { e2Pc = e1Pc x, e2Predicted = e1Predicted x, e2Control = control,
                 e2Computed = (compute (e1Pc x) (e1Word x) a b imm op2) {cAlu = Nothing, cTaken = Nothing},
                 e2Candidates = aluCandidates control a op2,
                 e2AluCompare = compareOperands a op2,
@@ -1739,7 +1766,7 @@ pipeStep machine memoryWord =
             writes = not slow && rd /= 0 && case kind of
               KindAlu -> True; KindJump -> True; KindLoad -> True; _ -> False
          in ( ExecuteOne
-                { e1Pc = pc, e1Word = word, e1Control = control,
+                { e1Pc = pc, e1Predicted = fPredicted f, e1Word = word, e1Control = control,
                   e1A = a, e1B = b, e1Imm = imm, e1Op2 = if opcode == 0x33 then b else imm,
                   e1Rd = rd, e1Writes = writes, e1Slow = slow },
               hazard, (a, b) )
@@ -1778,11 +1805,13 @@ pipeStep machine memoryWord =
       portBusy = mWriting || e2Reading
       fetchPc = fromMaybe (pFetchPc pipe) flushing
       issue = not portBusy && pOutstanding pipe < 4
-      issued = if issue then Just fetchPc else Nothing
+      entry = btb !! btbIndex fetchPc
+      predicted = if bValid entry && bTag entry == btbTag fetchPc then bTarget entry else fetchPc + 4
+      issued = if issue then Just (fetchPc, predicted) else Nothing
       pipe'
         | handover = restartPipe 0 pipe
         | isJust flushing =
-            (restartPipe (if issue then fetchPc + 4 else fetchPc) pipe)
+            (restartPipe (if issue then predicted else fetchPc) pipe)
               { pInflight = issued :> Nothing :> Nothing :> Nil,
                 pOutstanding = if issue then 1 else 0,
                 pM = case pM pipe of
@@ -1790,7 +1819,7 @@ pipeStep machine memoryWord =
                   _ -> Nothing }
         | otherwise =
               Pipe
-              { pFetchPc = if issue then fetchPc + 4 else fetchPc,
+              { pFetchPc = if issue then predicted else fetchPc,
                 pInflight = issued :> init inflight,
                 pQueue = queue', pQueueRead = readPointer', pQueueWrite = writePointer',
                 pOutstanding = pOutstanding pipe + (if issue then 1 else 0) - leaving,
@@ -1807,8 +1836,9 @@ pipeStep machine memoryWord =
                   _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
                 pM = case pM pipe of
                   Just m | mHold -> Just m {mWait = mWait m - 1}
-                  _ -> P.fst <$> e2Moved,
-                pRedirect = redirect
+                  _ -> (\(stage, _, _) -> stage) <$> e2Moved,
+                pRedirect = redirect,
+                pBtb = btb'
               }
       readAddress = if e2Reading then e2Index else memoryIndex fetchPc
       committed = case pM pipe of
