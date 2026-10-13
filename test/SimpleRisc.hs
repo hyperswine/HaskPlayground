@@ -1288,7 +1288,11 @@ genItem i n = Gen.frequency
 --   an exception saves mepc/mcause/mtval in x14-x16, clears mtvec and ends
 --   with ECALL into the ROM.
 genProgram :: Gen [Word32]
-genProgram = do
+genProgram = Gen.bool >>= genProgramWith
+
+-- | With or without interrupts enabled (MIE and MSIE) by the prologue.
+genProgramWith :: Bool -> Gen [Word32]
+genProgramWith enabled = do
   n <- Gen.integral (Range.linear 1 64)
   let go i acc
         | i >= n = P.pure (P.reverse acc)
@@ -1296,7 +1300,6 @@ genProgram = do
             ws <- genItem i n
             go (i + P.length ws) (P.reverse ws P.++ acc)
   body <- P.take n <$> go 0 []
-  enabled <- Gen.bool
   let enables = if enabled then [csrInstruction 0x300 6 0 8, csrInstruction 0x304 6 0 8] else []
       prologue = 5 + P.length enables
       handlerAt = prologue + P.length body + 1
@@ -1366,6 +1369,55 @@ matchesReferenceModel configure = withTests 300 . property $ do
   devMsip (cpuDevices core) === Model.mMsip model
   [IntMap.findWithDefault 0 k coreMemory | k <- touched] === [IntMap.findWithDefault 0 k modelMemory | k <- touched]
   counterValue (cpuInstret (simMachine drained)) === fromIntegral (Model.mRetired model)
+
+-- | Interrupts arriving at any moment are invisible to the program: the
+-- same random program, run once undisturbed and once with software
+-- interrupts raised at random cycles (the handler counts them in x10 and
+-- clears msip), ends with the same registers (but x10 and the handler's
+-- x13) and memory. Run on the phases and on the pipeline. The body's
+-- accesses to CSRs an interrupt changes (mstatus, mepc, mcause, mtval,
+-- mip) become NOPs.
+interruptsAreTransparent :: (Machine -> Machine) -> Property
+interruptsAreTransparent configure = withTests 100 . property $ do
+  generated <- forAll (genProgramWith True)
+  let -- setup (7), body, ECALL, handler (10)
+      (setup, rest) = P.splitAt 7 generated
+      (body, tailWords) = P.splitAt (P.length rest P.- 11) rest
+      touchesTrapState w = w .&. 0x7f == 0x73 && (w `shiftR` 12) .&. 7 /= 0
+        && (w `shiftR` 20) `P.elem` [0x300, 0x341, 0x342, 0x343, 0x344]
+      program = setup P.++ P.map (\w -> if touchesTrapState w then 0x13 else w) body P.++ tailWords
+  values <- forAll (Gen.list (Range.singleton 8) genValue)
+  gaps <- forAll (Gen.list (Range.linear 1 40) (Gen.integral (Range.linear 1 60)))
+  let dataStart = fromIntegral ((dataBase - ramBase) `shiftR` 2) :: Int
+      regs = P.zip [1 .. 8] values P.++ [(31, dataPointer)]
+      memory = IntMap.fromList (P.zip [0 ..] program P.++ P.zip [dataStart ..] (P.replicate 256 0))
+      start = startSim (configure (runningMachine [(fromIntegral r, v) | (r, v) <- regs])) (Ram 0 memory)
+      raiseAt = P.scanl1 (P.+) gaps
+      run sim cycle pending
+        | romAddress (cpuPc (simMachine sim)) || cycle > 50000 = sim
+        | otherwise =
+            let (now, later) = P.span (P.<= cycle) pending
+                m = simMachine sim
+                poked = if P.null now then sim else sim {simMachine = m {cpuDevices = (cpuDevices m) {devMsip = True}}}
+                next = stepSim poked Nothing
+             in simMachine next `seq` cpuRegs (simMachine next) `seq` ramWords (simRam next) `seq` run next (cycle P.+ 1) later
+      finish sim = runInputs sim (P.replicate 3 Nothing)
+      quiet = finish (run start (0 :: Int) [])
+      noisy = finish (run start (0 :: Int) raiseAt)
+      keep m = [cpuRegs m !! (r :: Index 32) | r <- [1 .. 31], r /= 10, r /= 13]
+  annotateShow (cpuRegs (simMachine noisy) !! (10 :: Index 32))
+  -- a program that runs past the cap (a loop whose counter was skipped)
+  -- stops at different points in the two runs: not a test
+  when (not (romAddress (cpuPc (simMachine quiet)) && romAddress (cpuPc (simMachine noisy)))) discard
+  classify "interrupted" (cpuRegs (simMachine noisy) !! (10 :: Index 32) > 0)
+  keep (simMachine noisy) === keep (simMachine quiet)
+  ramWords (simRam noisy) === ramWords (simRam quiet)
+
+prop_phases_interrupts_are_transparent :: Property
+prop_phases_interrupts_are_transparent = interruptsAreTransparent P.id
+
+prop_pipeline_interrupts_are_transparent :: Property
+prop_pipeline_interrupts_are_transparent = interruptsAreTransparent pipelined
 
 -- | The pipeline's multiplier (four partial products, then a sum) gives
 -- exactly the word MUL, MULH, MULHSU and MULHU define.
@@ -1718,6 +1770,8 @@ simpleRiscGroup =
       ("Core matches the reference model on random programs", prop_core_matches_reference_model),
       ("Pipeline matches the reference model on random programs", prop_pipeline_matches_reference_model),
       ("The pipeline's multiplier is exact", prop_pipeline_multiplier_is_exact),
+      ("Interrupts are transparent to the phases", prop_phases_interrupts_are_transparent),
+      ("Interrupts are transparent to the pipeline", prop_pipeline_interrupts_are_transparent),
       ("MRET takes a pending interrupt at once", prop_mret_takes_pending_interrupt_at_once),
       ("Boot ROM quietens interrupt sources before R", prop_boot_rom_quietens_devices_before_run),
       ("Precise staged exception entry", prop_precise_exception_entry),
