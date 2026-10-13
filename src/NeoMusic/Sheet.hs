@@ -137,10 +137,20 @@ engrave perf view score = do
     flatNames = ["c", "des", "d", "ees", "e", "f", "ges", "g", "aes", "a", "bes", "b"]
     octave k = replicate (abs k) (if k >= 0 then '\'' else ',')
     emitRest t d = emit "r" True ("", "") t d []
-    emitVoice total gap = go 0
+    -- The previous note's swell (direction, level at its end) is carried along
+    -- the voice, so a phrase-long crescendo is marked once where it starts. A
+    -- note that restarts quieter (a new swell) is marked again.
+    emitVoice total gap = go 0 (Flat, 0)
       where
-        go at [] = emit gap True ("", "") at (total - at) []
-        go at ((_, t, d, ps, ev) : xs) = emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs)) t d ps ++ go (t + d) xs
+        go at _ [] = emit gap True ("", "") at (total - at) []
+        go at previous ((_, t, d, ps, ev) : xs) =
+          emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs) (continuing previous ev)) t d ps
+            ++ go (t + d) (swellMotion ev, levelAt ev 1) xs
+        levelAt ev u = valueAt 0 1 u (level ev)
+        continuing (motion, end) ev = case (motion, swellMotion ev) of
+          (Rising, Rising) -> levelAt ev 0 >= end - 1e-9
+          (Falling, Falling) -> levelAt ev 0 <= end + 1e-9
+          _ -> False
         continues t ((_, u, _, qs, _) : _) = u == t && not (null qs)
         continues _ [] = False
     -- The gate becomes an articulation on the note's first segment, or for a
@@ -148,17 +158,17 @@ engrave perf view score = do
     -- Gate and fermata as before; a bend that ends elsewhere draws a glissando
     -- to the next note in the voice, any other bend, vibrato and swells are
     -- written as words or an espressivo.
-    articulation ev t followed =
+    articulation ev t followed continuesSwell =
       let (front, back) = gateMarks (gate ev)
           sliding = bendMotion ev `elem` [Rising, Falling] && followed
           curveFront = concat
             [ if bendMotion ev /= Flat && not sliding then "^\\markup \\italic \"bend\"" else ""
             , if vibrates ev then "^\\markup \\italic \"vib.\"" else ""
             , case swellMotion ev of
-                Rising -> "_\\markup \\italic \"cresc.\""
-                Falling -> "_\\markup \\italic \"dim.\""
+                Rising | not continuesSwell -> "_\\markup \\italic \"cresc.\""
+                Falling | not continuesSwell -> "_\\markup \\italic \"dim.\""
                 Returning -> "\\espressivo"
-                Flat -> "" ]
+                _ -> "" ]
           -- The numeric notation under each note: its steps, highest on top.
           stepsBelow = case reverse (sort [x | A.Step x <- pitches ev]) of
             _ | not (numbers view) -> ""

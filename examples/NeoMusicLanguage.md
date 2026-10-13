@@ -76,6 +76,15 @@ A `key` or `meter` header affects only the sheet view.
   (`bend 0 -> -1`, `bend {0:0 1/4:1 1:0}`), `vibrato d` is
   `pitch (d * sine 3)` (depth `d` steps, 3 cycles a beat), and `cents c` is
   `pitch (cents c)`.
+- `level across s [...]` and `pitch across s [...]` let a signal span the whole
+  group instead of each note: each note gets the part of `s` within its own
+  sounding time (breakpoints restrict exactly; waves run per note, so they
+  can't span a group). For a level, the value at a note's start becomes part
+  of its strength (velocity), so a crescendo plays louder and brighter, and
+  MIDI velocities follow it. The prelude's `cresc a b [...]` and
+  `dim a b [...]` are `level across a -> b`. The staff marks a run of notes
+  that continues one crescendo or diminuendo once, where it starts. See
+  `examples/neomusic/orchestral.neomusic` and `neomusic-phrase.md`.
 - `gate r` sets how long notes *sound* as a ratio `r` of the time they occupy,
   multiplying like `level`: `gate 1/2 [...]` is staccato, `gate 3/2 [...]` rings
   into the next note. It never moves onsets or changes a passage's length.

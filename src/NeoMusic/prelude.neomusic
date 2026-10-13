@@ -5,6 +5,8 @@
 -- Loudness: level multiplies, so these nest by multiplying.
 vel #v x      = level v [x]            -- strength, 0..1
 swell #s x    = level s [x]            -- a loudness shape, e.g. swell 1/4 -> 1
+cresc #a #b x = level across a -> b [x]   -- louder across the whole group (velocity too)
+dim #a #b x   = level across a -> b [x]   -- softer across the whole group
 
 -- Pitch shapes: pitch adds, in steps.
 bend #s x     = pitch s [x]            -- e.g. bend 0 -> 1, bend {0:0 1/4:1 1:0}

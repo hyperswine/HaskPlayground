@@ -10,6 +10,7 @@ module NeoMusic.Signal
   ( Signal(..), Wave(..)
   , plus, times, negateSignal, constantValue, terms, factors
   , validPoints, hasCents, oscillates, signalBounds, valueAt, withoutOsc
+  , pointsValue, restrictTo
   , Motion(..), motion
   ) where
 
@@ -128,6 +129,34 @@ pointsAt ((u0, y0) : more) u
     go ua ya ((ub, yb) : later)
       | u <= ub = if ub == ua then yb else ya + (yb - ya) * (u - ua) / (ub - ua)
       | otherwise = go ub yb later
+
+-- | Exact value of breakpoints at @x@, flat beyond the first and last.
+pointsValue :: [(Rational, Rational)] -> Rational -> Rational
+pointsValue [] _ = 0
+pointsValue ((u0, y0) : more) x
+  | x <= u0 = y0
+  | otherwise = go u0 y0 more
+  where
+    go _ y [] = y
+    go ua ya ((ub, yb) : later)
+      | x <= ub = if ub == ua then yb else ya + (yb - ya) * (x - ua) / (ub - ua)
+      | otherwise = go ub yb later
+
+-- | The part of a phrase-long signal (over the phrase, 0 to 1) that falls
+-- between phrase positions @x0@ and @x1@, re-expressed over a note's u from 0
+-- to 1. Breakpoints restrict exactly; an oscillator runs per note, so it can't.
+restrictTo :: Rational -> Rational -> Signal -> Either String Signal
+restrictTo x0 x1 s = case s of
+  Const k -> Right (Const k)
+  Points ps ->
+    let start = pointsValue ps x0
+        inside = [((x - x0) / (x1 - x0), y) | (x, y) <- ps, x > x0, x < x1]
+        pts = (0, start) : inside ++ [(1, pointsValue ps x1)]
+    in Right (if all ((== start) . snd) pts then Const start else Points pts)
+  Osc _ _ -> Left "an oscillator runs per note, not across a phrase"
+  a :+: b -> (:+:) <$> restrictTo x0 x1 a <*> restrictTo x0 x1 b
+  a :*: b -> (:*:) <$> restrictTo x0 x1 a <*> restrictTo x0 x1 b
+  Cents a -> Cents <$> restrictTo x0 x1 a
 
 -- | The signal with its oscillators silenced: the shape the reading views describe.
 withoutOsc :: Signal -> Signal

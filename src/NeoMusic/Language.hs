@@ -40,7 +40,7 @@ data ShapeE = SignalShape NumE | CycleShape [(NumE, ShapeE)] deriving (Eq, Show)
 data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr Expr
   | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr
   | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
-  | PitchE NumE Expr | LevelE NumE Expr | GlideE NumE Expr
+  | PitchE NumE Expr | LevelE NumE Expr | PitchAcrossE NumE Expr | LevelAcrossE NumE Expr | GlideE NumE Expr
   deriving (Eq, Show)
 -- | Parameters, body, and whether it came from the prelude (whose bodies only
 -- see prelude definitions, so a document can't change what they mean).
@@ -148,8 +148,9 @@ expression kinds numberNames = parallel
       -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
       -- speed r; speed a -> b (rit. or accel.); speed cycle {len:shape ...}.
       <|> (keyword "speed" *> (TempoE <$> shapeP <*> term))
-      <|> (keyword "pitch" *> (PitchE <$> numExpr <*> term))
-      <|> (keyword "level" *> (LevelE <$> numExpr <*> term))
+      -- pitch/level s: per note; pitch/level across s: spanning the group.
+      <|> (keyword "pitch" *> ((keyword "across" *> (PitchAcrossE <$> numExpr <*> term)) <|> (PitchE <$> numExpr <*> term)))
+      <|> (keyword "level" *> ((keyword "across" *> (LevelAcrossE <$> numExpr <*> term)) <|> (LevelE <$> numExpr <*> term)))
       <|> (keyword "glide" *> (GlideE <$> numExpr <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
@@ -198,7 +199,7 @@ presets = M.fromList
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","glide","sine","square"]
+reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","across","glide","sine","square"]
 
 -- | Source lines without comments or blank lines, numbered from 1. A line
 -- that starts with whitespace continues the statement above it.
@@ -570,6 +571,8 @@ evaluate env name expr = case expr of
     Tempo s <$> recur e
   PitchE p e -> do sig <- signalValue env p; mapPhrases (addPitch sig) <$> recur e
   LevelE l e -> do sig <- signalValue env l; mapPhrases (scaleLevel sig) <$> recur e
+  PitchAcrossE p e -> do sig <- signalValue env p; recur e >>= pitchAcross sig
+  LevelAcrossE l e -> do sig <- signalValue env l; recur e >>= levelAcross sig
   GlideE f e -> do
     f' <- num f >>= positiveNumber "a glide fraction"
     when (f' > 1) (Left "glide fraction must be within 0..1")

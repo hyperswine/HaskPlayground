@@ -4,7 +4,7 @@ module NeoMusic.Score
   , steady, swung, speedOf, swingOf, shapeSource
   , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
   , module NeoMusic.Signal
-  , addPitch, scaleLevel, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
+  , addPitch, scaleLevel, levelAcross, pitchAcross, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
   , mapPhrases, scoreLength, flatten, validate, render, writeAudio
@@ -209,6 +209,41 @@ pedal score = fst (go 0 score)
     go at (a :>>: b) = let (a', ta) = go at a; (b', tb) = go ta b in (a' :>>: b', tb)
     go at (a :||: b) = let (a', ta) = go at a; (b', tb) = go at b in (a' :||: b', max ta tb)
     go at (Tempo shape s) = let (s', t) = go at s in (Tempo shape s', t)
+
+-- | A level signal spanning the whole score rather than each note (a
+-- crescendo over a passage). Each note gets the part of the signal within its
+-- sounding time; its value at the note's start joins the note's strength, so
+-- a crescendo plays louder (velocity, and velocity-to-cutoff), and only the
+-- rest of the shape varies within the note. See neomusic-phrase.md.
+levelAcross :: Signal -> Score -> Either String Score
+levelAcross = across (\piece e -> e {level = times (strengthFirst piece) (level e)})
+  where
+    strengthFirst piece = case piece of
+      Points ps@((_, v0) : _) | v0 /= 0 ->
+        let shape = [(u, y / v0) | (u, y) <- ps]
+        in times (Const v0) (if all ((== 1) . snd) shape then Const 1 else Points shape)
+      _ -> piece
+
+-- | A pitch signal spanning the whole score rather than each note.
+pitchAcross :: Signal -> Score -> Either String Score
+pitchAcross = across (\piece e -> e {pitchShift = plus piece (pitchShift e)})
+
+-- | Apply a score-long signal note by note, each note getting its own span of it.
+across :: (Signal -> Event -> Event) -> Signal -> Score -> Either String Score
+across apply sig score = fst <$> go 0 score
+  where
+    total = scoreLength score
+    go at (Line name xs) = do
+      let onsets = scanl (+) at (map dur xs)
+          place t e
+            | null (pitches e) || total <= 0 = Right e
+            | otherwise = (`apply` e) <$> restrictTo (t / total) ((t + dur e * gate e) / total) sig
+      xs' <- sequence (zipWith place onsets xs)
+      pure (Line name xs', at + sum (map dur xs))
+    go at (Silence d) = Right (Silence d, at + d)
+    go at (a :>>: b) = do (a', ta) <- go at a; (b', tb) <- go ta b; pure (a' :>>: b', tb)
+    go at (a :||: b) = do (a', ta) <- go at a; (b', tb) <- go at b; pure (a' :||: b', max ta tb)
+    go at (Tempo shape s) = do (s', t) <- go at s; pure (Tempo shape s', t)
 
 -- | Length in beats, from durations (gates never change it).
 scoreLength :: Score -> Rational

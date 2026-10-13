@@ -5,7 +5,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Data.Either (isLeft)
-import Data.List (sort, sortOn, isInfixOf, isPrefixOf)
+import Data.List (sort, sortOn, isInfixOf, isPrefixOf, tails)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
@@ -600,6 +600,44 @@ scoreGroup = Group "NeoMusic score and views"
         , "instrument x = nothing\nright: 0"
         , "reverb wet -1", "reverb hall loud 1", "master peak 2", "master rate 4000"
         , "master normalize maybe", "reverb hall\nreverb none" ])
+  , ("phrase signals: across a group, not each note", withTests 1 $ property $ do
+      let events src = do
+            d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))
+            (_, es) <- evalEither (flatten (score d))
+            pure (d, map event es)
+      -- A crescendo: each note's start is its strength; the rest rises within it.
+      (_, rising) <- events "cresc 0.2 1 [0 2 4 5]"
+      map vel rising === [0.2, 0.4, 0.6, 0.8]
+      map level rising === [Const (2/10) :*: Points [(0, 1), (1, 2)], Const (4/10) :*: Points [(0, 1), (1, 3/2)]
+                           , Const (6/10) :*: Points [(0, 1), (1, 4/3)], Const (8/10) :*: Points [(0, 1), (1, 5/4)]]
+      map swellMotion rising === replicate 4 Rising
+      -- Breakpoints restrict exactly; a constant span folds to a constant.
+      (_, held) <- events "level across {0:1 1/4:1/2 3/4:1/2 1:1} [0:4]"
+      map level held === [Points [(0, 1), (1/4, 1/2), (3/4, 1/2), (1, 1)]]
+      (_, flat) <- events "level across {0:1 1/2:1 1:1/2} [0:2 2:2]"
+      map level flat === [Const 1, Points [(0, 1), (1, 1/2)]]
+      -- Pitch adds across the group; a detached note only gets its sounding span.
+      (_, drift) <- events "pitch across 0 -> -1 [0 0]"
+      map pitchShift drift === [Points [(0, 0), (1, -1/2)], Points [(0, -1/2), (1, -1)]]
+      (_, short) <- events "cresc 0 1 [staccato [0 0]]"
+      map level short === [Points [(0, 0), (1, 1/4)], Const (1/2) :*: Points [(0, 1), (1, 3/2)]]
+      -- Nesting multiplies; oscillators can't span a phrase.
+      (_, nested) <- events "vel 0.5 [cresc 0.5 1 [0 0]]"
+      map vel nested === [0.25, 0.375]
+      assert (isLeft (parseDocument (header ++ "right: level across (sine 2) [0]\n")))
+      (_, softer) <- events "dim 1 0.5 [0 0]"
+      map vel softer === [1, 0.75]
+      -- The staff marks a run once, where it starts.
+      (d, _) <- events "cresc 0.2 1 [0 2 4 5] 7"
+      sheet <- evalEither (engrave perf view (score d))
+      length (filter (isPrefixOf "cresc.") (tails sheet)) === 1
+      -- Canonical source keeps each note's share.
+      text <- evalEither (prettyScore (score d))
+      again <- evalEither (parseDocument (header ++ text))
+      (_, xs) <- evalEither (flatten (score d))
+      (_, ys) <- evalEither (flatten (score again))
+      sort [(onset e, show (level (event e))) | e <- ys, not (null (pitches (event e)))]
+        === sort [(onset e, show (level (event e))) | e <- xs])
   , ("LilyPond golden views", withTests 1 $ property $ do
       mapM_ (\name -> do
         source <- evalIO (readFile ("examples/neomusic/"++name++".neomusic"))
