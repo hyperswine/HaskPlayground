@@ -79,11 +79,13 @@ CPI on four kernels fell from 12.98 to 8.82, at 117 MHz (13.3 million
 instructions per second against 7.4 for the serial core at 96 MHz). Then a
 real pipeline: ordinary instructions run five stages deep with several in
 flight, and the rest hand over to the phases. CPI 6.71 (2.75 on plain
-arithmetic) at 96 MHz: 14.3 million instructions per second. The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
+arithmetic) at 96 MHz: 14.3 million instructions per second. With multiply
+in the pipeline, forwarding from execute and a branch target buffer, CPI
+2.56 at 81 MHz: 31.6 million instructions per second. The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
 with differential tests came first. See `boards/tangnano20k/` reports
 FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE, STAGES,
-MEMORY-PORT and PIPELINE (2026-10-12). Next: multiply in the pipeline,
-forwarding from the second execute stage, a branch target buffer, and the
+MEMORY-PORT and PIPELINE (2026-10-12/13). Next: area (the phases are a
+second CPU; the pipeline should be the only datapath), and with it the
 clock.
 
 ## Implementation status (2026-10-11): step 2 complete

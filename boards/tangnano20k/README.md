@@ -6,7 +6,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 
 | Design | Source | Build script | Clock |
 |---|---|---|---|
-| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 96 MHz (placement mode 2) |
+| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 81 MHz (placement mode 2) |
 | SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -310,12 +310,13 @@ pipeline and the rest in the multi-cycle phases
 ([PIPELINE-2026-10-12.md](PIPELINE-2026-10-12.md)). It is:
 
 ```bash
-GOWIN_PLACE_OPTION=2 FREQ_MHZ=96 boards/tangnano20k/build_gowin.sh
+GOWIN_PLACE_OPTION=2 FREQ_MHZ=81 boards/tangnano20k/build_gowin.sh
 ```
 
-The UART then runs at 96,000,000 / 868 = 110,599 baud: pass `--freq-mhz 96`
+The UART then runs at 81,000,000 / 868 = 93,318 baud: pass `--freq-mhz 81`
 to the check scripts. Placement modes give very different results with this
-design (90-106 MHz above a 96 MHz target; modes 2 and 3 close 96). The
+design (77-81 MHz at a 96 MHz target). The first pipeline, without
+multiply, forwarding from execute or branch prediction, closed 96 MHz. The
 phases alone, before the pipeline (commit bae9999), closed 117 MHz in mode 2
 ([MEMORY-PORT-2026-10-12.md](MEMORY-PORT-2026-10-12.md)), and Gowin's license server refuses
 builds intermittently; retry those.
