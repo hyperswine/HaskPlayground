@@ -6,7 +6,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 
 | Design | Source | Build script | Clock |
 |---|---|---|---|
-| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 117 MHz (placement mode 2) |
+| SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 96 MHz (placement mode 2) |
 | SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -305,20 +305,19 @@ vendor placement mode 0 through 4 (default 0).
 FREQ_MHZ=108 boards/tangnano20k/build_gowin.sh
 ```
 
-The current verified SimpleRisc build, with fetch overlap, the RAM
-load/store fast path, branch-target prefetch, decode-ahead, the register
-file in RAM ([REGFILE-2026-10-12.md](REGFILE-2026-10-12.md)) and decoded
-control in the stage register ([STAGES-2026-10-12.md](STAGES-2026-10-12.md))
-and the memory port from registers
-([MEMORY-PORT-2026-10-12.md](MEMORY-PORT-2026-10-12.md)), is:
+The current verified SimpleRisc build runs ordinary instructions in a
+pipeline and the rest in the multi-cycle phases
+([PIPELINE-2026-10-12.md](PIPELINE-2026-10-12.md)). It is:
 
 ```bash
-GOWIN_PLACE_OPTION=2 FREQ_MHZ=117 boards/tangnano20k/build_gowin.sh
+GOWIN_PLACE_OPTION=2 FREQ_MHZ=96 boards/tangnano20k/build_gowin.sh
 ```
 
-The UART then runs at 117,000,000 / 868 = 134,793 baud: pass `--freq-mhz 117`
+The UART then runs at 96,000,000 / 868 = 110,599 baud: pass `--freq-mhz 96`
 to the check scripts. Placement modes give very different results with this
-design (85-108 MHz at a 108 MHz target; mode 2 reaches 117), and Gowin's license server refuses
+design (90-106 MHz above a 96 MHz target; modes 2 and 3 close 96). The
+phases alone, before the pipeline (commit bae9999), closed 117 MHz in mode 2
+([MEMORY-PORT-2026-10-12.md](MEMORY-PORT-2026-10-12.md)), and Gowin's license server refuses
 builds intermittently; retry those.
 
 The build checks the requested clock and rejects any internal setup or hold

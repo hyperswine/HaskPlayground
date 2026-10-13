@@ -79,7 +79,7 @@ import Clash.Prelude
 import Clash.Annotations.BitRepresentation (DataReprAnn(..), ConstrRepr(..), liftQ)
 import Language.Haskell.TH.Syntax (addDependentFile, runIO)
 import qualified Prelude as P
-import Data.Maybe (isJust, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 
 type Word32 = Unsigned 32
 
@@ -744,6 +744,20 @@ data Machine = Machine
     -- enables both overlaps below. Off on images whose memory is driven by
     -- the CPU's phase (the SDRAM wrapper).
     cpuLocalMemory :: Bool,
+    -- | The pipeline: on the BRAM image, ordinary instructions run in
+    -- 'cpuPipe' while the phases above run only the rest (see 'pipeStep').
+    -- cpuFast: the pipeline holds the machine; cpuSlowOne: the phases must
+    -- run one instruction (or take an interrupt) before it may resume.
+    cpuPipelined :: Bool,
+    cpuFast :: Bool,
+    cpuSlowOne :: Bool,
+    cpuPipe :: Pipe,
+    -- | An interrupt is due (registered: the pipeline hands over a cycle
+    -- after it becomes due).
+    cpuInterruptDue :: Bool,
+    -- | The register file's read addresses this cycle, registered: the
+    -- next state's 'registerReads'.
+    cpuReadIndices :: (Index 32, Index 32),
     -- | Fast RAM access: ExecuteFinish found an aligned load or store to
     -- RAM and issued the word's read; Commit skips the bus.
     cpuFastMemory :: Bool,
@@ -859,6 +873,12 @@ initialMachine =
       cpuInstruction = 0,
       cpuFetchFault = False,
       cpuLocalMemory = True,
+      cpuPipelined = False,
+      cpuFast = False,
+      cpuSlowOne = False,
+      cpuPipe = emptyPipe,
+      cpuInterruptDue = False,
+      cpuReadIndices = (0, 0),
       cpuFastMemory = False,
       cpuPortIndex = 0,
       cpuStoreData = 0,
@@ -1045,7 +1065,7 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
     machineInput = bundle (memoryOut, received, txReady, emergencyReset)
     -- MISO is asynchronous: two flip-flops, then into the I/O complex.
     miso = register high (register high sdMiso)
-    machineState = register initialMachine (fst <$> stepped)
+    machineState = register boardMachine (fst <$> stepped)
     stepped = withIo <$> machineState <*> machineInput <*> ioAnswer <*> rfA <*> rfB
     -- The register file is distributed RAM: two copies, one per read port,
     -- written together. The mirror in the machine stays constant (removed).
@@ -1054,8 +1074,8 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
             m {cpuDevices = (cpuDevices m) {devIo = answer}, cpuRfA = a, cpuRfB = b} input
        in (m' {cpuRegs = repeat 0}, output)
     rfWrite = (\m cancel -> if cancel then Nothing else cpuPendingWrite m) <$> machineState <*> breaking
-    rfA = asyncRam (SNat @32) (fst . registerReads <$> machineState) rfWrite
-    rfB = asyncRam (SNat @32) (snd . registerReads <$> machineState) rfWrite
+    rfA = asyncRam (SNat @32) (fst . cpuReadIndices <$> machineState) rfWrite
+    rfB = asyncRam (SNat @32) (snd . cpuReadIndices <$> machineState) rfWrite
     machineOutput = snd <$> stepped
     -- The I/O complex sees the CPU's request as registered bus state and
     -- answers a cycle later; a system reset returns it to idle.
@@ -1091,6 +1111,11 @@ simpleRiscSd serialRx sdMiso = bundle (serialTx, sck, mosi, cs)
     romOut = register 0 (rom bootRomContents (resize <$> memoryAddress :: Signal dom (Unsigned 9)))
     romSelected = register False (register False ((`testBit` 14) <$> memoryAddress))
     memoryOut = mux romSelected romOut ramOut
+
+-- | The BRAM image's CPU: the pipeline runs ordinary instructions and the
+-- phases (without their own overlaps) the rest.
+boardMachine :: Machine
+boardMachine = initialMachine {cpuPipelined = True, cpuLocalMemory = False}
 
 -- I/O complex ---------------------------------------------------------------------
 
@@ -1296,13 +1321,22 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
           cpuPrefetchIssue = False}
         memoryWord received txReady emergencyReset
       cancelled = emergencyReset
-      (bus', response, busOutput, effect) = if cancelled
-        then ((systemBus machine) {busPhase = BusIdle}, Nothing, (0, Nothing, Nothing), NoEffect)
-        else busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine) (cpuDevices machine)
+      (busStepped, busResponse, busOutput, busEffect) =
+        busStepWith decodeTarget (systemBus machine) (cpuBusRequest machine) memoryWord txReady (rxHolding machine) (bootCause machine) (cpuDevices machine)
+      (bus', response, effect) = if cancelled
+        then ((systemBus machine) {busPhase = BusIdle}, Nothing, NoEffect)
+        else (busStepped, busResponse, busEffect)
       busActive = case busPhase (systemBus machine) of
         BusIdle -> case cpuBusRequest machine of Nothing -> False; Just _ -> True
         _ -> True
-      output = if busActive && not cancelled then busOutput else coreOutput
+      -- A break cancels writes and UART bytes; the read address is a
+      -- don't-care then, so it does not wait on the break.
+      (busAddress', busWrite', busTx) = busOutput
+      (coreAddress, coreWrite, coreTx) = coreOutput
+      output =
+        ( if busActive then busAddress' else coreAddress,
+          if busActive then (if cancelled then Nothing else busWrite') else coreWrite,
+          if busActive then (if cancelled then Nothing else busTx) else coreTx )
       counterWrite lowAddress highAddress = case cpuCounterWrite machine of
         Just (address, value)
           | address == lowAddress -> Just (False, value)
@@ -1344,7 +1378,19 @@ machineStepCoreWith decodeTarget machine (memoryWord, received, txReady, emergen
         | cpuTargetCount machine /= 0 =
             prefetched {cpuTargetCount = cpuTargetCount machine - 1}
         | otherwise = prefetched
-   in (if clearRegisters machine then targeted {cpuRegs = repeat 0, cpuRegValid = 0} else targeted, output)
+      final = (if clearRegisters machine then targeted {cpuRegs = repeat 0, cpuRegValid = 0} else targeted)
+        {cpuInterruptDue = isJust (interruptCause machine)}
+      -- The register file's next read: the pipeline's choice while it runs;
+      -- otherwise Decode's sources, which a pipelined machine (without the
+      -- phases' overlaps) always takes from the word FetchWait captures.
+      phasesReads = case cpuPhase machine of
+        FetchWait -> (instructionRs1 memoryWord, instructionRs2 memoryWord)
+        _ -> (instructionRs1 (cpuInstruction machine), instructionRs2 (cpuInstruction machine))
+      -- (a pipeline cycle always reads where the pipeline chose, even as
+      -- it hands over: the phases read nothing for several cycles)
+   in ( if cpuPipelined machine && cpuFast machine then final
+          else final {cpuReadIndices = if cpuPipelined machine then phasesReads else registerReads final},
+        output )
 
 -- | Keep time while an external memory holds the core (the SDRAM wrapper).
 tickHeld :: Machine -> Machine
@@ -1396,8 +1442,335 @@ systemReset cause machine =
       cpuNextValid = False,
       cpuAhead = False,
       cpuPrefetchIssue = False,
-      cpuWake = False
+      cpuWake = False,
+      cpuFast = False,
+      cpuSlowOne = False,
+      cpuPipe = restartPipe 0 (cpuPipe machine)
     }
+
+-- Pipeline -------------------------------------------------------------------
+
+-- | A fetched word and its pc.
+-- | A fetched word and its pc, with which source registers it reads
+-- (decoded as it arrives, so decode's hazard check is only compares).
+data Fetched = Fetched {fPc :: Word32, fWord :: Word32, fUsesRs1 :: Bool, fUsesRs2 :: Bool}
+  deriving (Generic, NFDataX, Show, Eq)
+
+fetchedWord :: Word32 -> Word32 -> Fetched
+fetchedWord pc word =
+  let opcode = word .&. 0x7f
+   in Fetched pc word (opcode /= 0x37 && opcode /= 0x17 && opcode /= 0x6f)
+        (opcode == 0x33 || opcode == 0x23 || opcode == 0x63)
+
+-- | Decode/register read to the first execute stage: operands (forwarded),
+-- the immediate and the decoded control.
+data ExecuteOne = ExecuteOne
+  { e1Pc :: Word32, e1Word :: Word32, e1Control :: ExecuteControl,
+    e1A :: Word32, e1B :: Word32, e1Imm :: Word32, e1Op2 :: Word32,
+    e1Rd :: Index 32, e1Writes :: Bool, e1Slow :: Bool }
+  deriving (Generic, NFDataX)
+
+-- | The first execute stage's registered adders, comparisons and ALU
+-- candidates (as in Execute), for the second to select from.
+data ExecuteTwo = ExecuteTwo
+  { e2Pc :: Word32, e2Control :: ExecuteControl, e2Computed :: Computed,
+    e2Candidates :: Vec 8 Word32, e2AluCompare :: CompareResults, e2BranchCompare :: CompareResults,
+    e2B :: Word32, e2Op2 :: Word32, e2Imm :: Word32,
+    e2Rd :: Index 32, e2Writes :: Bool, e2Slow :: Bool }
+  deriving (Generic, NFDataX)
+
+-- | The commit stage: an instruction here is the oldest in the pipeline.
+-- It writes RAM and the register file, or (slow) hands over to the phases.
+data MemoryStage = MemoryStage
+  { mPc :: Word32,
+    -- | The pc after it: pc + 4 or the taken target.
+    mNext :: Word32,
+    mValue :: Word32, mRd :: Index 32, mWrites :: Bool,
+    -- | mValue is the result (not a load, nor a shift still to finish), so
+    -- a later instruction may take it.
+    mFinal :: Bool,
+    mLoad :: Bool, mStore :: Bool,
+    -- | A word store: writes without reading.
+    mStoreWord :: Bool,
+    mFunct3 :: BitVector 3, mOffset :: Unsigned 2,
+    mIndex :: MemAddr, mData :: Word32, mMask :: Word32,
+    mShift :: Bool, mArith :: Bool, mAmount :: Word32,
+    -- | Cycles until the word read for a load or a sub-word store is on
+    -- the memory bus.
+    mWait :: Unsigned 2,
+    mSlow :: Bool }
+  deriving (Generic, NFDataX)
+
+data Pipe = Pipe
+  { -- | The next pc to fetch.
+    pFetchPc :: Word32,
+    -- | Reads in flight, newest first; the last one's word is on the
+    -- memory bus this cycle.
+    pInflight :: Vec 3 (Maybe Word32),
+    -- | Fetched words waiting for decode: a ring, read at pQueueRead and
+    -- written at pQueueWrite (each modulo 4; the difference is the count).
+    pQueue :: Vec 4 Fetched,
+    pQueueRead :: Unsigned 3,
+    pQueueWrite :: Unsigned 3,
+    -- | Words queued or in flight, kept as a register so fetch decides
+    -- from it directly.
+    pOutstanding :: Unsigned 3,
+    pD :: Maybe Fetched,
+    -- | Decode's operands: on its first cycle (pDFresh) they come from the
+    -- register file, read the cycle before at the entering word's sources;
+    -- while it waits, from here, refreshed by forwarding.
+    pDOperands :: (Word32, Word32),
+    pDFresh :: Bool,
+    pE1 :: Maybe ExecuteOne,
+    pE2 :: Maybe ExecuteTwo,
+    pM :: Maybe MemoryStage,
+    -- | A taken branch or jump left the second execute stage last cycle:
+    -- this cycle the younger stages are flushed and its target fetched.
+    pRedirect :: Maybe Word32 }
+  deriving (Generic, NFDataX)
+
+emptyPipe :: Pipe
+emptyPipe = Pipe 0 (repeat Nothing) (repeat (Fetched 0 0 False False)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing Nothing
+
+-- | Empty every stage and fetch from @pc@. Only valid bits, pointers and
+-- the pc change: the stages' contents are don't-cares once empty.
+restartPipe :: Word32 -> Pipe -> Pipe
+restartPipe pc pipe =
+  pipe
+    { pFetchPc = pc, pInflight = repeat Nothing, pQueueRead = 0, pQueueWrite = 0, pOutstanding = 0,
+      pD = Nothing, pDFresh = False, pE1 = Nothing, pE2 = Nothing, pM = Nothing, pRedirect = Nothing }
+
+-- | One cycle of the pipeline: fetch (up to four words outstanding), decode
+-- and register read with forwarding, two execute stages, and the commit
+-- stage. ALU instructions, jumps, branches, and aligned RAM loads and
+-- stores run here. Anything else (CSRs, ECALL, EBREAK, MRET, WFI,
+-- FENCE.I, multiply and divide, device or misaligned accesses, illegal
+-- encodings, misaligned targets, fetch faults) and any interrupt hands
+-- over: when it reaches the commit stage the pipeline is flushed and the
+-- phases run it from Fetch.
+pipeStep :: Machine -> Word32 -> (Machine, RegisterWrite, StepOutput)
+pipeStep machine memoryWord =
+  let pipe = cpuPipe machine
+      -- Every stall and port decision below reads registers (stage valid
+      -- bits, kinds, wait counts, queue pointers), never another stage's
+      -- decision, so no long chain runs from the commit stage to fetch.
+      -- Commit --------------------------------------------------------------
+      interrupt = cpuInterruptDue machine
+      handover = case pM pipe of
+        Just m -> mSlow m || interrupt
+        Nothing -> False
+      -- waiting for a load's (or a sub-word store's) word
+      mHold = case pM pipe of
+        Just m -> mWait m /= 0
+        Nothing -> False
+      mCommits = case pM pipe of
+        Just m -> not handover && mWait m == 0
+        Nothing -> False
+      -- the port writes this cycle (from registers; a handover makes it moot)
+      mWriting = case pM pipe of
+        Just m -> mStore m && mWait m == 0
+        Nothing -> False
+      committedValue m
+        | mLoad m = loadValue (mFunct3 m) (mOffset m) memoryWord
+        | mShift m = shiftResult (mFunct3 m) (if mArith m then 0x20 else 0) (mValue m) (fromIntegral (mAmount m .&. 0x1c))
+        | otherwise = mValue m
+      registerWriteNow = case pM pipe of
+        Just m | mCommits && mWrites m -> Just (mRd m, committedValue m)
+        _ -> Nothing
+      memoryWrite = case pM pipe of
+        Just m | mCommits && mStore m ->
+          Just (mIndex m, if mStoreWord m then mData m else (memoryWord .&. complement (mMask m)) .|. mData m)
+        _ -> Nothing
+      -- Execute two: select, resolve branches, read memory -----------------
+      -- A load or sub-word store reads its word whenever it is here (a read
+      -- nobody waits for is harmless), and moves on the cycle it can.
+      e2Reads x = case execKind (e2Control x) of
+        KindLoad -> True
+        KindStore -> execFunct3 (e2Control x) /= 2
+        _ -> False
+      e2Advance = case pE2 pipe of
+        Just x -> not mHold && not (e2Reads x && mWriting)
+        Nothing -> True
+      e2Out x =
+        let control = e2Control x
+            comp = e2Computed x
+            kind = execKind control
+            funct3 = execFunct3 control
+            aluResult
+              | execLui control = Just (e2Imm x)
+              | execAuipc control = Just (cTarget comp)
+              | execAluOp control = selectedAlu control (e2Candidates x) (e2AluCompare x)
+              | otherwise = Nothing
+            taken = case kind of
+              KindJump -> True
+              KindBranch -> branchTakenPrepared funct3 (e2BranchCompare x) == Just True
+              _ -> False
+            target = cTarget comp
+            address = cAddress comp
+            memory = case kind of KindLoad -> True; KindStore -> True; _ -> False
+            memoryOk = validMemoryAddress address && not (misalignedMemory funct3 address)
+            illegal = case kind of KindAlu -> isNothing aluResult; _ -> False
+            slow = e2Slow x || illegal || (taken && target .&. 3 /= 0) || (memory && not memoryOk)
+            load = not slow && case kind of KindLoad -> True; _ -> False
+            store = not slow && case kind of KindStore -> True; _ -> False
+            storeWord = store && funct3 == 2
+            value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
+            stage = MemoryStage
+              { mPc = e2Pc x, mNext = if taken then target else cLink comp,
+                mValue = value, mRd = e2Rd x, mWrites = e2Writes x && not slow,
+                mFinal = not load && not (execShift control),
+                mLoad = load, mStore = store, mStoreWord = storeWord,
+                mFunct3 = funct3, mOffset = resize address,
+                mIndex = ramWordIndex address, mData = storeLanes funct3 (resize address) (e2B x),
+                mMask = storeMask funct3 (resize address),
+                mShift = execShift control, mArith = execArithmeticShift control, mAmount = e2Op2 x,
+                mWait = if load || (store && not storeWord) then 2 else 0, mSlow = slow }
+         in (stage, if not slow && taken then Just target else Nothing)
+      -- (in a redirect cycle the stage holds a wrong-path instruction)
+      flushing = pRedirect pipe
+      e2Moved = case pE2 pipe of
+        Just x | e2Advance && isNothing flushing -> Just (e2Out x)
+        _ -> Nothing
+      redirect = e2Moved >>= P.snd
+      e2Reading = case pE2 pipe of
+        Just x -> e2Reads x && isNothing flushing
+        Nothing -> False
+      e2Index = maybe 0 (ramWordIndex . cAddress . e2Computed) (pE2 pipe)
+      -- Execute one ------------------------------------------------------------
+      e1Out x =
+        let a = e1A x
+            b = e1B x
+            imm = e1Imm x
+            op2 = e1Op2 x
+            control = e1Control x
+         in ExecuteTwo
+              { e2Pc = e1Pc x, e2Control = control,
+                e2Computed = (compute (e1Pc x) (e1Word x) a b imm op2) {cAlu = Nothing, cTaken = Nothing},
+                e2Candidates = aluCandidates control a op2,
+                e2AluCompare = compareOperands a op2,
+                e2BranchCompare = compareOperands a b,
+                e2B = b, e2Op2 = op2, e2Imm = imm,
+                e2Rd = e1Rd x, e2Writes = e1Writes x, e2Slow = e1Slow x }
+      e1Advance = isNothing (pE2 pipe) || e2Advance
+      -- Decode and register read ---------------------------------------------
+      d = pD pipe
+      e1Free = isNothing (pE1 pipe) || e1Advance
+      decodeOut f =
+        let word = fWord f
+            pc = fPc f
+            opcode = word .&. 0x7f
+            control = decodeExecuteControl word
+            kind = execKind control
+            fastKind = case kind of
+              KindAlu -> True; KindJump -> True; KindBranch -> True
+              KindLoad -> True; KindStore -> True; KindFence -> True
+              _ -> False
+            slow = not (romAddress pc || validMemoryAddress pc) || execMulDiv control || not fastKind
+            rs1 = instructionRs1 word
+            rs2 = instructionRs2 word
+            rd = instructionRd word
+            usesRs1 = fUsesRs1 f
+            usesRs2 = fUsesRs2 f
+            conflicts r producing = producing && ((usesRs1 && rs1 == r) || (usesRs2 && rs2 == r))
+            hazard = maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) (pE1 pipe)
+              || maybe False (\x -> conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
+              || maybe False (\m -> not (mFinal m) && conflicts (mRd m) (mWrites m)) (pM pipe)
+            operand r current = case pM pipe of
+              Just m | mWrites m && mRd m == r -> mValue m
+              _ -> case cpuPendingWrite machine of
+                Just (w, v) | w /= 0 && w == r -> v
+                _ -> current
+            (heldA, heldB) = pDOperands pipe
+            a = operand rs1 (if pDFresh pipe then registerValue (cpuRegValid machine) rs1 (cpuRfA machine) else heldA)
+            b = operand rs2 (if pDFresh pipe then registerValue (cpuRegValid machine) rs2 (cpuRfB machine) else heldB)
+            imm = decodeImmediate word
+            writes = not slow && rd /= 0 && case kind of
+              KindAlu -> True; KindJump -> True; KindLoad -> True; _ -> False
+         in ( ExecuteOne
+                { e1Pc = pc, e1Word = word, e1Control = control,
+                  e1A = a, e1B = b, e1Imm = imm, e1Op2 = if opcode == 0x33 then b else imm,
+                  e1Rd = rd, e1Writes = writes, e1Slow = slow },
+              hazard, (a, b) )
+      dAdvance = case d of
+        Just f -> e1Free && not (let (_, hazard, _) = decodeOut f in hazard)
+        Nothing -> False
+      dFree = isNothing d || dAdvance
+      -- Fetch ------------------------------------------------------------------
+      inflight = pInflight pipe
+      arrival = (`fetchedWord` memoryWord) <$> last inflight
+      readPointer = pQueueRead pipe
+      writePointer = pQueueWrite pipe
+      waiting = writePointer /= readPointer
+      slot i = fromIntegral (i .&. 3) :: Index 4
+      -- The arriving word is written at the write pointer regardless; it
+      -- counts as queued unless it went straight to decode.
+      bypass = dFree && not waiting
+      queue' = case arrival of
+        Just a -> replace (slot writePointer) a (pQueue pipe)
+        Nothing -> pQueue pipe
+      writePointer' = if isJust arrival && not bypass then writePointer + 1 else writePointer
+      readPointer' = if dFree && waiting then readPointer + 1 else readPointer
+      nextD
+        | not dFree = d
+        | waiting = Just (pQueue pipe !! slot readPointer)
+        | otherwise = arrival
+      -- The register file is read for the word that would enter decode
+      -- next (the queue head, else the arriving word), whether or not it
+      -- does: no stall decision reaches the read address.
+      entering = if waiting then fWord (pQueue pipe !! slot readPointer) else memoryWord
+      enteringReads = (instructionRs1 entering, instructionRs2 entering)
+      leaving = (if dFree && waiting then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
+      -- Words queued or in flight never exceed the queue (decided from
+      -- registers); the port is free unless a store writes or a read waits.
+      -- A redirect fetches its target from the next cycle.
+      portBusy = mWriting || e2Reading
+      fetchPc = fromMaybe (pFetchPc pipe) flushing
+      issue = not portBusy && pOutstanding pipe < 4
+      issued = if issue then Just fetchPc else Nothing
+      pipe'
+        | handover = restartPipe 0 pipe
+        | isJust flushing =
+            (restartPipe (if issue then fetchPc + 4 else fetchPc) pipe)
+              { pInflight = issued :> Nothing :> Nothing :> Nil,
+                pOutstanding = if issue then 1 else 0,
+                pM = case pM pipe of
+                  Just m | mHold -> Just m {mWait = mWait m - 1}
+                  _ -> Nothing }
+        | otherwise =
+              Pipe
+              { pFetchPc = if issue then fetchPc + 4 else fetchPc,
+                pInflight = issued :> init inflight,
+                pQueue = queue', pQueueRead = readPointer', pQueueWrite = writePointer',
+                pOutstanding = pOutstanding pipe + (if issue then 1 else 0) - leaving,
+                pD = nextD,
+                pDOperands = case d of
+                  Just f -> let (_, _, operands) = decodeOut f in operands
+                  Nothing -> pDOperands pipe,
+                pDFresh = dFree,
+                pE1 = case pE1 pipe of
+                  Just x | not e1Advance -> Just x
+                  _ -> if dAdvance then (\f -> let (stage, _, _) = decodeOut f in stage) <$> d else Nothing,
+                pE2 = case pE2 pipe of
+                  Just x | not e2Advance -> Just x
+                  _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
+                pM = case pM pipe of
+                  Just m | mHold -> Just m {mWait = mWait m - 1}
+                  _ -> P.fst <$> e2Moved,
+                pRedirect = redirect
+              }
+      readAddress = if e2Reading then e2Index else memoryIndex fetchPc
+      committed = case pM pipe of
+        Just m | mCommits -> machine {cpuPc = mNext m, cpuInRom = romAddress (mNext m), cpuCountRetirement = True}
+        _ -> machine
+      handed = case pM pipe of
+        Just m ->
+          machine
+            { cpuFast = False, cpuSlowOne = True, cpuPipe = restartPipe 0 pipe,
+              cpuPc = mPc m, cpuInRom = romAddress (mPc m), cpuPhase = Fetch, cpuFetchSource = FromMemory }
+        Nothing -> machine
+   in if handover
+        then (handed {cpuReadIndices = enteringReads}, Nothing, (0, Nothing, Nothing))
+        else (committed {cpuPipe = pipe', cpuReadIndices = enteringReads}, registerWriteNow, (readAddress, memoryWrite, Nothing))
 
 -- CPU ------------------------------------------------------------------------
 
@@ -1425,9 +1798,26 @@ cpuStep machine memoryWord received txReady
   = cpuStepDecodedWith decodeMemoryTarget machine memoryWord received txReady (received == Just 0x03)
 
 cpuStepDecodedWith :: (Word32 -> MemoryTarget) -> Machine -> Word32 -> Maybe Byte -> Bool -> Bool -> (Machine, RegisterWrite, StepOutput)
-cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset =
-  let (machine', write, (_, _, tx)) = cpuStepPhases decodeTarget machine memoryWord received txReady emergencyReset
-   in (machine', write, (portAddress machine, if emergencyReset then Nothing else portWrite machine memoryWord, tx))
+cpuStepDecodedWith decodeTarget machine memoryWord received txReady emergencyReset
+  | cpuPipelined machine && cpuFast machine =
+      let (machine', write, (address, memoryWrite, tx)) = pipeStep machine memoryWord
+       in if emergencyReset
+            then ((resetCpu machine) {cpuReadIndices = cpuReadIndices machine'}, Nothing, (address, Nothing, Nothing))
+            else (machine', write, (address, memoryWrite, tx))
+  -- Between instructions, with nothing for the phases to do, the pipeline
+  -- takes over at the pc.
+  -- (The interrupt flag is a cycle late; the pipeline cannot commit in
+  -- its first cycles, and hands over once it is set.)
+  | not emergencyReset && cpuPipelined machine && atFetch && not (cpuSlowOne machine)
+      && not (cpuInterruptDue machine) =
+      (machine {cpuFast = True, cpuPipe = restartPipe (cpuPc machine) (cpuPipe machine)}, Nothing, (0, Nothing, Nothing))
+  | otherwise =
+      let (machine', write, (_, _, tx)) = cpuStepPhases decodeTarget machine memoryWord received txReady emergencyReset
+          -- the phases have started their one instruction
+          started = if atFetch then machine' {cpuSlowOne = False} else machine'
+       in (started, write, (portAddress machine, if emergencyReset then Nothing else portWrite machine memoryWord, tx))
+  where
+    atFetch = case cpuPhase machine of Fetch -> True; _ -> False
 
 -- | The CPU's read address this cycle, from registers: Fetch reads the pc,
 -- Decode the next word (the prefetch), ExecuteFinish a load or store's word,
@@ -2019,7 +2409,10 @@ finishWith machine write request = (machine {cpuPhase = Fetch, cpuCountRetiremen
 -- Commit, the captured next word's (decode-ahead).
 registerReads :: Machine -> (Index 32, Index 32)
 registerReads machine =
-  let word = case cpuPhase machine of Commit -> cpuNextInstruction machine; _ -> cpuInstruction machine
+  let word
+        | cpuFast machine = maybe 0 fWord (pD (cpuPipe machine))
+        | cpuLocalMemory machine = case cpuPhase machine of Commit -> cpuNextInstruction machine; _ -> cpuInstruction machine
+        | otherwise = cpuInstruction machine
    in (instructionRs1 word, instructionRs2 word)
 
 -- | A register file output, or 0 for a register not written since reset.
@@ -2030,7 +2423,7 @@ registerValue valid index value = if testBit valid (fromIntegral index) then val
 -- 'registerReads'.
 withMirrorReads :: Machine -> Machine
 withMirrorReads machine =
-  let (a, b) = registerReads machine
+  let (a, b) = if cpuPipelined machine then cpuReadIndices machine else registerReads machine
    in machine {cpuRfA = cpuRegs machine !! a, cpuRfB = cpuRegs machine !! b}
 
 readRegisterBanks :: Index 32 -> Vec 32 Word32 -> Vec 4 Word32

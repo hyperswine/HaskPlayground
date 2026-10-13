@@ -75,13 +75,16 @@ Toward a pipeline, on the BRAM image:
   from a one-hot kind instead of decoding the instruction word);
 - the memory port's address and store write from registers.
 
-CPI on four kernels fell from 12.98 to 8.82. The verified build is 117 MHz
-(13.3 million instructions per second against 7.4 for the serial core at
-96 MHz). The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
+CPI on four kernels fell from 12.98 to 8.82, at 117 MHz (13.3 million
+instructions per second against 7.4 for the serial core at 96 MHz). Then a
+real pipeline: ordinary instructions run five stages deep with several in
+flight, and the rest hand over to the phases. CPI 6.71 (2.75 on plain
+arithmetic) at 96 MHz: 14.3 million instructions per second. The I/O complex (UART FIFOs, SPI DMA) and an RV32IM reference model
 with differential tests came first. See `boards/tangnano20k/` reports
-FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE, STAGES and
-MEMORY-PORT (2026-10-12). Next: real per-stage registers (several
-instructions in flight) with forwarding.
+FETCH-OVERLAP, FAST-MEMORY, BRANCH-TARGET, DECODE-AHEAD, REGFILE, STAGES,
+MEMORY-PORT and PIPELINE (2026-10-12). Next: multiply in the pipeline,
+forwarding from the second execute stage, a branch target buffer, and the
+clock.
 
 ## Implementation status (2026-10-11): step 2 complete
 
