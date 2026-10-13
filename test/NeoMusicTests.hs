@@ -12,9 +12,10 @@ import qualified Data.Vector.Unboxed as VU
 import System.IO.Temp (withSystemTempFile)
 import System.IO (hClose)
 import NeoMusic.Audio
-  ( Mix(..), Mod(..), Patch(..), Note(..), Timeline(..), Wave(..)
-  , adsr, cutoffHz, defaultMix, hall, hat, kick, modAt, pcmWav, percussive, pluck
-  , renderTimelineMix, sinePatch, validPatch )
+  ( Contour(..), Mix(..), Mod(..), Osc(..), Patch(..), Note(..), Timeline(..), Voice(..), Wave(..)
+  , adsr, basicPatch, cutoffHz, defaultMix, expandClassic, hall, hat, kick, modAt, noReverb, noiseSweep
+  , pcmWav, percussive, pianoPatch, pluck, reeseBass, renderTimelineMix, sawPatch, sinePatch, snare
+  , squarePatch, subBass, supersaw, validPatch, validVoice )
 import NeoMusic.Pitch (Step(..), Tuning(..), equalTemperament, freq)
 import NeoMusic.Score
   ( Performance(..), Score(..), defaultInstrument, defaultPerformance, hit, n, render, rest )
@@ -23,7 +24,23 @@ import qualified NeoMusic.Score as S
 -- | One instrument "v" with the given tuning and patch, at the given tempo.
 perfWith :: Tuning -> Patch -> Double -> Performance
 perfWith t p speed = defaultPerformance
-  { bpm = speed, instruments = M.singleton "v" defaultInstrument {S.tuning = t, S.timbre = p} }
+  { bpm = speed, instruments = M.singleton "v" defaultInstrument {S.tuning = t, S.timbre = Classic p} }
+
+-- | A dry, unnormalised render of single notes of a voice, straight from the engine.
+voiceRender :: Int -> Double -> [Note] -> Either String (VU.Vector Double, VU.Vector Double)
+voiceRender rate total = renderTimelineMix (Mix rate noReverb 0 0.8 0 False) . Timeline total
+
+-- | One note of a voice: start, Hz, seconds, velocity.
+voiceNote :: Voice -> Double -> Double -> Double -> Double -> Note
+voiceNote v t f d vel = Note t f d v vel 1 0 0 (Flat 0) (Flat 1)
+
+-- | Mean square over a span of samples.
+meanSquare :: VU.Vector Double -> Int -> Int -> Double
+meanSquare xs from count = VU.sum (VU.map (^ (2 :: Int)) (VU.slice from count xs)) / fromIntegral count
+
+-- | The lag between @lo@ and @hi@ samples where a signal best matches itself.
+period :: VU.Vector Double -> Int -> Int -> Int -> Int -> Int
+period xs from count lo hi = snd (maximum [(sum [VU.unsafeIndex xs (from + i) * VU.unsafeIndex xs (from + i + lag) | i <- [0 .. count - 1]], lag) | lag <- [lo .. hi]])
 
 stereo :: Mix -> Performance -> Score -> Either String (VU.Vector Double, VU.Vector Double)
 stereo m perf music = render perf music >>= renderTimelineMix m
@@ -150,7 +167,8 @@ neoMusicGroup = Group "NeoMusic audio engine"
       assert (isLeft (validPatch sinePatch {amp = Linear 0 1 0}))
       -- A vibrato patch is pitched; a pitch that falls into the note isn't.
       let vibrato = sinePatch {pitch = K 0.2 :* Lfo SineWave 5.5}
-      assert (not (percussive vibrato) && percussive kick && percussive hat && not (percussive sinePatch))
+      assert (not (percussive (Classic vibrato)) && percussive (Classic kick) && percussive (Classic hat)
+              && not (percussive (Classic sinePatch)))
       plain <- evalEither (mono 8000 (perfWith (Tuning 440 2) sinePatch 60) (Line "v" (n 0)))
       wobbly <- evalEither (mono 8000 (perfWith (Tuning 440 2) vibrato 60) (Line "v" (n 0)))
       assert (plain /= wobbly)
@@ -160,4 +178,54 @@ neoMusicGroup = Group "NeoMusic audio engine"
       bright <- evalEither (mono 8000 (perfWith (Tuning 220 2) opened 60) (Line "v" (n 0)))
       dark <- evalEither (mono 8000 (perfWith (Tuning 220 2) closing 60) (Line "v" (n 0)))
       assert (bright /= dark))
+    , ("voices: classic expansion, strings, filters, pan, pitched or not", withTests 1 $ property $ do
+      -- Every preset sounds the same played by the fast path and by the
+      -- general interpreter on its expansion, a curved note included.
+      let presets = [basicPatch, pianoPatch, sinePatch, sawPatch, squarePatch, pluck, supersaw
+                    , reeseBass, subBass, kick, snare, hat, noiseSweep]
+          curved v = (voiceNote v 0.3 330 0.4 0.6) {pitchMod = Breaks [(0, 0), (1, 0.25)], loudness = Breaks [(0, 0.5), (1, 1)]}
+          notes v = [voiceNote v 0 220 0.25 0.8, curved v]
+      differences <- evalEither (mapM (\p -> do
+          (l1, r1) <- voiceRender 22050 1 (notes (Classic p))
+          (l2, r2) <- voiceRender 22050 1 (notes (expandClassic p))
+          let biggest = VU.maximum (VU.map abs (l1 VU.++ r1))
+          pure (VU.maximum (VU.map abs (VU.zipWith (-) (l1 VU.++ r1) (l2 VU.++ r2))) / biggest)) presets)
+      annotateShow differences
+      assert (all (< 1e-9) differences)
+      -- A plucked string sounds at its pitch, and its fundamental falls 60 dB
+      -- over the decay: 30 dB in half of it.
+      let string = Gain (adsr 0.001 0 1 0.05) (Plucked 1 0)
+      (s, _) <- evalEither (voiceRender 44100 2 [voiceNote string 0 220 1.9 1])
+      let lag = period s 8820 2000 170 240
+      annotateShow lag
+      assert (abs (44100 / fromIntegral lag / 220 - 1) < 0.005)
+      let fall = meanSquare s 8820 4410 / meanSquare s 30870 4410
+      annotateShow (10 * logBase 10 fall)
+      assert (abs (10 * logBase 10 fall - 30) < 1.5)
+      -- It follows a bend: an octave up sounds an octave up.
+      (up, _) <- evalEither (voiceRender 44100 1 [voiceNote (Bend (K 12) string) 0 220 0.9 1])
+      assert (abs (44100 / fromIntegral (period up 8820 2000 85 120) / 440 - 1) < 0.01)
+      -- A band passes its centre at unity and cuts two octaves away.
+      let band = Bandpass (cutoffHz 1000) 1 (Tone SineWave)
+      (centre, _) <- evalEither (voiceRender 44100 0.5 [voiceNote band 0 1000 0.45 1])
+      (away, _) <- evalEither (voiceRender 44100 0.5 [voiceNote band 0 4000 0.45 1])
+      let steady xs = sqrt (2 * meanSquare xs 11025 4410)
+      annotateShow (steady centre, steady away)
+      assert (abs (steady centre - 1) < 0.01 && steady away < 0.3)
+      -- Pan and unison spread a voice across the stereo field.
+      (hardL, hardR) <- evalEither (voiceRender 8000 0.5 [voiceNote (Pan (K (-1)) (Tone SineWave)) 0 220 0.4 1])
+      assert (VU.any ((> 0.5) . abs) hardL && VU.all ((< 1e-12) . abs) hardR)
+      (wideL, wideR) <- evalEither (voiceRender 8000 0.5 [voiceNote (Unison 3 20 1 (Tone SawWave)) 0 220 0.4 1])
+      assert (wideL /= wideR)
+      -- A voice sounds until note-off plus its longest release.
+      (cut, _) <- evalEither (voiceRender 8000 1 [voiceNote (Gain (adsr 0.001 0 1 0.2) (Tone SineWave)) 0 220 0.5 1])
+      assert (VU.any ((> 1e-3) . abs) (VU.slice 4400 400 cut) && VU.all (== 0) (VU.drop 5700 cut))
+      -- Unpitched: every part is. Noise is; a bend into the note makes it so.
+      let flute = sinePatch {oscillators = [Osc TriangleWave 0 1 1 0, Osc NoiseWave 0 0.04 1 0]}
+      [percussive v | v <- [Noise, Tone SawWave :& Gain (K 0.1) Noise, Bend (Approach 12 0 0.1) (Tone SineWave)
+                           , Plucked 1 0.5, Classic kick, Classic snare, Classic flute, Gain (K 2) (Highpass (K 3) Noise)]]
+        === [True, False, True, False, True, True, False, True]
+      mapM_ (assert . isLeft . validVoice)
+        [ Tone NoiseWave, Plucked 0 0.5, Plucked 1 2, Bandpass (K 1) 0 (Tone SineWave), Pan (K 2) Noise
+        , Lowpass (K 1) 1 Noise, Unison 0 0 0 Noise, Gain (Linear 0 1 0) Noise, Classic sinePatch {resonance = 1} ])
   ]

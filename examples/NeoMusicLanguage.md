@@ -184,6 +184,40 @@ sound named like a built-in replaces it in that file. Every sound is checked
 even if unused. See `examples/neomusic/forest.neomusic` and
 `neomusic-sounds.md`.
 
+**Voices.** `sound NAME = VOICE` builds a sound from three sources and a few
+shapers, each shaper acting on the voice after it (see `neomusic-voice.md`):
+
+| Word | Meaning |
+|---|---|
+| `tone WAVE` | a sine, saw, square or triangle at the pitch reaching it |
+| `noise` | white noise, the same for the same note |
+| `plucked decay brightness` | a plucked string: its fundamental falls 60 dB in `decay` seconds; brightness 0..1 |
+| `gain MOD v` | `v` multiplied by a modulation (an envelope, `velocity`, an LFO...) |
+| `bend MOD v` | everything in `v` this many semitones higher; inside it, `key` is the raised pitch |
+| `lowpass MOD r v`, `highpass MOD v` | filters; cutoffs in octaves above C4 (`hz f`, `key`...), resonance 0..1 |
+| `bandpass MOD w v` | a resonance `w` octaves wide, unity at its centre: a body or formant |
+| `unison n cents width v` | `n` copies of `v`, detuned across `cents`, spread across the stereo `width` |
+| `pan MOD v` | stereo position, -1..1 |
+| `a + b` | mixed |
+| a sound's name | that sound (a built-in, or one the file defines) |
+
+A shaper's arguments are atoms (numbers, words, or parentheses), then the voice
+it shapes, so `gain 0.5 tone saw + noise` is `(gain 0.5 (tone saw)) + noise`.
+For example, a harp and a flute with a breath at the start:
+
+```
+sound harp  = gain (velocity * adsr 0.001 0 1 1.2) (lowpass (hz 3000 + 0.3 * key) 0 plucked 2.5 0.55)
+sound flute = gain (velocity * adsr 0.08 0.2 0.85 0.15)
+    (tone triangle + gain (0.3 * adsr 0.03 0.12 0.2 0.1) (bandpass key 0.6 noise))
+```
+
+A voice sounds until note-off plus the longest `release` in its gains, so give
+it an amplitude envelope. The part-by-part form (`sound x from y ...`) is
+shorthand for the classic voice, a mix of oscillators low-passed,
+high-passed and shaped by `amp`, all under `pitch`; it can start only from a
+classic sound. `examples/neomusic/orchestral.neomusic` voices a whole cue this
+way.
+
 **Mix.** `reverb [hall|none] [room x] [damping x] [width x] [wet x]
 [predelay x]` sets the reverb, starting from none unless `hall` is named.
 `master [drive x] [peak x] [tail secs] [rate hz] [normalize on|off]` sets the
@@ -197,7 +231,7 @@ Modules, each depending only on the ones above it:
 | Module | Contents |
 |---|---|
 | `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
-| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
+| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `neomusic-voice.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names
@@ -345,8 +379,10 @@ that covers its curves, and the bend wheel and expression (CC 11) are sampled
 every 1/64 beat, positioned through the tempo clock, then reset at the
 note-off. Expression above 1 is clipped to full. Custom synth patches, gain/pan/reverb are not reproduced. Steps must use 12-EDO
 with an exactly aligned 12-TET reference (floating-point tolerance applies).
-No pitch rounding. Notes must fit MIDI 0–127. Noise and pitch-drop percussion patches require a future
-percussion mapping and are rejected. Overlapping unisons get separate channels;
+No pitch rounding. Notes must fit MIDI 0–127. Unpitched sounds require a future
+percussion mapping and are rejected: a sound is unpitched when every part of
+it is, where noise is unpitched and so is anything under a bend that starts
+away from 0 (a drop into the note). Overlapping unisons get separate channels;
 channel exhaustion beyond 15 pitched channels is an error. Off events precede
 on events at the same tick. Beat resolution is selected by LCM for exact rhythm,
 and rejected above 32767 ticks/quarter. Tempo rounds to the nearest microsecond

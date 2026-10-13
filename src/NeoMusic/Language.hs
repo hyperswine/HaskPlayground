@@ -7,7 +7,7 @@
 module NeoMusic.Language
   ( Document(..), SheetView(..), Staff(..), parseDocument, parseSounds, prettyScore, pitchNumber ) where
 
-import Control.Monad (foldM, unless, void, when)
+import Control.Monad (foldM, forM_, unless, void, when)
 import Data.Char (isSpace)
 import Data.List (intercalate, nub)
 import qualified Data.Map.Strict as M
@@ -226,14 +226,25 @@ isBinding s = '=' `elem` s && takeWord s `notElem` ["instrument", "sound"]
 data SoundPart = SOsc A.Osc | SAmp A.Mod | SPitch A.Mod | SCutoff A.Mod
   | SResonance Double | SHighpass Double | SWidth Double
 
--- | @sound NAME [from BASE] parts...@ (see neomusic-sounds.md).
-soundParser :: Parser (Name, Maybe Name, [SoundPart])
+-- | A sound as written: a classic patch from a base, adjusted part by part
+-- (neomusic-sounds.md), or a voice expression (neomusic-voice.md).
+data SoundDef = ClassicSound (Maybe Name) [SoundPart] | VoiceSound VoiceE
+
+-- | A voice expression, with the sounds it names still to be looked up.
+data VoiceE = VLeaf A.Voice | VWrap (A.Voice -> A.Voice) VoiceE | VMix VoiceE VoiceE | VRef Name
+
+-- | The words of a voice expression, which no sound may be named.
+voiceWords :: [String]
+voiceWords = ["tone","noise","plucked","gain","bend","lowpass","highpass","bandpass","unison","pan"]
+
+-- | @sound NAME [from BASE] parts...@ or @sound NAME = voice@.
+soundParser :: Parser (Name, SoundDef)
 soundParser = do
   keyword "sound"
   name <- ident
-  base <- optionMaybe (keyword "from" *> ident)
-  parts <- many part
-  pure (name, base, parts)
+  def <- (symbol "=" *> (VoiceSound <$> voiceP))
+    <|> (ClassicSound <$> optionMaybe (keyword "from" *> ident) <*> many part)
+  pure (name, def)
   where
     part = (keyword "osc" *> (SOsc <$> oscP))
       <|> (keyword "amp" *> (SAmp <$> modP))
@@ -249,6 +260,25 @@ soundParser = do
                 <|> (\x o -> o {A.unison = x}) <$> (keyword "unison" *> integer)
                 <|> (\x o -> o {A.detuneCents = x}) <$> (keyword "detune" *> constant))
       pure (foldl (flip ($)) (A.Osc w 0 1 1 0) opts)
+
+-- | Mixes of terms. A shaper's arguments are atoms, then the voice it shapes,
+-- so @gain 0.5 tone saw + noise@ is @(gain 0.5 (tone saw)) + noise@.
+voiceP :: Parser VoiceE
+voiceP = chainl1 voiceTerm (VMix <$ symbol "+")
+
+voiceTerm :: Parser VoiceE
+voiceTerm = between (symbol "(") (symbol ")") voiceP
+  <|> (keyword "tone" *> (VLeaf . A.Tone <$> waveP))
+  <|> (VLeaf A.Noise <$ keyword "noise")
+  <|> (keyword "plucked" *> (VLeaf <$> (A.Plucked <$> constant <*> constant)))
+  <|> (keyword "gain" *> (VWrap . A.Gain <$> modAtom <*> voiceTerm))
+  <|> (keyword "bend" *> (VWrap . A.Bend <$> modAtom <*> voiceTerm))
+  <|> (keyword "lowpass" *> ((\m r -> VWrap (A.Lowpass m r)) <$> modAtom <*> constant <*> voiceTerm))
+  <|> (keyword "highpass" *> (VWrap . A.Highpass <$> modAtom <*> voiceTerm))
+  <|> (keyword "bandpass" *> ((\m w -> VWrap (A.Bandpass m w)) <$> modAtom <*> constant <*> voiceTerm))
+  <|> (keyword "unison" *> ((\u c w -> VWrap (A.Unison u c w)) <$> integer <*> constant <*> constant <*> voiceTerm))
+  <|> (keyword "pan" *> (VWrap . A.Pan <$> modAtom <*> voiceTerm))
+  <|> (VRef <$> ident)
 
 waveP :: Parser A.Wave
 waveP = (A.SineWave <$ keyword "sine") <|> (A.SawWave <$ keyword "saw") <|> (A.SquareWave <$ keyword "square")
@@ -301,23 +331,38 @@ constant = modAtom >>= \m -> case m of
   A.K x -> pure x
   _ -> fail "expected a number"
 
--- | Resolve a file's sounds, each from its base (another sound in the file or
--- a preset; without @from@, the built-in @basic@), in any order but without
--- cycles.
-resolveSounds :: [(Int, (Name, Maybe Name, [SoundPart]))] -> Either String (M.Map Name A.Patch)
+-- | Resolve a file's sounds: a classic sound from its base (another sound in
+-- the file or a preset; without @from@, the built-in @basic@), a voice from
+-- the sounds it names. In any order, but without cycles.
+resolveSounds :: [(Int, (Name, SoundDef))] -> Either String (M.Map Name A.Voice)
 resolveSounds defs = do
-  let names = [name | (_, (name, _, _)) <- defs]
+  let names = [name | (_, (name, _)) <- defs]
   unless (length names == length (nub names)) (Left "duplicate sound")
-  let table = M.fromList [(name, (i, base, parts)) | (i, (name, base, parts)) <- defs]
+  forM_ names $ \name -> when (name `elem` voiceWords) (Left ("a sound cannot be named " ++ name))
+  let table = M.fromList [(name, (i, def)) | (i, (name, def)) <- defs]
       resolve visiting name = case M.lookup name table of
-        Nothing -> maybe (Left ("unknown sound: " ++ name)) Right (M.lookup name presets)
-        Just (i, base, parts) -> do
+        Nothing -> maybe (Left ("unknown sound: " ++ name)) (Right . A.Classic) (M.lookup name presets)
+        Just (i, def) -> do
           unless (name `notElem` visiting) (Left ("sounds defined in a cycle: " ++ intercalate " -> " (reverse (name : visiting))))
-          -- Without "from", a sound starts from the built-in basic sound.
-          start <- maybe (Right A.basicPatch) (resolve (name : visiting)) base
-          patch <- either (Left . (("line " ++ show i ++ ", sound " ++ name ++ ": ") ++)) Right (applyParts start parts)
-          either (Left . (("sound " ++ name ++ ": ") ++)) Right (A.validPatch patch)
-          pure patch
+          let within = either (Left . (("line " ++ show i ++ ", sound " ++ name ++ ": ") ++)) Right
+              deeper = resolve (name : visiting)
+          voice <- case def of
+            ClassicSound base parts -> do
+              -- Without "from", a sound starts from the built-in basic sound.
+              start <- case base of
+                Nothing -> Right A.basicPatch
+                Just b -> deeper b >>= \v -> case v of
+                  A.Classic patch -> Right patch
+                  _ -> within (Left ("only a classic sound can be adjusted part by part, and " ++ b ++ " is a voice"))
+              A.Classic <$> within (applyParts start parts)
+            VoiceSound e -> voiceOf deeper e
+          either (Left . (("sound " ++ name ++ ": ") ++)) Right (A.validVoice voice)
+          pure voice
+      voiceOf lookupSound e = case e of
+        VLeaf v -> Right v
+        VWrap f x -> f <$> voiceOf lookupSound x
+        VMix a b -> (A.:&) <$> voiceOf lookupSound a <*> voiceOf lookupSound b
+        VRef other -> lookupSound other
   M.fromList <$> mapM (\name -> (,) name <$> resolve [] name) names
 
 -- | A base sound with its parts replaced. Any @osc@ lines replace all the base's
@@ -342,7 +387,7 @@ applyParts base parts = do
   pure (foldl set start parts)
 
 -- | The sounds a file defines (not the presets), by name.
-parseSounds :: String -> Either String (M.Map Name A.Patch)
+parseSounds :: String -> Either String (M.Map Name A.Voice)
 parseSounds input = do
   let ls = sourceLines input
   defs <- mapM (\(i, s) -> (,) i <$> runLine i soundParser s) [(i, s) | (i, s) <- ls, takeWord s == "sound"]
@@ -376,7 +421,7 @@ parseDocument input = do
   (fromPreludeDefs, preludeKinds) <- prelude
   let ls = sourceLines input
   (defs, kinds) <- parseDefinitions False preludeKinds ls
-  sounds <- (`M.union` presets) <$> parseSounds input
+  sounds <- (`M.union` M.map A.Classic presets) <$> parseSounds input
   let nonbindings = [(i,s) | (i,s) <- ls, not (isBinding s)]
       initial = (defaultPerformance, SheetView 4 "C" M.empty True, tuning defaultInstrument, [], [])
       env = Env defs fromPreludeDefs False M.empty []

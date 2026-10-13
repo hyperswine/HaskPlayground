@@ -3,53 +3,42 @@ tempo 90
 tuning 12 at C4
 meter 4
 
-sound strings from basic
-  osc saw unison 5 detune 18
-  osc saw up -12 gain 0.3 unison 3 detune 12
-  amp velocity * adsr 0.35 0.5 0.85 0.6
-  pitch 0.08 * lfo sine 5.2
-  cutoff filter 1400 0.4 (adsr 0.3 1 0.6 0.6) 0.8 1.2
-  resonance 0.05  width 0.9
-sound pizz from basic
-  osc triangle
-  osc saw gain 0.3
-  amp velocity * adsr 0.002 0.25 0 0.15
-  cutoff filter 900 0.5 (adsr 0.001 0.08 0 0.1) 2 1
-sound horn from basic
-  osc saw
-  osc square gain 0.3
-  amp velocity * adsr 0.12 0.4 0.8 0.3
-  pitch 0.05 * lfo sine 4.5
-  cutoff filter 500 0.6 (adsr 0.15 0.6 0.4 0.3) 1.5 1.5
-  resonance 0.1
-sound flute from basic
-  osc triangle
-  osc sine up 12 gain 0.15
-  osc noise gain 0.04
-  amp velocity * adsr 0.06 0.2 0.85 0.15
-  pitch 0.1 * then 0.3 0 (lfo sine 5)     -- vibrato that arrives after the attack
-  cutoff hz 5000
-sound harp from basic
-  osc triangle
-  osc sine up 12 gain 0.4
-  osc sine up 19 gain 0.1
-  amp velocity * adsr 0.002 1.6 0 0.8
-  cutoff filter 2500 0.5 (adsr 0.001 0.4 0.3 0.4) 1 0.8
-sound timpani from basic
-  osc sine
-  osc noise gain 0.15
-  amp velocity * adsr 0.002 1.2 0 0.6
-  pitch approach 3 0 0.2
-  cutoff hz 900
+-- Each instrument is a voice: sources, shaped (see neomusic-voice.md).
+-- Strings: a bowed section. Saws through three body resonances, a little bow
+-- noise, a vibrato that arrives after the attack, five players slightly apart.
+sound strings = gain (velocity * adsr 0.3 0.5 0.85 0.6) (unison 5 16 0.9
+    (bend (0.08 * then 0.3 0 (lfo sine 5.2))
+      (lowpass (filter 2400 0.3 (adsr 0.3 1 0.6 0.6) 0.6 1) 0.05
+        (gain 0.7 bandpass (hz 300) 1.5 tone saw + gain 0.5 bandpass (hz 1100) 1.2 tone saw
+         + gain 0.3 bandpass (hz 2600) 1.5 tone saw + gain 0.2 tone saw)
+       + gain (0.03 * adsr 0.05 0.3 0.4 0.3) (bandpass (hz 2500) 2 noise))))
+-- Pizzicato and harp: plucked strings.
+sound pizz = gain (velocity * adsr 0.001 0 1 0.2) (lowpass (hz 1800 + 0.5 * key) 0 plucked 0.5 0.3)
+sound harp = gain (velocity * adsr 0.001 0 1 1.2) (lowpass (hz 3000 + 0.3 * key) 0 plucked 2.5 0.55)
+-- Flute: a soft tone, a breath at the start, and a little breath throughout,
+-- both centred on the note.
+sound flute = gain (velocity * adsr 0.08 0.2 0.85 0.15) (bend (0.12 * then 0.35 0 (lfo sine 5))
+    (lowpass (hz 4500) 0 (tone triangle + gain 0.15 bend 12 tone sine)
+     + gain (0.3 * adsr 0.03 0.12 0.2 0.1) (bandpass key 0.6 noise)
+     + gain 0.04 bandpass (key + 1) 1 noise))
+-- Horn: a brassy attack (the filter opens with it) and a formant near 480 Hz.
+sound horn = gain (velocity * adsr 0.1 0.4 0.8 0.3) (bend (0.04 * lfo sine 4.5)
+    (lowpass (filter 450 0.5 (adsr 0.12 0.6 0.4 0.3) 1.5 1.5) 0.1 (tone saw + gain 0.3 tone square)
+     + gain 0.6 bandpass (hz 480) 1 tone saw))
+-- Timpani: a membrane's partials (1, 1.5 and 2 times the pitch) that drop
+-- into tune, and a felt mallet's thud.
+sound timpani = gain (velocity * adsr 0.002 1.4 0 0.8) (bend (approach 2 0 0.15)
+    (tone sine + gain 0.5 bend 7.02 tone sine + gain 0.25 bend 12 tone sine)
+     + gain (0.6 * adsr 0.001 0.08 0 0.05) (bandpass key 1.5 noise))
 reverb hall room 0.9 wet 0.45 predelay 0.03
 master peak 0.89 tail 3
 
-instrument strings = strings gain 0.22 send 0.6
-instrument pizz    = pizz gain 0.4 pan -0.2 send 0.4
-instrument harp    = harp gain 0.25 pan 0.35 send 0.5
+instrument strings = strings gain 0.3 send 0.6
+instrument pizz    = pizz gain 1.1 pan -0.2 send 0.4
+instrument harp    = harp gain 0.8 pan 0.35 send 0.5
 instrument flute   = flute gain 0.35 pan 0.2 send 0.45
-instrument horn    = horn gain 0.3 pan -0.15 send 0.55
-instrument timp    = timpani gain 0.6 send 0.5
+instrument horn    = horn gain 0.2 pan -0.15 send 0.55
+instrument timp    = timpani gain 0.55 send 0.5
 
 -- Chords, voiced around middle C (0).
 Dm = (-10 -3 2 5)

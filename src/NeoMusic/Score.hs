@@ -84,7 +84,7 @@ instance Semigroup Score where (<>) = (:>>:)
 instance Monoid Score where mempty = Silence 0
 
 data Instrument = Instrument
-  { tuning :: Tuning, timbre :: A.Patch, gain :: Double, pan :: Double, send :: Double }
+  { tuning :: Tuning, timbre :: A.Voice, gain :: Double, pan :: Double, send :: Double }
   deriving (Eq, Show)
 data Performance = Performance
   { bpm :: Double, instruments :: M.Map Name Instrument, mix :: A.Mix }
@@ -93,7 +93,7 @@ data BeatEvent = BeatEvent { onset :: Rational, instrument :: Name, event :: Eve
   deriving (Eq, Show)
 
 defaultInstrument :: Instrument
-defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) A.pianoPatch 1 0 0
+defaultInstrument = Instrument (Tuning (440 * 2 ** (-9/12)) (2 ** (1/12))) (A.Classic A.pianoPatch) 1 0 0
 defaultPerformance :: Performance
 defaultPerformance = Performance 120 M.empty (A.defaultMix 44100)
 
@@ -371,7 +371,7 @@ validate performance score = do
     let Tuning base r = tuning i
         context message = "instrument " ++ name ++ ": " ++ message
     unless (positive base && positive r) (Left (context "tuning must be finite and positive"))
-    either (Left . context) Right (A.validPatch (timbre i))
+    either (Left . context) Right (A.validVoice (timbre i))
     unless (finite (gain i) && gain i >= 0) (Left (context "gain must be finite and nonnegative"))
     unless (finite (pan i) && abs (pan i) <= 1) (Left (context "pan must be within -1..1"))
     unless (finite (send i) && send i >= 0 && send i <= 1) (Left (context "reverb send must be within 0..1"))

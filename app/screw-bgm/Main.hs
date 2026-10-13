@@ -18,7 +18,7 @@ import qualified Data.Map.Strict as M
 import NeoMusic.Score (Score(..), Phrase, hit, hush)
 import qualified NeoMusic.Score as S
 import NeoMusic.Audio
-  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Wave(..), adsr, cutoffHz, filterCutoff
+  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Voice(Classic), Wave(..), adsr, cutoffHz, filterCutoff
   , hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass, supersaw
   , writeTimelineMix )
 import NeoMusic.Pitch (Tuning(..))
@@ -190,7 +190,7 @@ mix = Mix
 performance :: S.Performance
 performance = S.Performance 96 (M.fromList registry) mix
   where
-    inst name patch level side reverbSend = (name, S.Instrument semis patch level side reverbSend)
+    inst name patch level side reverbSend = (name, S.Instrument semis (Classic patch) level side reverbSend)
     registry =
       [ inst "glint" glass 0.28 0 0.6
       , inst "glintEcho1" glass 0.14 (-0.7) 0.6
@@ -202,7 +202,7 @@ performance = S.Performance 96 (M.fromList registry) mix
       , inst "kick" kick 0.9 0 0, inst "boom" boom 0.9 0 0, inst "snare" snare 0.4 0 0.25
       , inst "hat" hat 0.2 0.25 0.1, inst "openHat" openHat 0.14 0.25 0.1
       , inst "crash" crash 0.3 0 0.5, inst "sweep" noiseSweep 0.22 0 0.5
-      , ("microRiser", S.Instrument quarterTones pluck 0.16 0 0.4) ]
+      , ("microRiser", S.Instrument quarterTones (Classic pluck) 0.16 0 0.4) ]
 
 main :: IO ()
 main = do

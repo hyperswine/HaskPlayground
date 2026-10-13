@@ -21,7 +21,7 @@ import qualified Data.Map.Strict as M
 import Data.Ratio (denominator)
 import qualified Data.Vector.Unboxed as VU
 import NeoMusic.Audio
-  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Wave(..), adsr, cutoffHz, filterCutoff
+  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Voice(Classic), Wave(..), adsr, cutoffHz, filterCutoff
   , basicPatch, hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass
   , supersaw, writeTimelineMix )
 import NeoMusic.Pitch (Tuning(..))
@@ -393,7 +393,7 @@ master = Mix
 performance :: Performance
 performance = Performance 144 (M.fromList registry) master
   where
-    inst name patch level side reverbSend = (name, Instrument d4 patch level side reverbSend)
+    inst name patch level side reverbSend = (name, Instrument d4 (Classic patch) level side reverbSend)
     registry =
       [ inst "lead" lead 0.53 0 0.25, inst "leadEcho" lead 0.17 0.55 0.45
       , inst "bell" bell 0.35 (-0.3) 0.45
@@ -405,7 +405,7 @@ performance = Performance 144 (M.fromList registry) master
       , inst "snare" snare 0.42 0 0.2, inst "hat" hat 0.16 0.2 0.08, inst "openHat" openHat 0.12 0.2 0.1
       , inst "crash" crash 0.3 0 0.5
       , inst "air" noiseSweep 0.08 0 0.5, inst "sweep" noiseSweep 0.2 0 0.5
-      , ("microRiser", Instrument quarterTones pluck 0.14 0 0.4)
+      , ("microRiser", Instrument quarterTones (Classic pluck) 0.14 0 0.4)
       , inst "glint" glass 0.28 0 0.6, inst "glintEcho1" glass 0.14 (-0.7) 0.6
       , inst "glintEcho2" glass 0.08 0.7 0.6, inst "glintEcho3" glass 0.04 (-0.7) 0.6 ]
 

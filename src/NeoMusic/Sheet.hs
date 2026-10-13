@@ -147,7 +147,7 @@ engrave perf view score = do
           emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs) (continuing previous ev)) t d ps
             ++ go (t + d) (swellMotion ev, levelAt ev 1) xs
         levelAt ev u = valueAt 0 1 u (level ev)
-        continuing (motion, end) ev = case (motion, swellMotion ev) of
+        continuing (before, end) ev = case (before, swellMotion ev) of
           (Rising, Rising) -> levelAt ev 0 >= end - 1e-9
           (Falling, Falling) -> levelAt ev 0 <= end + 1e-9
           _ -> False

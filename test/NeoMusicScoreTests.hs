@@ -104,7 +104,7 @@ scoreGroup = Group "NeoMusic score and views"
   , ("strict sheet/MIDI bounds and exact tick resolution", withTests 1 $ property $ do
       let micro = perf {instruments=M.singleton "right" defaultInstrument {tuning=A.Tuning 440 (2 ** (1/24))}}
           note = Line "right" (n 0)
-      let percussion = perf {instruments=M.singleton "right" defaultInstrument {timbre=A.kick}}
+      let percussion = perf {instruments=M.singleton "right" defaultInstrument {timbre=A.Classic A.kick}}
       assert (isLeft (midi percussion note))
       assert (isLeft (engrave percussion view note))
       assert (isLeft (midi micro note))
@@ -166,7 +166,7 @@ scoreGroup = Group "NeoMusic score and views"
       assert (isLeft (validate perf {bpm=0} note))
       mapM_ (\i -> assert (isLeft (validate perf {instruments=M.singleton "right" i} note)))
         [ defaultInstrument {pan=1.5}, defaultInstrument {gain= -1}, defaultInstrument {send=2}
-        , defaultInstrument {tuning=A.Tuning 0 2}, defaultInstrument {timbre=A.pianoPatch {A.resonance=1}} ]
+        , defaultInstrument {tuning=A.Tuning 0 2}, defaultInstrument {timbre=A.Classic A.pianoPatch {A.resonance=1}} ]
       -- Declared-but-unused instruments are still checked.
       assert (isLeft (validate perf {instruments=M.insert "spare" defaultInstrument {pan=9} (instruments perf)} note)))
   , ("gate: sounding length is a ratio, separate from occupied time", property $ do
@@ -345,7 +345,7 @@ scoreGroup = Group "NeoMusic score and views"
       assert (isLeft (render perf (Line "right" (bendBy [(1, 0), (0, 1)] (n 0))))))
   , ("signals: a bend really moves the pitch; oscillators count beats", withTests 1 $ property $ do
       -- A sine at C4 bending up an octave over 1 s: twice the zero crossings by the end.
-      let sinePerf = perf {bpm = 60, instruments = M.singleton "right" defaultInstrument {timbre = A.sinePatch}}
+      let sinePerf = perf {bpm = 60, instruments = M.singleton "right" defaultInstrument {timbre = A.Classic A.sinePatch}}
       (l, _) <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (bendBy [(0, 0), (1, 12)] (n 0))))
       let crossings a b = length [() | i <- [a .. b - 2], l VU.! i <= 0, l VU.! (i + 1) > 0]
           early = crossings 0 800
@@ -556,7 +556,7 @@ scoreGroup = Group "NeoMusic score and views"
       let builtIn = [ ("basic", A.basicPatch), ("piano", A.pianoPatch), ("sine", A.sinePatch), ("saw", A.sawPatch)
                     , ("square", A.squarePatch), ("pluck", A.pluck), ("supersaw", A.supersaw), ("reeseBass", A.reeseBass)
                     , ("subBass", A.subBass), ("kick", A.kick), ("snare", A.snare), ("hat", A.hat), ("noiseSweep", A.noiseSweep) ]
-      [(name, M.lookup name written == Just patch) | (name, patch) <- builtIn] === [(name, True) | (name, _) <- builtIn]
+      [(name, M.lookup name written == Just (A.Classic patch)) | (name, patch) <- builtIn] === [(name, True) | (name, _) <- builtIn]
       -- Indented lines continue the statement above, music included.
       one <- evalEither (parseDocument (header ++ "right: 0 2 4 5 7\n"))
       wrapped <- evalEither (parseDocument (header ++ "right: 0 2\n   4 5\n\t7\n"))
@@ -574,7 +574,9 @@ scoreGroup = Group "NeoMusic score and views"
         , "instrument right = glass send 0.4"
         , "instrument left = wobble"
         , "right: 0", "left: 7" ]))
-      let timbreOf name = timbre (instruments (performance doc) M.! name)
+      let timbreOf name = case timbre (instruments (performance doc) M.! name) of
+            A.Classic patch -> patch
+            other -> error ("not a classic sound: " ++ show other)
           glass = timbreOf "right"
       A.oscillators glass === [A.Osc A.TriangleWave 0 1 1 0, A.Osc A.SineWave 12 0.5 1 0]
       A.amp glass === (A.Velocity A.:* A.adsr 0.001 0.7 0 0.6)
@@ -600,6 +602,49 @@ scoreGroup = Group "NeoMusic score and views"
         , "instrument x = nothing\nright: 0"
         , "reverb wet -1", "reverb hall loud 1", "master peak 2", "master rate 4000"
         , "master normalize maybe", "reverb hall\nreverb none" ])
+  , ("voices in .neomusic", withTests 1 $ property $ do
+      -- A voice expression builds exactly the Voice that Haskell would, and may
+      -- name other sounds, presets included, in any order.
+      sounds <- evalEither (parseSounds (unlines
+        [ "sound ensemble = gain 0.5 violins + harp"
+        , "sound violins = gain (velocity * adsr 0.08 0.3 0.85 0.4) (unison 4 14 0.8"
+        , "    (bend (0.1 * then 0.25 0 (lfo sine 5.5))"
+        , "      (bandpass (hz 450) 1.2 tone saw + bandpass (hz 1600) 1 tone saw)"
+        , "     + gain (0.08 * adsr 0.005 0.06 0 0.05) (highpass (hz 3000) noise)))"
+        , "sound harp = gain velocity lowpass (hz 3500 + 0.4 * key) 0 plucked 2.5 0.6"
+        , "sound bright = pan -0.5 pluck" ]))
+      let saw = A.Tone A.SawWave
+          violins = A.Gain (A.Velocity A.:* A.adsr 0.08 0.3 0.85 0.4) (A.Unison 4 14 0.8
+            (A.Bend (A.K 0.1 A.:* A.Then 0.25 (A.K 0) (A.Lfo A.SineWave 5.5))
+               (A.Bandpass (A.cutoffHz 450) 1.2 saw A.:& A.Bandpass (A.cutoffHz 1600) 1 saw)
+             A.:& A.Gain (A.K 0.08 A.:* A.adsr 0.005 0.06 0 0.05) (A.Highpass (A.cutoffHz 3000) A.Noise)))
+          harp = A.Gain A.Velocity (A.Lowpass (A.cutoffHz 3500 A.:+ A.K 0.4 A.:* A.Key) 0 (A.Plucked 2.5 0.6))
+      M.lookup "violins" sounds === Just violins
+      M.lookup "harp" sounds === Just harp
+      M.lookup "ensemble" sounds === Just (A.Gain (A.K 0.5) violins A.:& harp)
+      M.lookup "bright" sounds === Just (A.Pan (A.K (-0.5)) (A.Classic A.pluck))
+      -- A voice plays, and its notes go to MIDI and the staff as pitched notes.
+      doc <- evalEither (parseDocument (unlines
+        [ "tempo 120", "tuning 12 at C4", "sound harp = gain (velocity * adsr 0.001 0 1 1) plucked 2 0.5"
+        , "instrument right = harp", "right: 0 4 7" ]))
+      (l, _) <- evalEither (render (performance doc) (score doc) >>= A.renderTimelineMix (mix (performance doc)))
+      assert (VU.any ((> 0.1) . abs) l)
+      _ <- evalEither (midi (performance doc) (score doc))
+      _ <- evalEither (engrave (performance doc) (sheetView doc) (score doc))
+      mapM_ (assert . isLeft . parseDocument . (header ++))
+        -- Each fails for its own reason.
+        [ "sound a = tone noise\nright: 0"
+        , "sound a = plucked 0 1\nright: 0"
+        , "sound a = gain 1 b\nsound b = a\nright: 0"
+        , "sound a = gain 1 nowhere\nright: 0"
+        , "sound a = tone saw\nsound b from a amp 1\nright: 0"
+        , "sound noise = tone saw\nright: 0"
+        , "sound a = pan 2 tone saw\nright: 0"
+        , "sound a = tone saw +\nright: 0" ]
+      -- The last parses, but a noise voice is unpitched, so it has no MIDI note.
+      drums <- evalEither (parseDocument (unlines
+        [ "tempo 120", "tuning 12 at C4", "sound a = noise", "instrument drums = a", "drums: 0" ]))
+      assert (isLeft (midi (performance drums) (score drums))))
   , ("phrase signals: across a group, not each note", withTests 1 $ property $ do
       let events src = do
             d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))

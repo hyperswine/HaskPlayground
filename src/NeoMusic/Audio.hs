@@ -2,8 +2,10 @@
 -- | The synthesis engine. It knows only Hz, seconds and patches: no steps,
 -- beats, scores or pieces. Every front end lowers to a 'Timeline' first.
 module NeoMusic.Audio
-  ( -- * Patches
-    Wave(..), Osc(..), Patch(..), validPatch, percussive
+  ( -- * Voices
+    Voice(..), validVoice, percussive, expandClassic
+    -- * Patches
+  , Wave(..), Osc(..), Patch(..), validPatch
     -- * Modulation
   , Mod(..), modAt, modBounds, plusM, timesM, adsr, cutoffHz, filterCutoff
   , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch
@@ -17,6 +19,7 @@ module NeoMusic.Audio
 
 import Control.Monad (forM_, unless, when)
 import Control.Monad.ST (ST, runST)
+import Data.STRef (STRef, newSTRef, readSTRef, writeSTRef)
 import Data.Bits (shiftL, shiftR, xor)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
@@ -228,13 +231,13 @@ infixl 7 :*.
 -- | 'pitchMod' is added to the pitch in octaves; 'loudness' multiplies the
 -- amplitude. @Flat 0@ and @Flat 1@ mean "none", and take the plain path.
 data Note = Note
-  { start :: Double, hz :: Double, duration :: Double, sound :: Patch
+  { start :: Double, hz :: Double, duration :: Double, sound :: Voice
   , velocity :: Double, gain :: Double, pan :: Double, send :: Double
   , pitchMod :: Contour, loudness :: Contour }
   deriving (Eq, Show)
 
 -- | A note that doesn't vary.
-note :: Double -> Double -> Double -> Patch -> Double -> Double -> Double -> Double -> Note
+note :: Double -> Double -> Double -> Voice -> Double -> Double -> Double -> Double -> Note
 note t f d p v g pn s = Note t f d p v g pn s (Flat 0) (Flat 1)
 
 contourAt :: Contour -> Double -> Double
@@ -298,10 +301,109 @@ validPatch p = do
           && nonNegative (highpass p) && unitRange (stereoWidth p))
     (Left "invalid patch filter or stereo settings")
 
--- | Unpitched: a noise oscillator, or a pitch modulation that starts away from
--- the note (a drop or sweep into it). A vibrato starts at 0, so it isn't.
-percussive :: Patch -> Bool
-percussive p = any ((== NoiseWave) . wave) (oscillators p) || modAt (pitch p) (1 / 0) 1 0 0 /= 0
+-- Voices ----------------------------------------------------------------------
+
+-- | A voice: an audio signal built from three sources and a few shapers, each
+-- shaper acting on the voice inside it (see neomusic-voice.md). Sources sound
+-- at unit amplitude, at the pitch that reaches them: the note's, raised by every
+-- 'Bend' above. Inside a 'Bend', 'Key' is that raised pitch. A 'Classic' patch
+-- is a named shorthand; its meaning is 'expandClassic'.
+data Voice
+  = Tone Wave                      -- ^ a band-limited sine, saw, square or triangle
+  | Noise                          -- ^ white noise, the same for the same note
+  | Plucked Double Double          -- ^ a plucked string: seconds to fall 60 dB, brightness 0..1
+  | Gain Mod Voice                 -- ^ multiplied by a modulation
+  | Bend Mod Voice                 -- ^ everything inside sounds this many semitones higher
+  | Lowpass Mod Double Voice       -- ^ cutoff (octaves above C4) and resonance 0..1
+  | Highpass Mod Voice             -- ^ cutoff (octaves above C4)
+  | Bandpass Mod Double Voice      -- ^ centre (octaves above C4) and width in octaves; unity at the centre
+  | Unison Int Double Double Voice -- ^ n copies detuned across c cents in total, spread across stereo width w
+  | Pan Mod Voice                  -- ^ stereo position, -1..1
+  | Voice :& Voice                 -- ^ mixed
+  | Classic Patch                  -- ^ the subtractive voice: see 'expandClassic'
+  deriving (Eq, Show)
+infixl 6 :&
+
+-- | What a classic patch means: its oscillators (each a tone or noise, raised,
+-- scaled and spread), mixed, low-passed, high-passed, then shaped by the
+-- amplitude, all under the patch's pitch. The engine plays 'Classic' patches by
+-- a faster route that a test holds to this expansion.
+expandClassic :: Patch -> Voice
+expandClassic p = bent (Gain (amp p) (highpassed (Lowpass (cutoff p) (resonance p) mixed)))
+  where
+    bent v = if pitch p == K 0 then v else Bend (pitch p) v
+    highpassed v = if highpass p > 0 then Highpass (cutoffHz (highpass p)) v else v
+    mixed = case map oscillator (oscillators p) of
+      [] -> Gain (K 0) (Tone SineWave)
+      vs -> foldr1 (:&) vs
+    oscillator o = spread (scaled (raised (if wave o == NoiseWave then Noise else Tone (wave o))))
+      where
+        raised v = if semitones o == 0 then v else Bend (K (semitones o)) v
+        scaled v = if oscGain o == 1 then v else Gain (K (oscGain o)) v
+        spread v = if unison o == 1 then v else Unison (unison o) (detuneCents o) (stereoWidth p) v
+
+validVoice :: Voice -> Either String ()
+validVoice voice = case voice of
+  Tone w -> unless (w /= NoiseWave) (Left "noise is a source of its own, not a tone")
+  Noise -> pure ()
+  Plucked d b -> unless (positive d && unitRange b) (Left "a plucked string needs a positive decay and brightness within 0..1")
+  Gain m v -> modOk m >> validVoice v
+  Bend m v -> modOk m >> validVoice v
+  Lowpass m r v -> do
+    modOk m
+    unless (nonNegative r && r < 1) (Left "resonance must be within 0..1 (below 1)")
+    validVoice v
+  Highpass m v -> modOk m >> validVoice v
+  Bandpass m w v -> do
+    modOk m
+    unless (positive w) (Left "a band's width must be positive")
+    validVoice v
+  Unison n c w v -> do
+    unless (n >= 1 && nonNegative c && unitRange w) (Left "unison needs at least 1 copy, a nonnegative detune and width within 0..1")
+    validVoice v
+  Pan m v -> do
+    modOk m
+    let (lo, hi) = modBounds m
+    unless (lo >= -1 && hi <= 1) (Left "pan must stay within -1..1")
+    validVoice v
+  a :& b -> validVoice a >> validVoice b
+  Classic p -> validPatch p
+  where modOk m = unless (validMod m) (Left "voice modulations need finite values and positive times")
+
+-- | Unpitched: every part is. Noise is unpitched, and so is everything under a
+-- 'Bend' that starts away from 0 (a drop or sweep into the note); a vibrato
+-- starts at 0, so it isn't.
+percussive :: Voice -> Bool
+percussive voice = case voice of
+  Tone _ -> False
+  Noise -> True
+  Plucked _ _ -> False
+  Bend m v -> modAt m (1 / 0) 1 0 0 /= 0 || percussive v
+  Gain _ v -> percussive v
+  Lowpass _ _ v -> percussive v
+  Highpass _ v -> percussive v
+  Bandpass _ _ v -> percussive v
+  Unison _ _ _ v -> percussive v
+  Pan _ v -> percussive v
+  a :& b -> percussive a && percussive b
+  Classic p -> percussive (expandClassic p)
+
+-- | How long a voice sounds after note-off: its longest amplitude release
+-- (at least 2 ms, so a note never stops on a click).
+voiceTail :: Voice -> Double
+voiceTail = max 0.002 . go
+  where
+    go voice = case voice of
+      Gain m v -> max (releaseOf m) (go v)
+      Bend _ v -> go v
+      Lowpass _ _ v -> go v
+      Highpass _ v -> go v
+      Bandpass _ _ v -> go v
+      Unison _ _ _ v -> go v
+      Pan _ v -> go v
+      a :& b -> max (go a) (go b)
+      Classic p -> releaseOf (amp p)
+      _ -> 0
 
 -- Patches ---------------------------------------------------------------------
 
@@ -417,8 +519,6 @@ validMix mix = do
 defaultMix :: Int -> Mix
 defaultMix rate = Mix rate noReverb 0 0.8 0 True
 
-tailOf :: Patch -> Double
-tailOf = max 0.002 . releaseOf . amp
 
 -- | Stereo render. Each note is synthesised only over its own span into
 -- left/right/send buffers; the send bus feeds the reverb, then the master stage.
@@ -434,14 +534,14 @@ renderTimelineMix mix (Timeline total ns) = do
             && finite (pan v) && abs (pan v) <= 1) (Left "invalid timeline note")
     unless (validContour (pitchMod v) && validContour (loudness v) && fst (contourBounds (loudness v)) >= 0)
       (Left "invalid note curve")
-    validPatch (sound v)
+    validVoice (sound v)
   let rate = mixRate mix
       fr = fromIntegral rate :: Double
       rv = mixReverb mix
   validMix mix
   let highest v = hz v * 2 ** max 0 (snd (contourBounds (pitchMod v)))
   unless (all ((< fr / 2) . highest) ns) (Left "pitch reaches Nyquist frequency")
-  let end = maximum (total : [start v + duration v + tailOf (sound v) | v <- ns]) + mixTail mix
+  let end = maximum (total : [start v + duration v + voiceTail (sound v) | v <- ns]) + mixTail mix
   unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
     (Left "rendered sample count exceeds platform range")
   let len = ceiling (end * fr) :: Int
@@ -472,8 +572,11 @@ panGains x = (sqrt 2 * cos a, sqrt 2 * sin a) where a = (x + 1) * pi / 4
 sampleRange :: Double -> Int -> Double -> Double -> (Int, Int)
 sampleRange fr len t0 t1 = (max 0 (ceiling (t0 * fr)), min len (ceiling (t1 * fr)))
 
+-- | A classic patch takes the fast path; any other voice, the general one.
 renderNote :: Double -> Word32 -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
-renderNote fr seed v = renderSynth fr seed v (sound v)
+renderNote fr seed v = case sound v of
+  Classic p -> renderSynth fr seed v p
+  voice -> renderVoice fr seed v voice
 
 renderSynth :: Double -> Word32 -> Note -> Patch -> Buffer s -> Buffer s -> Buffer s -> ST s ()
 renderSynth fr seed v p left right sends = do
@@ -489,7 +592,7 @@ renderSynth fr seed v p left right sends = do
       table = VU.fromList (map fst voices)
       nv = VU.length table
   phases <- VU.thaw (VU.fromList (map snd voices))
-  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + tailOf p)
+  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail (Classic p))
       (gl, gr) = panGains (pan v)
       -- The patch's modulations, compiled for this note's note-off and velocity.
       ampAt = compileMod (duration v) (velocity v) (amp p)
@@ -544,8 +647,275 @@ renderSynth fr seed v p left right sends = do
             addTo right i yr
             addTo sends i (send v * (yl + yr) / 2)
             go (i + 1) l1' l2' r1' r2' h1' h2' h3' h4' rng'
-      seed0 = (seed * 2654435761) `xor` 0x9E3779B9
-  go i0 0 0 0 0 0 0 0 0 (if seed0 == 0 then 1 else seed0)
+  go i0 0 0 0 0 0 0 0 0 (noteSeed seed)
+
+-- | The note's own noise generator state, never 0.
+noteSeed :: Word32 -> Word32
+noteSeed seed = let s0 = (seed * 2654435761) `xor` 0x9E3779B9 in if s0 == 0 then 1 else s0
+
+
+-- The general voice ----------------------------------------------------------
+
+-- | A voice compiled for one note: modulations prepared for its note-off and
+-- velocity, constants folded, unison copies laid out, and every source and
+-- filter given its own state.
+data Node s
+  = NTone !Int !(MV.MVector s Double)                 -- wave code, phase
+  | NNoise !(MV.MVector s Word32)                     -- the note's generator, shared in tree order
+  | NString !(PluckedString s)
+  | NScale !Double !Double (Node s)                   -- constant gains, left and right
+  | NGain !Prepared !Bool (Node s)                    -- modulation, follows the key?
+  | NRaise !Double (Node s)                           -- a constant bend, as a frequency ratio
+  | NBend !Prepared !Bool (Node s)
+  | NFilter !Int !Coefficient !Double !Bool !(MV.MVector s Double) (Node s)  -- low/high/band, cutoff, k, mono, state
+  | NPan !Prepared !Bool (Node s)
+  | NAdd (Node s) (Node s)
+
+-- | A filter's cutoff: fixed (its tan-warped gain, computed once) or moving.
+data Coefficient = Fixed !Double | Moving !Prepared !Bool
+
+-- | One output on both sides: the mono parts are filtered once.
+monoNode :: Node s -> Bool
+monoNode node = case node of
+  NScale l r c -> l == r && monoNode c
+  NGain _ _ c -> monoNode c
+  NRaise _ c -> monoNode c
+  NBend _ _ c -> monoNode c
+  NFilter _ _ _ mono _ _ -> mono
+  NPan _ _ _ -> False
+  NAdd a b -> monoNode a && monoNode b
+  _ -> True
+
+constantOf :: Prepared -> Maybe Double
+constantOf p = case p of
+  PK x -> Just x
+  PAdd a b -> (+) <$> constantOf a <*> constantOf b
+  PMul a b -> (*) <$> constantOf a <*> constantOf b
+  _ -> Nothing
+
+keyOf :: Double -> Double
+keyOf f = logBase 2 (f / 261.63)
+{-# INLINE keyOf #-}
+
+-- | The state of a plucked string (Karplus-Strong): a delay line one period
+-- long that grows if the pitch falls, its write count, the excitation, and
+-- the loop settings for the last frequency (frequency, delay, loop filter,
+-- loop gain).
+data PluckedString s = PluckedString
+  { stringLine :: STRef s (MV.MVector s Double)
+  , stringCount :: MV.MVector s Int
+  , stringBurst :: VU.Vector Double
+  , stringLoop :: MV.MVector s Double
+  , stringDecay :: Double, stringBrightness :: Double }
+
+-- | The excitation: one period of the note's noise, smoothed by the
+-- brightness, without its mean, at unit peak.
+newString :: Double -> Word32 -> Double -> Double -> Double -> ST s (PluckedString s)
+newString fr seed f0 decay brightness = do
+  let size = max 2 (round (fr / f0)) :: Int
+      c = 0.1 + 0.9 * brightness
+      raw = take size (drop 1 (iterate xorshift seed))
+      smoothed = drop 1 (scanl (\e r -> e + c * ((fromIntegral r / 2147483647.5 - 1) - e)) 0 raw)
+      mean = sum smoothed / fromIntegral size
+      centred = map (subtract mean) smoothed
+      peak = maximum (map abs centred)
+      burst = VU.fromList (map (/ (if peak > 0 then peak else 1)) centred)
+  line <- MV.replicate (2 * size + 8) 0
+  lineRef <- newSTRef line
+  count <- MV.replicate 1 0
+  loop <- MV.replicate 4 0
+  pure (PluckedString lineRef count burst loop decay brightness)
+
+-- | One sample of a plucked string at frequency @f@. The loop is the delay, a
+-- linear interpolation, and a two-point loss filter @(1-s) + s z^-1@. The
+-- brightness sets @s@ (0.5 at 0, none at 1), lowered where needed so the
+-- fundamental can still ring for the whole decay; the loop gain then makes
+-- the fundamental fall exactly 60 dB in the decay.
+stepString :: Double -> PluckedString s -> Double -> ST s Double
+stepString fr st f = do
+  n <- MV.unsafeRead (stringCount st) 0
+  lastF <- MV.unsafeRead (stringLoop st) 0
+  when (f /= lastF) $ do
+    let w = 2 * pi * f / fr
+        target = 10 ** (-3 / (f * stringDecay st))
+        cw = 1 - cos w
+        q = (1 - target * target) / (2 * cw)
+        sMax = if q >= 0.25 then 0.5 else (1 - sqrt (1 - 4 * q)) / 2
+        s = min (0.5 * (1 - stringBrightness st)) sMax
+        d = max 1 (fr / f - s)
+        a = wrap (negate d)
+        lossH = sqrt (1 - 2 * s * (1 - s) * cw)
+        lossI = sqrt (1 - 2 * a * (1 - a) * cw)
+        rho = min 1 (target / (lossH * lossI))
+    MV.unsafeWrite (stringLoop st) 0 f
+    MV.unsafeWrite (stringLoop st) 1 d
+    MV.unsafeWrite (stringLoop st) 2 s
+    MV.unsafeWrite (stringLoop st) 3 rho
+  d <- MV.unsafeRead (stringLoop st) 1
+  s <- MV.unsafeRead (stringLoop st) 2
+  rho <- MV.unsafeRead (stringLoop st) 3
+  line0 <- readSTRef (stringLine st)
+  line <- if ceiling d + 3 < MV.length line0 then pure line0 else do
+    let cap0 = MV.length line0
+        cap = 2 * (ceiling d + 3)
+    grown <- MV.replicate cap 0
+    forM_ [max 0 (n - cap0) .. n - 1] $ \k -> MV.unsafeRead line0 (k `mod` cap0) >>= MV.unsafeWrite grown (k `mod` cap)
+    writeSTRef (stringLine st) grown
+    pure grown
+  let cap = MV.length line
+      pos = fromIntegral n - d
+      k0 = floor pos :: Int
+      a = pos - fromIntegral k0
+      at k = if k < 0 then pure 0 else MV.unsafeRead line (k `mod` cap)
+  ym <- at (k0 - 1)
+  y0 <- at k0
+  y1 <- at (k0 + 1)
+  let here = (1 - a) * y0 + a * y1
+      before = (1 - a) * ym + a * y0
+      burst = stringBurst st
+      x = if n < VU.length burst then VU.unsafeIndex burst n else 0
+      out = x + rho * ((1 - s) * here + s * before)
+  MV.unsafeWrite line (n `mod` cap) out
+  MV.unsafeWrite (stringCount st) 0 (n + 1)
+  pure out
+
+-- | Compile a voice for one note: @gate@ and @vel@ are its note-off and
+-- velocity, @f0@ the frequency reaching this part at note-on, @phase@ the
+-- starting phase (spread by unison copies), @seeds@ counts the strings.
+compileVoice :: Double -> Double -> Double -> Word32 -> MV.MVector s Word32 -> STRef s Word32
+             -> Double -> Double -> Voice -> ST s (Node s)
+compileVoice fr gate vel seed rng seeds = build
+  where
+    prep = prepare gate vel
+    build !phase !f0 voice = case voice of
+      Tone w -> NTone (waveCode w) <$> MV.replicate 1 phase
+      Noise -> pure (NNoise rng)
+      Plucked d b -> do
+        k <- readSTRef seeds
+        writeSTRef seeds (k + 1)
+        NString <$> newString fr (noteSeed (seed * 7919 + k * 104729)) f0 d b
+      Gain m v -> let p = prep m in case constantOf p of
+        Just g -> NScale g g <$> build phase f0 v
+        Nothing -> NGain p (usesKey m) <$> build phase f0 v
+      Bend m v -> let p = prep m in case constantOf p of
+        Just x -> let r = 2 ** (x / 12) in NRaise r <$> build phase (f0 * r) v
+        Nothing -> NBend p (usesKey m) <$> build phase (f0 * 2 ** (evalPrepared gate p 0 (keyOf f0) / 12)) v
+      Lowpass m r v -> case constantOf (prep m) of
+        Just c | 261.63 * 2 ** c >= 0.45 * fr -> build phase f0 v   -- at or above 0.45 x the rate: passes everything
+        _ -> filterNode 0 m (max 0.05 (sqrt 2 * (1 - r))) phase f0 v
+      Highpass m v -> filterNode 1 m (sqrt 2) phase f0 v
+      Bandpass m w v -> filterNode 2 m ((2 ** w - 1) / sqrt (2 ** w)) phase f0 v
+      Unison n c w v
+        | n <= 1 -> build phase f0 v
+        | otherwise -> foldr1 NAdd <$> mapM copy [0 .. n - 1]
+        where
+          copy j = do
+            let x = fromIntegral j / fromIntegral (n - 1) :: Double
+                r = 2 ** (c * (x - 0.5) / 100 / 12)
+                (vl, vr) = if w == 0 then (1, 1) else panGains (w * (2 * x - 1))
+                scale = 1 / sqrt (fromIntegral n)
+            NRaise r . NScale (scale * vl) (scale * vr) <$> build (wrap (phase + fromIntegral j * 0.618034 + 0.1)) (f0 * r) v
+      Pan m v -> NPan (prep m) (usesKey m) <$> build phase f0 v
+      a :& b -> NAdd <$> build phase f0 a <*> build phase f0 b
+      Classic p -> build phase f0 (expandClassic p)
+    filterNode kind m k phase f0 v = do
+      child <- build phase f0 v
+      state <- MV.replicate 4 0
+      let p = prep m
+          coefficient = maybe (Moving p (usesKey m)) (Fixed . cutoffGain fr) (constantOf p)
+      pure (NFilter kind coefficient k (monoNode child) state child)
+
+-- | A cutoff in octaves above C4 as the filter's warped gain, at most 0.45 x the rate.
+cutoffGain :: Double -> Double -> Double
+cutoffGain fr octaves = tan (pi * min (0.45 * fr) (261.63 * 2 ** octaves) / fr)
+
+-- | One stereo sample of a compiled voice at @t@ seconds since note-on, with
+-- frequency @f@ reaching it.
+stepVoice :: Double -> Double -> Node s -> Double -> Double -> ST s (Double, Double)
+stepVoice fr gate = go
+  where
+    modNow p keyed t f = evalPrepared gate p t (if keyed then keyOf f else 0)
+    go node !t !f = case node of
+      NTone code phase -> do
+        ph <- MV.unsafeRead phase 0
+        let dt = min 0.49 (f / fr)
+            x = oscSample code ph dt 0
+        MV.unsafeWrite phase 0 (wrap (ph + dt))
+        pure (x, x)
+      NNoise rng -> do
+        r <- MV.unsafeRead rng 0
+        let r' = xorshift r
+            x = fromIntegral r' / 2147483647.5 - 1
+        MV.unsafeWrite rng 0 r'
+        pure (x, x)
+      NString st -> do
+        x <- stepString fr st f
+        pure (x, x)
+      NScale l r c -> do
+        (a, b) <- go c t f
+        pure (l * a, r * b)
+      NGain p keyed c -> do
+        (a, b) <- go c t f
+        let g = modNow p keyed t f
+        pure (g * a, g * b)
+      NRaise r c -> go c t (f * r)
+      NBend p keyed c -> go c t (f * 2 ** (modNow p keyed t f / 12))
+      NFilter kind coefficient k mono state c -> do
+        (a, b) <- go c t f
+        let g = case coefficient of
+              Fixed x -> x
+              Moving p keyed -> cutoffGain fr (modNow p keyed t f)
+        ya <- filterStep kind g k state 0 a
+        if mono then pure (ya, ya) else do
+          yb <- filterStep kind g k state 2 b
+          pure (ya, yb)
+      NPan p keyed c -> do
+        (a, b) <- go c t f
+        let (gl, gr) = panGains (max (-1) (min 1 (modNow p keyed t f)))
+        pure (gl * a, gr * b)
+      NAdd x y -> do
+        (a, b) <- go x t f
+        (c, d) <- go y t f
+        pure (a + c, b + d)
+
+filterStep :: Int -> Double -> Double -> MV.MVector s Double -> Int -> Double -> ST s Double
+filterStep kind g k state at x = do
+  ic1 <- MV.unsafeRead state at
+  ic2 <- MV.unsafeRead state (at + 1)
+  let (band, low, s1, s2) = svf g k x ic1 ic2
+  MV.unsafeWrite state at s1
+  MV.unsafeWrite state (at + 1) s2
+  pure $ case kind of
+    0 -> low
+    1 -> x - k * band - low
+    _ -> k * band
+{-# INLINE filterStep #-}
+
+renderVoice :: Double -> Word32 -> Note -> Voice -> Buffer s -> Buffer s -> Buffer s -> ST s ()
+renderVoice fr seed v voice left right sends = do
+  rng <- MV.replicate 1 (noteSeed seed)
+  seeds <- newSTRef 0
+  let curved = pitchMod v /= Flat 0
+      freqAt u = if curved then hz v * 2 ** contourAt (pitchMod v) u else hz v
+  node <- compileVoice fr (duration v) (velocity v) seed rng seeds 0 (freqAt 0) voice
+  let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + voiceTail voice)
+      (gl, gr) = panGains (pan v)
+      go !i
+        | i >= i1 = pure ()
+        | otherwise = do
+            let t = fromIntegral i / fr - start v
+                u = max 0 (min 1 (t / duration v))
+            (a, b) <- stepVoice fr (duration v) node t (freqAt u)
+            let e
+                  | loudness v == Flat 1 = gain v
+                  | otherwise = gain v * contourAt (loudness v) u
+                yl = e * gl * a
+                yr = e * gr * b
+            addTo left i yl
+            addTo right i yr
+            addTo sends i (send v * (yl + yr) / 2)
+            go (i + 1)
+  go i0
 
 wrap :: Double -> Double
 wrap x = x - fromIntegral (floor x :: Int)
