@@ -48,7 +48,7 @@ out="$root/output/tangnano20k"
 mkdir -p "$out"
 cd "$root"
 
-stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir "$out/clash"
+cabal run -v0 clash -- src/SimpleRisc.hs --verilog -outputdir "$out/clash"
 # every module Clash generated (the dual-port RAM is its own file)
 core="$(ls "$out"/clash/SimpleRisc.topEntity/*.v | tr '\n' ' ')"
 

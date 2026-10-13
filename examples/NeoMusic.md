@@ -11,12 +11,12 @@ a motif and its transposed reversal over a bass part, then a quarter-tone phrase
 From the repository root:
 
 ```sh
-stack run neo-music -- neo-music.wav
+cabal run neo-music -- neo-music.wav
 # MP3 / lossless FLAC require ffmpeg on PATH (e.g. brew install ffmpeg).
-stack run neo-music -- neo-music.mp3
-stack run neo-music -- neo-music.flac
-stack test --fast
-stack ghci haskplayground:lib
+cabal run neo-music -- neo-music.mp3
+cabal run neo-music -- neo-music.flac
+cabal test
+cabal repl haskplayground
 ```
 
 In GHCi:
@@ -65,7 +65,7 @@ note inside them. `renderMix`/`writeMix` produce stereo: notes are rendered into
 left/right/send buffers over their own spans only, the send bus feeds a stereo
 Freeverb (`hall`, `noReverb`), then the master applies optional tanh drive and
 peak normalisation (`mixNormalize`, `mixPeak`); `mixTail` appends reverb decay.
-`app/screw-bgm` is a complete 30-second example (`stack run screw-bgm -- --stems`
+`app/screw-bgm` is a complete 30-second example (`cabal run screw-bgm -- --stems`
 prints per-layer levels).
 
 `FromPart` avoids the draft's duplicate `Part` constructor name. `render`

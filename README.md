@@ -3,15 +3,20 @@
 Put everything else into examples.
 There's a script to auto copy stuff from verilog output to examples. Use lushay code to build and flash.
 
-`stack exec --package clash-ghc -- clash src/Processor.hs --verilog`
+The project builds with cabal (GHC 9.8.2, which ghcup installs): `cabal.project`
+pins the compiler and `cabal.project.freeze` every dependency's version.
 
-`stack exec clash -- --verilog src/CPU.hs`
+`cabal build all` builds everything; `cabal test` runs the test suite.
 
-`stack exec ghci -- -ghci-script /dev/stdin test/RVLangTest.hs 2>&1 <<'EOF'`
+`cabal run clash -- src/SimpleRisc.hs --verilog` runs the Clash compiler (the
+`clash` executable in `haskplayground.cabal`; `cabal.project` writes the GHC
+environment file it uses to find the project's packages).
 
-`stack exec haskplayground-exe -- examples/fact.fpl` For speed.
+`cabal repl haskplayground` loads the library in GHCi.
 
-`stack run -- zonesim` to run a thing.
+`cabal run haskplayground-exe -- examples/fact.fpl` For speed.
+
+`cabal run haskplayground-exe -- zonesim` to run a thing.
 
 ## Tang Nano 20K
 

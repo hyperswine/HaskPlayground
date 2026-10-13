@@ -22,7 +22,7 @@ out="${GOWIN_OUT:-$root/output/tangnano20k/gowin-$freq}"
 echo "Gowin vendor build: core $freq MHz, VCO $((freq * odiv)) MHz, output $out"
 mkdir -p "$out"
 cd "$root"
-stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir "$root/output/tangnano20k/clash"
+cabal run -v0 clash -- src/SimpleRisc.hs --verilog -outputdir "$root/output/tangnano20k/clash"
 # The vendor PLL library uses GW2AR-18C for this device.
 python3 - "$here/top.v" "$out/top_vendor.v" "$freq" "$odiv" <<'PY'
 from pathlib import Path

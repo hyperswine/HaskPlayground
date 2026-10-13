@@ -8,16 +8,16 @@ text authoring, MIDI, and the first LilyPond piano view (review steps 1–4).
 From the HaskPlayground root:
 
 ```sh
-stack run neo-music -- check examples/neomusic/twinkle.neomusic
-stack run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.wav
-stack run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.mp3
-stack run neo-music -- midi examples/neomusic/twinkle.neomusic -o twinkle.mid
-stack run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.html
-stack run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.txt
-stack run neo-music -- hybrid examples/neomusic/twinkle.neomusic -o twinkle-bars.html
-stack run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --pdf
-stack run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --no-numbers
-stack test --fast
+cabal run neo-music -- check examples/neomusic/twinkle.neomusic
+cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.wav
+cabal run neo-music -- play examples/neomusic/twinkle.neomusic -o twinkle.mp3
+cabal run neo-music -- midi examples/neomusic/twinkle.neomusic -o twinkle.mid
+cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.html
+cabal run neo-music -- sheet examples/neomusic/twinkle.neomusic -o twinkle.txt
+cabal run neo-music -- hybrid examples/neomusic/twinkle.neomusic -o twinkle-bars.html
+cabal run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --pdf
+cabal run neo-music -- staff examples/neomusic/twinkle.neomusic -o twinkle.ly --no-numbers
+cabal test
 ```
 
 `play` renders a file; it does not open an audio player. WAV synthesis is native.

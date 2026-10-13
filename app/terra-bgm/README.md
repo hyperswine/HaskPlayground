@@ -22,8 +22,8 @@ release/reverb makes the exported track approximately 94.98 seconds.
 From HaskPlayground, with Stack and FFmpeg installed:
 
 ```sh
-stack run terra-bgm -- --check
-stack run terra-bgm -- /tmp/skyward-raw.wav
+cabal run terra-bgm -- --check
+cabal run terra-bgm -- /tmp/skyward-raw.wav
 python3 app/terra-bgm/master.py /tmp/skyward-raw.wav ../qos/models/music/Skyward_Little_World.mp3
 ```
 

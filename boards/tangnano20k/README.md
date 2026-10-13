@@ -154,7 +154,7 @@ vvp -n /tmp/tb.vvp +frame=/tmp/hello.hex
 Loading runs at UART speed, and iverilog simulates the current core at
 roughly 3,000 clocks per second, so even the 30-byte `tb_simple_risc.v`
 program takes about a minute and a 750-byte image about 40 minutes. `build.sh` writes the Verilog; to generate only the Verilog, run
-`stack exec --package clash-ghc -- clash src/SimpleRisc.hs --verilog -outputdir output/tangnano20k/clash`.
+`cabal run clash -- src/SimpleRisc.hs --verilog -outputdir output/tangnano20k/clash`.
 
 ## Clock speed: nextpnr is optimistic
 

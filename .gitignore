@@ -8,6 +8,7 @@ NOTES.txt
 verilog/
 .vscode/
 dist-newstyle/
+.ghc.environment.*
 nprolog.conf
 file.txt
 *.o

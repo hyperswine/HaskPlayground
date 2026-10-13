@@ -1,425 +1,157 @@
-cabal-version: 1.12
-
--- This file has been generated from package.yaml by hpack version 0.39.6.
---
--- see: https://github.com/sol/hpack
-
+cabal-version: 3.0
 name:           haskplayground
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/githubuser/haskplayground#readme>
+description:    Please see the README on GitHub at <https://github.com/hyperswine/haskplayground#readme>
 homepage:       https://github.com/hyperswine/haskplayground#readme
 bug-reports:    https://github.com/hyperswine/haskplayground/issues
 author:         Jasen Qin
 maintainer:     jasen.qin33@gmail.com
 copyright:      2025 Jasen Qin
-license:        GPL-3
+license:        GPL-3.0-only
 license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
     CHANGELOG.md
     examples/NeoMusicLanguage.md
-    examples/neomusic/articulation.neomusic
-    examples/neomusic/cents.neomusic
-    examples/neomusic/curves.neomusic
-    examples/neomusic/numeric-preview.neomusic
-    examples/neomusic/scale.neomusic
-    examples/neomusic/tempo.neomusic
-    examples/neomusic/ties.neomusic
-    examples/neomusic/twinkle.neomusic
-    examples/neomusic/voices.neomusic
-    test/golden/neomusic/cents.ly
-    test/golden/neomusic/curves.ly
-    test/golden/neomusic/scale.ly
-    test/golden/neomusic/tempo.ly
-    test/golden/neomusic/ties.ly
-    test/golden/neomusic/twinkle.ly
-    test/golden/neomusic/voices.ly
+    examples/neomusic/*.neomusic
+    test/golden/neomusic/*.ly
     src/NeoMusic/prelude.neomusic
 
 source-repository head
   type: git
   location: https://github.com/hyperswine/haskplayground
 
-library
-  exposed-modules:
-      DTs
-      MyClash
-      MyData
-      MyStuff
-      NeoMusic.Audio
-      NeoMusic.Language
-      NeoMusic.Midi
-      NeoMusic.Numeric
-      NeoMusic.Pitch
-      NeoMusic.Prelude
-      NeoMusic.Score
-      NeoMusic.Sheet
-      PsramRegs
-      QuantUI
-      SdramSimpleRisc
-      SimpleRisc
-      WASM.Actors
-      WASM.Main
-      WASM.TestMain
-      WASM.WasmVM
-      WASM.WatParser
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
+common warnings
+  ghc-options:
+    -Wall -Wcompat -Widentities -Wincomplete-record-updates
+    -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules
+    -Wpartial-fields -Wredundant-constraints
   default-language: Haskell2010
+
+-- Every component shares the library's dependencies (as the hpack file did).
+common deps
+  build-depends:
+        aeson
+      , array
+      , async
+      , base >=4.7 && <5
+      , binary
+      , brick
+      , bytestring
+      , clash-prelude
+      , containers
+      , cryptohash-sha1
+      , directory
+      , filepath
+      , free
+      , hashable
+      , haskeline
+      , hedgehog
+      , http-conduit
+      , linear
+      , linear-base
+      , megaparsec
+      , mtl
+      , parsec
+      , parser-combinators
+      , prettyprinter
+      , prettyprinter-ansi-terminal
+      , process
+      , random
+      , recursion-schemes
+      , regex-tdfa
+      , row-types
+      , stm
+      , template-haskell
+      , temporary
+      , text
+      , time
+      , unix
+      , unordered-containers
+      , vector
+      , vty
+      , vty-crossplatform
+
+library
+  import: warnings, deps
+  hs-source-dirs: src
+  exposed-modules:
+        DTs
+      , MyClash
+      , MyData
+      , MyStuff
+      , NeoMusic.Audio
+      , NeoMusic.Language
+      , NeoMusic.Midi
+      , NeoMusic.Numeric
+      , NeoMusic.Pitch
+      , NeoMusic.Prelude
+      , NeoMusic.Score
+      , NeoMusic.Sheet
+      , PsramRegs
+      , QuantUI
+      , SdramSimpleRisc
+      , SimpleRisc
+      , WASM.Actors
+      , WASM.Main
+      , WASM.TestMain
+      , WASM.WasmVM
+      , WASM.WatParser
 
 executable haskplayground-exe
+  import: warnings, deps
   main-is: Main.hs
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+  hs-source-dirs: app
+  build-depends: haskplayground
+  ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
 
 executable neo-music
+  import: warnings, deps
   main-is: Main.hs
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      app/neo-music
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+  hs-source-dirs: app/neo-music
+  build-depends: haskplayground
+  ghc-options: -O2
 
 executable screw-anime
+  import: warnings, deps
   main-is: Main.hs
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      app/screw-anime
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+  hs-source-dirs: app/screw-anime
+  build-depends: haskplayground
+  ghc-options: -O2
 
 executable screw-bgm
+  import: warnings, deps
   main-is: Main.hs
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      app/screw-bgm
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+  hs-source-dirs: app/screw-bgm
+  build-depends: haskplayground
+  ghc-options: -O2
 
 executable terra-bgm
+  import: warnings, deps
   main-is: Main.hs
-  other-modules:
-      Paths_haskplayground
-  hs-source-dirs:
-      app/terra-bgm
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+  hs-source-dirs: app/terra-bgm
+  build-depends: haskplayground
+  ghc-options: -O2
+
+-- The Clash compiler, for the board builds: cabal run clash -- <file> --verilog
+executable clash
+  import: warnings
+  main-is: Clash.hs
+  hs-source-dirs: bin
+  build-depends: base, clash-ghc
+  ghc-options: -threaded -rtsopts
 
 test-suite haskplayground-test
+  import: warnings, deps
   type: exitcode-stdio-1.0
   main-is: Spec.hs
+  hs-source-dirs: test
   other-modules:
       NeoMusicScoreTests
-      NeoMusicTests
-      PsramRegs
-      Rv32Model
-      SimpleRisc
-      Paths_haskplayground
-  hs-source-dirs:
-      test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      aeson
-    , array
-    , async
-    , base >=4.7 && <5
-    , binary
-    , brick
-    , bytestring
-    , clash-prelude
-    , containers
-    , cryptohash-sha1
-    , directory
-    , filepath
-    , free
-    , hashable
-    , haskeline
-    , haskplayground
-    , hedgehog
-    , http-conduit
-    , linear
-    , linear-base
-    , megaparsec
-    , mtl
-    , parsec
-    , parser-combinators
-    , prettyprinter
-    , prettyprinter-ansi-terminal
-    , process
-    , random
-    , recursion-schemes
-    , regex-tdfa
-    , row-types
-    , stm
-    , template-haskell
-    , temporary
-    , text
-    , time
-    , unix
-    , unordered-containers
-    , vector
-    , vty
-    , vty-crossplatform
-  default-language: Haskell2010
+    , NeoMusicTests
+    , PsramRegs
+    , Rv32Model
+    , SimpleRisc
+  build-depends: haskplayground
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N

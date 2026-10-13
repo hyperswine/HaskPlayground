@@ -1,0 +1,14 @@
+packages: .
+
+with-compiler: ghc-9.8.2
+
+-- Hackage as of the stack snapshot this project used (nightly-2024-09-30);
+-- cabal.project.freeze pins the versions it chose.
+index-state: hackage.haskell.org 2024-09-30T00:00:00Z
+
+-- Some dependencies' upper bounds predate GHC 9.8 (stack ran with
+-- allow-newer as well).
+allow-newer: all
+
+-- Clash (cabal run clash) finds the project's packages through this file.
+write-ghc-environment-files: always

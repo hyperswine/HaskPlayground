@@ -22,7 +22,7 @@ core="$out/clash/PsramRegs.topEntity/psram_regs.v"
 mkdir -p "$out"
 cd "$root"
 
-stack exec --package clash-ghc -- clash src/PsramRegs.hs --verilog -outputdir "$out/clash"
+cabal run -v0 clash -- src/PsramRegs.hs --verilog -outputdir "$out/clash"
 
 "$bin/yosys" -q -l "$out/yosys.log" -p \
   "read_verilog $core $here/psram_top.v; synth_gowin -top top -json $out/psram_regs.json"

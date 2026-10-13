@@ -18,7 +18,7 @@ between uninterpreted sequences and their interpretation:
 | Renderer | every note tested at every sample | each note rendered only over its own span |
 
 Files: `src/NeoMusic.hs`, `test/NeoMusicTests.hs`, `examples/NeoMusic.md`, and the
-worked example `app/screw-bgm/Main.hs` (new `screw-bgm` executable in `package.yaml`).
+worked example `app/screw-bgm/Main.hs` (new `screw-bgm` executable in `haskplayground.cabal`).
 
 ## 1. Breaking changes and migration
 
@@ -257,7 +257,7 @@ so large scores were slow. v2:
 - runs the reverb as whole-buffer passes per comb and allpass.
 
 The 30 s stereo `screw-bgm` score renders in about 3 s at 44.1 kHz on an M4
-(`stack exec screw-bgm`). It uses supersaw chords, 16th-note arpeggios, drums
+(`cabal run screw-bgm`). It uses supersaw chords, 16th-note arpeggios, drums
 and a hall reverb.
 
 ## 7. Tests
@@ -279,7 +279,7 @@ migration. v2 adds:
     sounding after the note ends.
   - Noise patches produce bounded output, and no render contains NaN.
 
-Run with `stack test`.
+Run with `cabal test`.
 
 ## 8. Worked example: `screw-bgm`
 
@@ -299,7 +299,7 @@ Run with `stack test`.
   - A long `kick` for the impact hit, a crash made from `hat`, and `noiseSweep`
     for the riser.
 - **Microtones.** A 24-EDO pluck staircase leading into the drop.
-- **Level checks.** `stack run screw-bgm -- --stems` renders each layer
+- **Level checks.** `cabal run screw-bgm -- --stems` renders each layer
   un-normalised and prints its loudest 0.5 s RMS plus a level strip over time.
   That's how the layers were balanced.
 

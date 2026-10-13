@@ -11,7 +11,7 @@ case "$mode" in
  test) top="$here/test_top.v"; rtl="";;
  core) top="$here/core_top.v";
    cd "$root"
-   stack exec --package clash-ghc -- clash -isrc -hide-package haskplayground src/SdramSimpleRisc.hs --verilog -outputdir "$root/output/tangnano20k/sdram-generated/clash"
+   cabal run -v0 clash -- -isrc -hide-package haskplayground src/SdramSimpleRisc.hs --verilog -outputdir "$root/output/tangnano20k/sdram-generated/clash"
    rtl="$root/output/tangnano20k/sdram-generated/clash/SdramSimpleRisc.topEntity/sdram_simple_risc.v";;
  *) echo "usage: build.sh [test|core]" >&2; exit 1;;
 esac

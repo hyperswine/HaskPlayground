@@ -1,4 +1,4 @@
--- stack exec haskplayground-exe -- quantui
+-- cabal run haskplayground-exe -- quantui
 
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
