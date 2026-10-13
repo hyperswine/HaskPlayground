@@ -89,6 +89,7 @@ library
       , NeoMusic.Prelude
       , NeoMusic.Score
       , NeoMusic.Sheet
+      , NeoMusic.Signal
       , PsramRegs
       , QuantUI
       , SdramSimpleRisc

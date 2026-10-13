@@ -26,7 +26,11 @@ plain = NumericView False False
 visible :: NumericView -> Event -> Event
 visible view e
   | showMarks view = e
-  | otherwise = e {gate = 1, bends = [], swells = [], vibrato = 0}
+  | otherwise =
+      -- Constant offsets are part of the pitch and stay; what varies is dropped.
+      let (steps, cs, _) = pitchParts (pitchShift e)
+      in e { gate = 1, pitchShift = plus (Const steps) (if cs == 0 then Const 0 else Cents (Const cs))
+           , level = Const (fst (levelParts (level e))) }
 
 -- | Separate simultaneous lines without merging independently timed events.
 -- Every lane starts at beat zero; gaps and trailing silence remain explicit.
@@ -233,8 +237,11 @@ eventText e = pitchText e ++ centsText e ++ (if dur e == 1 then "" else ":" ++ r
 -- | A fine offset is part of the pitch, so it is shown exactly: @7+14c@.
 centsText :: Event -> String
 centsText e
-  | null (pitches e) || cents e == 0 = ""
-  | otherwise = (if cents e > 0 then "+" else "") ++ rationalText (cents e) ++ "c"
+  | null (pitches e) = ""
+  | otherwise = signed steps "" ++ signed cs "c"
+  where
+    (steps, cs, _) = pitchParts (pitchShift e)
+    signed x unit = if x == 0 then "" else (if x > 0 then "+" else "") ++ rationalText x ++ unit
 
 -- | Reading aids, not exact values, in this order after an event: gate, bend,
 -- vibrato, swell.
@@ -244,7 +251,7 @@ eventMarks e
   | otherwise = filter (not . null)
       [ gateMark e
       , case bendMotion e of Rising -> "/"; Falling -> "\\"; Returning -> "^"; Flat -> ""
-      , if vibrato e > 0 then "w" else ""
+      , if vibrates e then "w" else ""
       , case swellMotion e of Rising -> "<"; Falling -> ">"; Returning -> "<>"; Flat -> "" ]
 
 -- | The legend line for each mark, in display order.

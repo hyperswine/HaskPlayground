@@ -7,7 +7,7 @@ module NeoMusic.Audio
   , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch
   , pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
     -- * Physical timeline
-  , Note(..), Timeline(..), note, curveAt
+  , Note(..), Timeline(..), Contour(..), note, contourAt, contourBounds
     -- * Mixing and export
   , Reverb(..), Mix(..), noReverb, hall, defaultMix
   , renderTimelineMix, writeTimelineMix, pcmWav, exportAs
@@ -58,33 +58,72 @@ data Patch = Patch
   , stereoWidth :: Double
   } deriving (Eq, Show)
 
--- | Curves run over the note's sounding time, @u@ from 0 to 1 (held at 1
--- through the release): 'bend' is piecewise-linear breakpoints @(u, octaves)@,
--- 'swells' are loudness multipliers @(u, factor)@ that multiply together, and
--- vibrato is a sine of 'vibratoDepth' octaves at 'vibratoRate' Hz.
+-- | How a note varies while it sounds, over its sounding time @u@ from 0 to 1
+-- (held at 1 through the release). The engine knows nothing of steps or beats:
+-- 'Cycles' counts whole cycles over the note.
+data Contour
+  = Flat Double
+  | Breaks [(Double, Double)]   -- ^ piecewise-linear @(u, value)@
+  | Cycles Wave Double          -- ^ a unit sine or square, this many cycles over the note
+  | Contour :+. Contour
+  | Contour :*. Contour
+  deriving (Eq, Show)
+infixl 6 :+.
+infixl 7 :*.
+
+-- | 'pitchMod' is added to the pitch in octaves; 'loudness' multiplies the
+-- amplitude. @Flat 0@ and @Flat 1@ mean "none", and take the plain path.
 data Note = Note
   { start :: Double, hz :: Double, duration :: Double, sound :: Patch
   , velocity :: Double, gain :: Double, pan :: Double, send :: Double
-  , bend :: [(Double, Double)], vibratoDepth :: Double, vibratoRate :: Double
-  , swells :: [[(Double, Double)]] }
+  , pitchMod :: Contour, loudness :: Contour }
   deriving (Eq, Show)
 
--- | A note with no curves.
+-- | A note that doesn't vary.
 note :: Double -> Double -> Double -> Patch -> Double -> Double -> Double -> Double -> Note
-note t f d p v g pn s = Note t f d p v g pn s [] 0 0 []
+note t f d p v g pn s = Note t f d p v g pn s (Flat 0) (Flat 1)
 
--- | Piecewise-linear value at @u@, flat beyond the first and last breakpoints.
-curveAt :: [(Double, Double)] -> Double -> Double
-curveAt [] _ = 0
-curveAt ((u0, y0) : more) u
-  | u <= u0 = y0
-  | otherwise = go u0 y0 more
+contourAt :: Contour -> Double -> Double
+contourAt c u = case c of
+  Flat x -> x
+  Breaks ps -> breaksAt ps
+  Cycles w n ->
+    let phase = n * u
+    in case w of
+         SquareWave -> if phase - fromIntegral (floor phase :: Int) < 0.5 then 1 else -1
+         _ -> sin (2 * pi * phase)
+  a :+. b -> contourAt a u + contourAt b u
+  a :*. b -> contourAt a u * contourAt b u
   where
+    breaksAt [] = 0
+    breaksAt ((u0, y0) : more)
+      | u <= u0 = y0
+      | otherwise = go u0 y0 more
     go _ y [] = y
-    go ua ya ((ub, yb) : rest')
+    go ua ya ((ub, yb) : later)
       | u <= ub = if ub == ua then yb else ya + (yb - ya) * (u - ua) / (ub - ua)
-      | otherwise = go ub yb rest'
-{-# INLINE curveAt #-}
+      | otherwise = go ub yb later
+
+-- | Lower and upper bounds over the whole note, by interval arithmetic.
+contourBounds :: Contour -> (Double, Double)
+contourBounds c = case c of
+  Flat x -> (x, x)
+  Breaks [] -> (0, 0)
+  Breaks ps -> (minimum (map snd ps), maximum (map snd ps))
+  Cycles _ _ -> (-1, 1)
+  a :+. b -> let (l1, h1) = contourBounds a; (l2, h2) = contourBounds b in (l1 + l2, h1 + h2)
+  a :*. b -> let (l1, h1) = contourBounds a; (l2, h2) = contourBounds b
+                 ps = [l1 * l2, l1 * h2, h1 * l2, h1 * h2]
+             in (minimum ps, maximum ps)
+
+validContour :: Contour -> Bool
+validContour c = case c of
+  Flat x -> finite x
+  Breaks ps -> all (\(u, y) -> unitRange u && finite y) ps
+  Cycles _ n -> finite n
+  a :+. b -> validContour a && validContour b
+  a :*. b -> validContour a && validContour b
+
 data Timeline = Timeline { seconds :: Double, notes :: [Note] } deriving (Eq, Show)
 
 finite, positive, nonNegative, unitRange :: Double -> Bool
@@ -230,9 +269,7 @@ renderTimelineMix mix (Timeline total ns) = do
     unless (nonNegative (start v) && positive (duration v) && positive (hz v)
             && unitRange (velocity v) && nonNegative (gain v) && nonNegative (send v)
             && finite (pan v) && abs (pan v) <= 1) (Left "invalid timeline note")
-    unless (all (\(u, y) -> unitRange u && finite y) (bend v)
-            && all (all (\(u, y) -> unitRange u && nonNegative y)) (swells v)
-            && nonNegative (vibratoDepth v) && (vibratoDepth v == 0 || positive (vibratoRate v)))
+    unless (validContour (pitchMod v) && validContour (loudness v) && fst (contourBounds (loudness v)) >= 0)
       (Left "invalid note curve")
     validPatch (sound v)
   let rate = mixRate mix
@@ -244,7 +281,7 @@ renderTimelineMix mix (Timeline total ns) = do
     (Left "reverb room, damping and width must be within 0..1; wet and pre-delay nonnegative")
   unless (nonNegative (mixDrive mix) && nonNegative (mixTail mix) && mixPeak mix > 0 && mixPeak mix <= 1)
     (Left "mix drive and tail must be nonnegative and peak within (0, 1]")
-  let highest v = hz v * 2 ** (maximum (0 : map snd (bend v)) + vibratoDepth v)
+  let highest v = hz v * 2 ** max 0 (snd (contourBounds (pitchMod v)))
   unless (all ((< fr / 2) . highest) ns) (Left "pitch reaches Nyquist frequency")
   let end = maximum (total : [start v + duration v + tailOf (sound v) | v <- ns]) + mixTail mix
   unless (finite (end * fr) && end * fr < fromIntegral (maxBound :: Int))
@@ -313,7 +350,7 @@ renderSynth fr seed v p left right sends = do
       amp = velocity v * gain v
       (gl, gr) = panGains (pan v)
       lowpassOn = cutoff p < 0.45 * fr || filterAmount p > 0 || velocityToCutoff p > 0
-      pitchCurved = not (null (bend v)) || vibratoDepth v > 0
+      pitchCurved = pitchMod v /= Flat 0
       kq = max 0.05 (sqrt 2 * (1 - resonance p))
       hpG = tan (pi * min (0.45 * fr) (highpass p) / fr)
       oscillate !j !pitch !accL !accR !rng
@@ -336,7 +373,7 @@ renderSynth fr seed v p left right sends = do
                   | otherwise = hz v * 2 ** (pitchDrop p * exp (-t / pitchTime p) / 12)
                 pitch
                   | not pitchCurved = dropped
-                  | otherwise = dropped * 2 ** (curveAt (bend v) u + vibratoDepth v * sin (2 * pi * vibratoRate v * t))
+                  | otherwise = dropped * 2 ** contourAt (pitchMod v) u
             (oscL, oscR, rng') <- oscillate 0 pitch 0 0 rng
             let fc = cutoff p * (pitch / 261.63) ** keyTrack p
                      * 2 ** (filterAmount p * adsr (filterEnvelope p) (duration v) t
@@ -347,8 +384,8 @@ renderSynth fr seed v p left right sends = do
                 (outL, h1', h2') = if highpass p > 0 then highpassed hpG lowL h1 h2 else (lowL, h1, h2)
                 (outR, h3', h4') = if highpass p > 0 then highpassed hpG lowR h3 h4 else (lowR, h3, h4)
                 e
-                  | null (swells v) = amp * adsr (ampEnvelope p) (duration v) t
-                  | otherwise = amp * product [curveAt c u | c <- swells v] * adsr (ampEnvelope p) (duration v) t
+                  | loudness v == Flat 1 = amp * adsr (ampEnvelope p) (duration v) t
+                  | otherwise = amp * contourAt (loudness v) u * adsr (ampEnvelope p) (duration v) t
                 yl = e * gl * outL
                 yr = e * gr * outR
             addTo left i yl

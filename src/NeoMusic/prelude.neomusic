@@ -2,6 +2,15 @@
 -- the primitives. Read before every score; a score's own definition of any of
 -- these names replaces this one. #k marks a number parameter.
 
+-- Loudness: level multiplies, so these nest by multiplying.
+vel #v x      = level v [x]            -- strength, 0..1
+swell #s x    = level s [x]            -- a loudness shape, e.g. swell 1/4 -> 1
+
+-- Pitch shapes: pitch adds, in steps.
+bend #s x     = pitch s [x]            -- e.g. bend 0 -> 1, bend {0:0 1/4:1 1:0}
+vibrato #d x  = pitch (d * sine 3) [x] -- depth d steps, 3 cycles a beat
+cents #c x    = pitch (cents c) [x]    -- a fine offset in cents, any tuning
+
 -- Time and tempo
 hold #k x     = speed 1/k [x]          -- a fermata: held k times as long
 rit #r x      = speed 1 -> r [x]       -- slow to r times the tempo
