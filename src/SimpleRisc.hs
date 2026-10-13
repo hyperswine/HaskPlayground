@@ -1479,7 +1479,10 @@ data ExecuteTwo = ExecuteTwo
     -- | A multiply's four 17 x 17 partial products (DSP blocks), summed in
     -- the second execute stage.
     e2Products :: Vec 4 (Signed 34),
-    e2Rd :: Index 32, e2Writes :: Bool, e2Slow :: Bool }
+    e2Rd :: Index 32, e2Writes :: Bool, e2Slow :: Bool,
+    -- | Its result is selected here (an ALU result other than a shift or a
+    -- multiply, LUI, AUIPC, or a jump's link), so decode may take it.
+    e2Forwards :: Bool }
   deriving (Generic, NFDataX)
 
 -- | The commit stage: an instruction here is the oldest in the pipeline.
@@ -1659,6 +1662,15 @@ pipeStep machine memoryWord =
          in (stage, if not slow && taken then Just target else Nothing)
       -- (in a redirect cycle the stage holds a wrong-path instruction)
       flushing = pRedirect pipe
+      -- the result a forwarding instruction selects in this stage
+      e2Value x =
+        let control = e2Control x
+            comp = e2Computed x
+         in case execKind control of
+              KindJump -> cLink comp
+              _ | execLui control -> e2Imm x
+                | execAuipc control -> cTarget comp
+                | otherwise -> fromMaybe 0 (selectedAlu control (e2Candidates x) (e2AluCompare x))
       e2Moved = case pE2 pipe of
         Just x | e2Advance && isNothing flushing -> Just (e2Out x)
         _ -> Nothing
@@ -1682,7 +1694,11 @@ pipeStep machine memoryWord =
                 e2BranchCompare = compareOperands a b,
                 e2B = b, e2Op2 = op2, e2Imm = imm,
                 e2Products = partialProducts (execFunct3 control) a b,
-                e2Rd = e1Rd x, e2Writes = e1Writes x, e2Slow = e1Slow x }
+                e2Rd = e1Rd x, e2Writes = e1Writes x, e2Slow = e1Slow x,
+                e2Forwards = e1Writes x && case execKind control of
+                  KindJump -> True
+                  KindAlu -> not (execShift control) && not (execMulDiv control)
+                  _ -> False }
       e1Advance = isNothing (pE2 pipe) || e2Advance
       -- Decode and register read ---------------------------------------------
       d = pD pipe
@@ -1707,11 +1723,13 @@ pipeStep machine memoryWord =
             usesRs2 = fUsesRs2 f
             conflicts r producing = producing && ((usesRs1 && rs1 == r) || (usesRs2 && rs2 == r))
             hazard = maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) (pE1 pipe)
-              || maybe False (\x -> conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
+              || maybe False (\x -> not (e2Forwards x) && conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
               || maybe False (\m -> not (mFinal m) && conflicts (mRd m) (mWrites m)) (pM pipe)
-            operand r current = case pM pipe of
-              Just m | mWrites m && mRd m == r -> mValue m
-              _ -> case cpuPendingWrite machine of
+            operand r current = case pE2 pipe of
+              Just x | e2Forwards x && e2Rd x == r -> e2Value x
+              _ -> case pM pipe of
+               Just m | mWrites m && mRd m == r -> mValue m
+               _ -> case cpuPendingWrite machine of
                 Just (w, v) | w /= 0 && w == r -> v
                 _ -> current
             (heldA, heldB) = pDOperands pipe
