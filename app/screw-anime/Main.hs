@@ -21,7 +21,7 @@ import qualified Data.Map.Strict as M
 import Data.Ratio (denominator)
 import qualified Data.Vector.Unboxed as VU
 import NeoMusic.Audio
-  ( Envelope(..), Mix(..), Osc(..), Patch(..), Reverb(..), Wave(..)
+  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Wave(..), adsr, cutoffHz, filterCutoff
   , basicPatch, hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass
   , supersaw, writeTimelineMix )
 import NeoMusic.Pitch (Tuning(..))
@@ -256,8 +256,8 @@ subBar b = case section b of
 
 -- | One bar on a 16th grid; beats accented, 8ths medium, 16ths light.
 grid :: Int -> Double -> [Int] -> Phrase
-grid pitch level positions = concat
-  [if i `elem` positions then hit [pitch] (1/4) (level * accent i) else hush (1/4) | i <- [0 .. 15 :: Int]]
+grid step level positions = concat
+  [if i `elem` positions then hit [step] (1/4) (level * accent i) else hush (1/4) | i <- [0 .. 15 :: Int]]
   where accent i | i `mod` 4 == 0 = 1 | even i = 0.7 | otherwise = 0.5
 
 kickStep, snareStep, hatStep :: Int
@@ -361,28 +361,29 @@ lead, bell, piano, pumpPad, bassSynth, glass, boom, openHat, crash :: Patch
 -- | Bright, slightly hollow J-pop lead: square body, detuned saw shine, sine octave.
 lead = basicPatch
   { oscillators = [Osc SquareWave 0 0.5 1 0, Osc SawWave 0 0.35 3 10, Osc SineWave 12 0.15 1 0]
-  , ampEnvelope = Envelope 0.01 0.2 0.8 0.12
-  , cutoff = 2400, resonance = 0.1, filterEnvelope = Envelope 0.001 0.3 0.4 0.15
-  , filterAmount = 1.2, velocityToCutoff = 0.6, stereoWidth = 0.3 }
+  , amp = Velocity :* adsr 0.01 0.2 0.8 0.12
+  , cutoff = filterCutoff 2400 0 (adsr 0.001 0.3 0.4 0.15) 1.2 0.6, resonance = 0.1, stereoWidth = 0.3 }
 bell = basicPatch
   { oscillators = [Osc SineWave 0 1 1 0, Osc SineWave 12 0.28 1 0, Osc SineWave 28 0.06 1 0]
-  , ampEnvelope = Envelope 0.002 0.5 0 0.4 }
+  , amp = Velocity :* adsr 0.002 0.5 0 0.4 }
 piano = pluck
   { oscillators = [Osc TriangleWave 0 1 1 0, Osc SineWave 12 0.32 1 0, Osc SineWave 19 0.07 1 0]
-  , ampEnvelope = Envelope 0.003 0.6 0.12 0.22, cutoff = 3600, filterAmount = 0.4, stereoWidth = 0.3 }
-pumpPad = supersaw { ampEnvelope = Envelope 0.07 0 1 0.05, filterEnvelope = Envelope 0.01 0 1 0.1 }
+  , amp = Velocity :* adsr 0.003 0.6 0.12 0.22
+  , cutoff = filterCutoff 3600 0.5 (adsr 0.001 0.2 0 0.2) 0.4 1.2, stereoWidth = 0.3 }
+pumpPad = supersaw
+  { amp = Velocity :* adsr 0.07 0 1 0.05, cutoff = filterCutoff 900 0.3 (adsr 0.01 0 1 0.1) 1.5 2 }
 -- | Growling saw over a square sub: audible on small speakers, heavy on big ones.
 bassSynth = reeseBass
   { oscillators = [Osc SawWave 0 1 2 12, Osc SquareWave (-12) 0.45 1 0]
-  , ampEnvelope = Envelope 0.003 0.25 0.75 0.06
-  , cutoff = 320, resonance = 0.3, filterEnvelope = Envelope 0.002 0.18 0 0.1
-  , filterAmount = 2.2, velocityToCutoff = 1, stereoWidth = 0.15 }
+  , amp = Velocity :* adsr 0.003 0.25 0.75 0.06
+  , cutoff = filterCutoff 320 0 (adsr 0.002 0.18 0 0.1) 2.2 1, resonance = 0.3, stereoWidth = 0.15 }
 glass = pluck
   { oscillators = [Osc TriangleWave 0 1 1 0, Osc SineWave 12 0.5 1 0, Osc SineWave 19 0.12 1 0]
-  , ampEnvelope = Envelope 0.001 0.7 0 0.6, cutoff = 3000, filterAmount = 1.5 }
-boom = kick { ampEnvelope = Envelope 0.001 1.6 0 0.2, pitchDrop = 30, pitchTime = 0.09 }
-openHat = hat { ampEnvelope = Envelope 0.001 0.25 0 0.08 }
-crash = hat { ampEnvelope = Envelope 0.001 2.2 0 0.5, highpass = 3500, cutoff = 12000, stereoWidth = 1 }
+  , amp = Velocity :* adsr 0.001 0.7 0 0.6
+  , cutoff = filterCutoff 3000 0.5 (adsr 0.001 0.2 0 0.2) 1.5 1.2 }
+boom = kick { amp = Velocity :* adsr 0.001 1.6 0 0.2, pitch = Approach 30 0 (4.6 * 0.09) }
+openHat = hat { amp = Velocity :* adsr 0.001 0.25 0 0.08 }
+crash = hat { amp = Velocity :* adsr 0.001 2.2 0 0.5, highpass = 3500, cutoff = cutoffHz 12000, stereoWidth = 1 }
 
 master :: Mix
 master = Mix

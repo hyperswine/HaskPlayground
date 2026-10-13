@@ -1,6 +1,6 @@
 # NeoMusic v2: velocity, synth voices, stereo mixing and reverb
 
-> **Historical.** This API (`Seq`, `Part`, `Piece`, the `NeoMusic` module) was removed on 2026-10-12. The audio engine it describes lives on in `NeoMusic.Audio`; see [NeoMusicLanguage.md](examples/NeoMusicLanguage.md) for the current API.
+> **Historical.** This API (`Seq`, `Part`, `Piece`, the `NeoMusic` module) was removed on 2026-10-12. The audio engine it describes lives on in `NeoMusic.Audio`; see [NeoMusicLanguage.md](examples/NeoMusicLanguage.md) for the current API. The patch fields described here (`ampEnvelope`, `filterEnvelope`, `pitchDrop`, ...) became modulation signals on 2026-10-14; see [neomusic-patch.md](neomusic-patch.md).
 
 **Status:** implemented, 2026-09-16. Extends the v1 implementation (`examples/NeoMusic.md`)
 of `neo-music-design.md`.

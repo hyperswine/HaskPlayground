@@ -51,21 +51,25 @@ harmonies = [dmaj,amaj,bmin,gmaj]
 piano, lead, pad, bass, bell, cymbal :: Patch
 piano = pluck
  { oscillators = [Osc TriangleWave 0 1 1 0, Osc SineWave 12 0.32 1 0, Osc SineWave 19 0.07 1 0]
- , ampEnvelope = Envelope 0.003 0.6 0.12 0.22, cutoff = 3600, filterAmount = 0.4, stereoWidth = 0.3 }
+ , amp = Velocity :* adsr 0.003 0.6 0.12 0.22
+ , cutoff = filterCutoff 3600 0.5 (adsr 0.001 0.2 0 0.2) 0.4 1.2, stereoWidth = 0.3 }
 lead = basicPatch
  { oscillators = [Osc TriangleWave 0 0.9 1 0, Osc SawWave 0 0.32 3 9, Osc SineWave 12 0.1 1 0]
- , ampEnvelope = Envelope 0.016 0.1 0.78 0.09, cutoff = 2900, resonance = 0.08
- , filterAmount = 0.2, stereoWidth = 0.35 }
+ , amp = Velocity :* adsr 0.016 0.1 0.78 0.09
+ , cutoff = filterCutoff 2900 0 (adsr 0.001 0 0 0.05) 0.2 0, resonance = 0.08, stereoWidth = 0.35 }
 pad = supersaw
  { oscillators = [Osc SawWave 0 0.5 3 16, Osc TriangleWave 0 0.6 1 0]
- , ampEnvelope = Envelope 0.24 0.5 0.58 0.45, cutoff = 1050, filterAmount = 0.3, velocityToCutoff = 0.2 }
+ , amp = Velocity :* adsr 0.24 0.5 0.58 0.45
+ , cutoff = filterCutoff 1050 0.3 (adsr 0.5 1.5 0.4 1) 0.3 0.2 }
 bass = reeseBass
  { oscillators = [Osc TriangleWave 0 0.65 1 0, Osc SawWave 0 0.32 1 0, Osc SineWave 0 0.5 1 0]
- , ampEnvelope = Envelope 0.004 0.12 0.65 0.06, cutoff = 420, filterAmount = 0.8, stereoWidth = 0 }
+ , amp = Velocity :* adsr 0.004 0.12 0.65 0.06
+ , cutoff = filterCutoff 420 0 (adsr 0.002 0.25 0 0.1) 0.8 1, stereoWidth = 0 }
 bell = piano
  { oscillators = [Osc SineWave 0 1 1 0, Osc SineWave 12 0.28 1 0, Osc SineWave 28 0.06 1 0]
- , ampEnvelope = Envelope 0.002 0.4 0 0.35, cutoff = 6000 }
-cymbal = hat { ampEnvelope = Envelope 0.002 0.9 0 0.3, highpass = 4300 }
+ , amp = Velocity :* adsr 0.002 0.4 0 0.35
+ , cutoff = filterCutoff 6000 0.5 (adsr 0.001 0.2 0 0.2) 0.4 1.2 }
+cymbal = hat { amp = Velocity :* adsr 0.002 0.9 0 0.3, highpass = 4300 }
 
 -- Eight-bar original vocal-like hook: pickups, held peaks, and answering phrases.
 hook :: [[(Int,Rational)]]
@@ -116,7 +120,7 @@ bassBar b h
 
 -- Each percussion lane is a full bar on a sixteenth-note grid.
 drumBar :: Int -> Int -> [Int] -> Line
-drumBar b pitch positions = concat [if i `elem` positions then note [pitch] (1/8) (energy b * accent i) ++ silent (1/8) else silent (1/4) | i <- [0..15]]
+drumBar b step positions = concat [if i `elem` positions then note [step] (1/8) (energy b * accent i) ++ silent (1/8) else silent (1/4) | i <- [0..15]]
  where accent i = if i `mod` 4 == 0 then 0.95 else 0.65
 kickPositions :: Int -> [Int]
 kickPositions b | b < 4 || (b >= 36 && b < 40) || b >= 54 = [0]

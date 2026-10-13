@@ -18,7 +18,7 @@ import qualified Data.Map.Strict as M
 import NeoMusic.Score (Score(..), Phrase, hit, hush)
 import qualified NeoMusic.Score as S
 import NeoMusic.Audio
-  ( Envelope(..), Mix(..), Osc(..), Patch(..), Reverb(..), Wave(..)
+  ( Mix(..), Mod(..), Osc(..), Patch(..), Reverb(..), Wave(..), adsr, cutoffHz, filterCutoff
   , hall, hat, kick, noiseSweep, pluck, reeseBass, renderTimelineMix, snare, subBass, supersaw
   , writeTimelineMix )
 import NeoMusic.Pitch (Tuning(..))
@@ -68,22 +68,25 @@ arpBar level h = concat (replicate 4 (concat (zipWith note cell [1, 0.45, 0.75, 
 
 -- | Supersaw retriggered in 8ths with a short attack: sidechain-style pumping.
 pumpPad :: Patch
-pumpPad = supersaw { ampEnvelope = Envelope 0.09 0 1 0.06, filterEnvelope = Envelope 0.01 0 1 0.1 }
+pumpPad = supersaw
+  { amp = Velocity :* adsr 0.09 0 1 0.06
+  , cutoff = filterCutoff 900 0.3 (adsr 0.01 0 1 0.1) 1.5 2 }
 
 -- | Glassy bell for the glints.
 glass :: Patch
 glass = pluck
   { oscillators = [Osc TriangleWave 0 1 1 0, Osc SineWave 12 0.5 1 0, Osc SineWave 19 0.12 1 0]
-  , ampEnvelope = Envelope 0.001 0.7 0 0.6, cutoff = 3000, filterAmount = 1.5 }
+  , amp = Velocity :* adsr 0.001 0.7 0 0.6
+  , cutoff = filterCutoff 3000 0.5 (adsr 0.001 0.2 0 0.2) 1.5 1.2 }
 
 boom :: Patch
-boom = kick { ampEnvelope = Envelope 0.001 1.6 0 0.2, pitchDrop = 30, pitchTime = 0.09 }
+boom = kick { amp = Velocity :* adsr 0.001 1.6 0 0.2, pitch = Approach 30 0 (4.6 * 0.09) }
 
 openHat :: Patch
-openHat = hat { ampEnvelope = Envelope 0.001 0.3 0 0.08 }
+openHat = hat { amp = Velocity :* adsr 0.001 0.3 0 0.08 }
 
 crash :: Patch
-crash = hat { ampEnvelope = Envelope 0.001 2.2 0 0.5, highpass = 3500, cutoff = 12000, stereoWidth = 1 }
+crash = hat { amp = Velocity :* adsr 0.001 2.2 0 0.5, highpass = 3500, cutoff = cutoffHz 12000, stereoWidth = 1 }
 
 -- Layers ----------------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 -- | Piano engraving is a view over exact beat events, never audio samples.
 module NeoMusic.Sheet (engrave, sheetEvents) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.List (intercalate, nub, sort, sortOn)
 import qualified Data.Map.Strict as M
 import Data.Ratio (denominator, numerator)
@@ -25,9 +25,8 @@ sheetEvents perf view score = do
     convert e = do
       i <- maybe (Left "missing instrument") Right (M.lookup (instrument e) (instruments perf))
       staff <- maybe (Left ("missing staff for " ++ instrument e)) Right (M.lookup (instrument e) (staves view))
-      unless
-        (A.pitchDrop (timbre i) == 0 && all ((/= A.NoiseWave) . A.wave) (A.oscillators (timbre i)))
-        (Left "noise/pitch-drop percussion cannot be engraved without a staff mapping")
+      when (A.percussive (timbre i))
+        (Left "unpitched sounds (noise, or a pitch that sweeps into the note) cannot be engraved without a staff mapping")
       -- Validate the tuning even for an all-rest instrument.
       _ <- midiPitch (tuning i) (A.Step 0)
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))

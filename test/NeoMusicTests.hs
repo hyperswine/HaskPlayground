@@ -12,8 +12,9 @@ import qualified Data.Vector.Unboxed as VU
 import System.IO.Temp (withSystemTempFile)
 import System.IO (hClose)
 import NeoMusic.Audio
-  ( Envelope(..), Mix(..), Patch(..), Note(..), Timeline(..)
-  , defaultMix, hall, hat, pcmWav, pluck, renderTimelineMix, sinePatch )
+  ( Mix(..), Mod(..), Patch(..), Note(..), Timeline(..), Wave(..)
+  , adsr, cutoffHz, defaultMix, hall, hat, kick, modAt, pcmWav, percussive, pluck
+  , renderTimelineMix, sinePatch, validPatch )
 import NeoMusic.Pitch (Step(..), Tuning(..), equalTemperament, freq)
 import NeoMusic.Score
   ( Performance(..), Score(..), defaultInstrument, defaultPerformance, hit, n, render, rest )
@@ -98,10 +99,65 @@ neoMusicGroup = Group "NeoMusic audio engine"
       assert (VU.all (== 0) (VU.drop 8120 dryL))
       assert (VU.any ((> 1e-3) . abs) (VU.drop 8400 wetL) && VU.any (/= 0) (VU.drop 8400 wetR))
       assert (VU.all (\x -> abs x <= 0.8) wetL)
-      let ringing = perfWith t pluck {ampEnvelope = Envelope 0.01 0 1 0.5} 60
+      let ringing = perfWith t pluck {amp = Velocity :* adsr 0.01 0 1 0.5} 60
       (sl, sr) <- evalEither (stereo (defaultMix 8000) ringing blip)
       VU.length sl === 12000
       assert (VU.any ((> 1e-3) . abs) (VU.drop 8000 sl) && VU.all (not . isNaN) sr)
       noise <- evalEither (mono 8000 (perfWith t hat 60) blip)
       assert (VU.any (/= 0) noise && VU.all (\x -> abs x <= 0.8) noise))
+  , ("adsr is exactly the classic envelope", property $ do
+      a <- forAll (Gen.element [0, 0.0005, 0.002, 0.01, 0.3])
+      d <- forAll (Gen.element [0, 0.05, 0.4, 1.5])
+      sus <- forAll (Gen.element [0, 0.15, 0.8, 1])
+      r <- forAll (Gen.element [0, 0.001, 0.05, 1.2])
+      gate <- forAll (Gen.element [0.0001, 0.003, 0.2, 1, 2.5])
+      ts <- forAll (Gen.list (Range.linear 1 40) (Gen.double (Range.linearFrac 0 5)))
+      -- The envelope the engine used before patches became signals, verbatim.
+      let classic t
+            | t < 0 = 0
+            | t < gate = held t
+            | t < gate + r' = let u = (t - gate) / r' in held gate * (1 - u) * (1 - u)
+            | otherwise = 0
+            where
+              a' = max 0.001 a
+              r' = max 0.002 r
+              held x
+                | x < a' = x / a'
+                | d <= 0 = sus
+                | otherwise = sus + (1 - sus) * exp (-4.6 * (x - a') / d)
+      -- Bit for bit, not approximately.
+      [modAt (adsr a d sus r) gate 1 0 t | t <- ts] === map classic ts)
+  , ("patch modulations: release, LFO, velocity, bounds, pitched or not", withTests 1 $ property $ do
+      -- Release starts from wherever the sound has got to at note-off.
+      let swellUp = Release 0.5 (Linear 0 1 2)
+      modAt swellUp 1 1 0 1 === 0.5
+      modAt swellUp 1 1 0 1.25 === 0.5 * 0.5 * 0.5
+      modAt swellUp 1 1 0 1.6 === 0
+      -- Then restarts the second part's clock; Approach is 99% of the way after its time.
+      modAt (Then 1 (K 3) (Linear 0 10 2)) 9 1 0 1.5 === 2.5
+      assert (abs (modAt (Approach 1 0 2) 9 1 0 2 - 0.01) < 0.0001)
+      -- A fixed-Hz LFO, a velocity input, and the key.
+      assert (abs (modAt (Lfo SineWave 5) 9 1 0 0.05 - 1) < 1e-12)
+      modAt (Velocity :* K 2) 9 0.25 0 0 === 0.5
+      modAt (K 0.5 :* Key) 9 1 2 0 === 1
+      -- Velocity is the patch's to apply: without it, soft and hard notes match.
+      let flat = (perfWith (Tuning 440 2) sinePatch {amp = adsr 0.005 0 1 0.015} 60)
+      xs <- evalEither (mono 8000 flat (Line "v" (hit [0] 1 1 <> hit [0] 1 0.5)))
+      let peakIn a' b' = VU.maximum (VU.map abs (VU.slice a' (b' - a') xs))
+      assert (abs (peakIn 8400 16000 / peakIn 0 8000 - 1) < 1e-3)
+      -- An amplitude that could go negative is rejected.
+      assert (isLeft (validPatch sinePatch {amp = Lfo SineWave 3}))
+      assert (isLeft (validPatch sinePatch {amp = Linear 0 1 0}))
+      -- A vibrato patch is pitched; a pitch that falls into the note isn't.
+      let vibrato = sinePatch {pitch = K 0.2 :* Lfo SineWave 5.5}
+      assert (not (percussive vibrato) && percussive kick && percussive hat && not (percussive sinePatch))
+      plain <- evalEither (mono 8000 (perfWith (Tuning 440 2) sinePatch 60) (Line "v" (n 0)))
+      wobbly <- evalEither (mono 8000 (perfWith (Tuning 440 2) vibrato 60) (Line "v" (n 0)))
+      assert (plain /= wobbly)
+      -- A modulated cutoff is never bypassed, even when its base is open.
+      let opened = sinePatch {oscillators = oscillators pluck, cutoff = cutoffHz 20000}
+          closing = opened {cutoff = cutoffHz 20000 :+ K (-6) :* Velocity}
+      bright <- evalEither (mono 8000 (perfWith (Tuning 220 2) opened 60) (Line "v" (n 0)))
+      dark <- evalEither (mono 8000 (perfWith (Tuning 220 2) closing 60) (Line "v" (n 0)))
+      assert (bright /= dark))
   ]

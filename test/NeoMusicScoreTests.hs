@@ -378,7 +378,9 @@ scoreGroup = Group "NeoMusic score and views"
       let first src = do
             d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))
             (_, xs) <- evalEither (flatten (score d))
-            pure (event (head xs))
+            case xs of
+              x : _ -> pure (event x)
+              [] -> failure
       mixed <- first "pitch (2 + cents 14) [0]"
       pitchParts (pitchShift mixed) === (2, 14, Const 0)
       arrow <- first "pitch 0 -> 1 [0]"

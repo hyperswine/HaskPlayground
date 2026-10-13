@@ -3,7 +3,9 @@
 -- beats, scores or pieces. Every front end lowers to a 'Timeline' first.
 module NeoMusic.Audio
   ( -- * Patches
-    Wave(..), Osc(..), Envelope(..), Patch(..), validPatch
+    Wave(..), Osc(..), Patch(..), validPatch, percussive
+    -- * Modulation
+  , Mod(..), modAt, modBounds, plusM, timesM, adsr, cutoffHz, filterCutoff
   , basicPatch, sinePatch, sawPatch, squarePatch, pianoPatch
   , pluck, supersaw, reeseBass, subBass, kick, snare, hat, noiseSweep
     -- * Physical timeline
@@ -36,26 +38,178 @@ data Osc = Osc
   { wave :: Wave, semitones :: Double, oscGain :: Double, unison :: Int, detuneCents :: Double }
   deriving (Eq, Show)
 
--- | Attack, decay and release in seconds; sustain level in 0..1.
-data Envelope = Envelope { attack :: Double, decay :: Double, sustain :: Double, release :: Double }
+-- | How a sound changes while a note plays, in seconds since note-on. A sound
+-- has two anchors: note-on, where attack and decay count from, and note-off,
+-- where 'Release' starts from wherever the sound has got to. See
+-- neomusic-patch.md.
+data Mod
+  = K Double                      -- ^ a constant
+  | Linear Double Double Double   -- ^ from a to b over d seconds, then holds b
+  | Approach Double Double Double -- ^ from a toward b, 99% of the way after t seconds
+  | Then Double Mod Mod           -- ^ the first for d seconds, then the second (its clock restarted)
+  | Release Double Mod            -- ^ after note-off: from its value then down to 0 over r seconds
+  | Lfo Wave Double               -- ^ a unit wave at f Hz, phase 0 at note-on
+  | Velocity                      -- ^ how hard the note is played, 0..1
+  | Key                           -- ^ the note's current pitch, octaves above C4 (261.63 Hz)
+  | Mod :+ Mod
+  | Mod :* Mod
   deriving (Eq, Show)
+infixl 6 :+
+infixl 7 :*
 
--- | Subtractive voice: oscillators, resonant low-pass, optional high-pass, amp envelope.
--- The low-pass cutoff in Hz at time t is
---
--- > cutoff * 2 ** (filterAmount * filterEnvelope t + velocityToCutoff * velocity)
--- >        * (pitch / 261.63) ** keyTrack
---
--- 'pitchDrop' semitones are added at onset and decay with time constant 'pitchTime'.
--- Unison voices are spread across the stereo field by 'stereoWidth' (0..1).
+-- | Addition and multiplication that drop zeros and ones, so a patch built
+-- from parts stays as simple (and as cheap to play) as it can.
+plusM, timesM :: Mod -> Mod -> Mod
+plusM (K 0) b = b
+plusM a (K 0) = a
+plusM a b = a :+ b
+timesM (K 0) _ = K 0
+timesM _ (K 0) = K 0
+timesM (K 1) b = b
+timesM a (K 1) = a
+timesM a b = a :* b
+
+-- | Attack, decay, sustain, release: exactly the classic envelope, built from
+-- the primitives (attack at least 1 ms, release at least 2 ms).
+adsr :: Double -> Double -> Double -> Double -> Mod
+adsr a d s r = Release (max 0.002 r) (Then a' (Linear 0 1 a') (if d <= 0 then K s else Approach 1 s d))
+  where a' = max 0.001 a
+
+-- | A frequency as a cutoff: octaves above C4.
+cutoffHz :: Double -> Mod
+cutoffHz f = K (logBase 2 (f / 261.63))
+
+-- | The classic subtractive cutoff: a base frequency, key tracking, an
+-- envelope moving it by @amount@ octaves, and velocity sensitivity in octaves.
+filterCutoff :: Double -> Double -> Mod -> Double -> Double -> Mod
+filterCutoff base keyTrack env amount velocityAmount =
+  cutoffHz base `plusM` timesM (K keyTrack) Key `plusM` timesM (K amount) env `plusM` timesM (K velocityAmount) Velocity
+
+usesKey :: Mod -> Bool
+usesKey m = case m of
+  Key -> True
+  Then _ a b -> usesKey a || usesKey b
+  Release _ a -> usesKey a
+  a :+ b -> usesKey a || usesKey b
+  a :* b -> usesKey a || usesKey b
+  _ -> False
+
+-- | A modulation prepared for one note: velocity filled in, and each
+-- release's level at note-off computed once (unless it follows the key).
+-- Strict fields and a known recursive evaluator keep the per-sample
+-- arithmetic unboxed.
+data Prepared
+  = PK !Double
+  | PLinear !Double !Double !Double
+  | PApproach !Double !Double !Double
+  | PThen !Double !Prepared !Prepared
+  | PRelease !Double !Bool !Double !Prepared   -- time, level known?, level at note-off, body
+  | PLfo !Wave !Double
+  | PKey
+  | PAdd !Prepared !Prepared
+  | PMul !Prepared !Prepared
+
+prepare :: Double -> Double -> Mod -> Prepared
+prepare gate vel m = case m of
+  K x -> PK x
+  Linear a b d -> PLinear a b d
+  Approach a b d -> PApproach a b d
+  Then d x y -> PThen d (prepare gate vel x) (prepare gate vel y)
+  Release r x ->
+    let px = prepare gate vel x
+        known = not (usesKey x)
+    in PRelease r known (if known then evalPrepared gate px gate 0 else 0) px
+  Lfo w f -> PLfo w f
+  Velocity -> PK vel
+  Key -> PKey
+  a :+ b -> PAdd (prepare gate vel a) (prepare gate vel b)
+  a :* b -> PMul (prepare gate vel a) (prepare gate vel b)
+
+-- | The value at @t@ seconds since note-on, for a note released at @gate@,
+-- with the current key @k@.
+evalPrepared :: Double -> Prepared -> Double -> Double -> Double
+evalPrepared !gate = go
+  where
+    go p !t !k = case p of
+      PK x -> x
+      PLinear a b d -> if t >= d then b else a + (b - a) * (t / d)
+      PApproach a b d -> if d <= 0 then b else b + (a - b) * exp (negate (4.6 * t / d))
+      PThen d x y -> if t < d then go x t k else go y (t - d) k
+      PRelease r known held x
+        | t < gate -> go x t k
+        | t < gate + r -> let u = (t - gate) / r in (if known then held else go x gate k) * (1 - u) * (1 - u)
+        | otherwise -> 0
+      PLfo w f -> waveAt w (f * t)
+      PKey -> k
+      PAdd a b -> go a t k + go b t k
+      PMul a b -> go a t k * go b t k
+
+-- | A modulation compiled for one note (its note-off time and velocity) into a
+-- function of seconds since note-on and the current key.
+compileMod :: Double -> Double -> Mod -> Double -> Double -> Double
+compileMod gate vel m = evalPrepared gate (prepare gate vel m)
+
+-- | A modulation's value at @t@ seconds for a note released at @gate@.
+modAt :: Mod -> Double -> Double -> Double -> Double -> Double
+modAt m gate vel key t = compileMod gate vel m t key
+
+waveAt :: Wave -> Double -> Double
+waveAt w phase = case w of
+  SquareWave -> if frac < 0.5 then 1 else -1
+  SawWave -> 2 * frac - 1
+  TriangleWave -> 4 * abs (frac - 0.5) - 1
+  _ -> sin (2 * pi * phase)
+  where frac = phase - fromIntegral (floor phase :: Int)
+
+-- | Lower and upper bounds over any note (velocity 0..1, key unbounded).
+modBounds :: Mod -> (Double, Double)
+modBounds m = case m of
+  K x -> (x, x)
+  Linear a b _ -> (min a b, max a b)
+  Approach a b _ -> (min a b, max a b)
+  Then _ a b -> let (l1, h1) = modBounds a; (l2, h2) = modBounds b in (min l1 l2, max h1 h2)
+  Release _ a -> let (l, h) = modBounds a in (min 0 l, max 0 h)
+  Lfo _ _ -> (-1, 1)
+  Velocity -> (0, 1)
+  Key -> (-1 / 0, 1 / 0)
+  a :+ b -> let (l1, h1) = modBounds a; (l2, h2) = modBounds b in (l1 + l2, h1 + h2)
+  a :* b -> let (l1, h1) = modBounds a; (l2, h2) = modBounds b
+                ps = [mul l1 l2, mul l1 h2, mul h1 l2, mul h1 h2]
+            in (minimum ps, maximum ps)
+  where mul x y = if x == 0 || y == 0 then 0 else x * y
+
+validMod :: Mod -> Bool
+validMod m = case m of
+  K x -> finite x
+  Linear a b d -> all finite [a, b] && positive d
+  Approach a b d -> all finite [a, b] && nonNegative d
+  Then d a b -> nonNegative d && validMod a && validMod b
+  Release r a -> positive r && validMod a
+  Lfo w f -> finite f && w /= NoiseWave
+  a :+ b -> validMod a && validMod b
+  a :* b -> validMod a && validMod b
+  _ -> True
+
+-- | The longest release in a modulation (how long a note rings after note-off).
+releaseOf :: Mod -> Double
+releaseOf m = case m of
+  Release r a -> max r (releaseOf a)
+  Then _ a b -> max (releaseOf a) (releaseOf b)
+  a :+ b -> max (releaseOf a) (releaseOf b)
+  a :* b -> max (releaseOf a) (releaseOf b)
+  _ -> 0
+
+-- | A subtractive voice: oscillators summed into a resonant low-pass, an
+-- optional high-pass, then amplitude. Everything that varies while a note
+-- plays is a 'Mod': 'amp' (the engine applies nothing else, velocity
+-- included), 'pitch' in semitones added to the note, and 'cutoff' in octaves
+-- above C4. Unison voices are spread across the stereo field by 'stereoWidth'.
 data Patch = Patch
   { oscillators :: [Osc]
-  , ampEnvelope :: Envelope
-  , cutoff :: Double, resonance :: Double, keyTrack :: Double
-  , filterEnvelope :: Envelope, filterAmount :: Double, velocityToCutoff :: Double
-  , highpass :: Double
-  , pitchDrop :: Double, pitchTime :: Double
-  , stereoWidth :: Double
+  , amp :: Mod
+  , pitch :: Mod
+  , cutoff :: Mod
+  , resonance :: Double, highpass :: Double, stereoWidth :: Double
   } deriving (Eq, Show)
 
 -- | How a note varies while it sounds, over its sounding time @u@ from 0 to 1
@@ -134,18 +288,20 @@ unitRange x = nonNegative x && x <= 1
 
 validPatch :: Patch -> Either String ()
 validPatch p = do
-  let env (Envelope a d s r) = all nonNegative [a, d, r] && unitRange s
-      oscOk (Osc _ st g u c) = finite st && nonNegative g && u >= 1 && nonNegative c
+  let oscOk (Osc _ st g u c) = finite st && nonNegative g && u >= 1 && nonNegative c
   unless (not (null (oscillators p)) && all oscOk (oscillators p))
     (Left "patch needs oscillators with nonnegative gain and spread, and unison >= 1")
-  unless (env (ampEnvelope p) && env (filterEnvelope p))
-    (Left "envelope times must be nonnegative and sustain within 0..1")
-  unless (positive (cutoff p) && nonNegative (resonance p) && resonance p < 1
-          && all finite [keyTrack p, filterAmount p, velocityToCutoff p, pitchDrop p]
+  unless (all validMod [amp p, pitch p, cutoff p])
+    (Left "patch modulations need finite values and positive times")
+  unless (fst (modBounds (amp p)) >= 0) (Left "a patch's amplitude cannot go below 0")
+  unless (nonNegative (resonance p) && resonance p < 1
           && nonNegative (highpass p) && unitRange (stereoWidth p))
-    (Left "invalid patch filter, pitch or stereo settings")
-  unless (pitchDrop p == 0 || positive (pitchTime p))
-    (Left "pitchTime must be positive when pitchDrop is set")
+    (Left "invalid patch filter or stereo settings")
+
+-- | Unpitched: a noise oscillator, or a pitch modulation that starts away from
+-- the note (a drop or sweep into it). A vibrato starts at 0, so it isn't.
+percussive :: Patch -> Bool
+percussive p = any ((== NoiseWave) . wave) (oscillators p) || modAt (pitch p) (1 / 0) 1 0 0 /= 0
 
 -- Patches ---------------------------------------------------------------------
 
@@ -153,81 +309,77 @@ validPatch p = do
 basicPatch :: Patch
 basicPatch = Patch
   { oscillators = [Osc SawWave 0 1 1 0]
-  , ampEnvelope = Envelope 0.005 0 1 0.05
-  , cutoff = 20000, resonance = 0, keyTrack = 0
-  , filterEnvelope = Envelope 0.001 0 0 0.05, filterAmount = 0, velocityToCutoff = 0
-  , highpass = 0, pitchDrop = 0, pitchTime = 0.05, stereoWidth = 0 }
+  , amp = Velocity :* adsr 0.005 0 1 0.05
+  , pitch = K 0
+  , cutoff = cutoffHz 20000, resonance = 0, highpass = 0, stereoWidth = 0 }
 
 -- | Bright plucked saw; velocity opens the filter.
 pluck :: Patch
 pluck = basicPatch
   { oscillators = [Osc SawWave 0 1 3 14, Osc SquareWave 12 0.25 1 0]
-  , ampEnvelope = Envelope 0.002 0.4 0 0.3
-  , cutoff = 450, resonance = 0.3, keyTrack = 0.5
-  , filterEnvelope = Envelope 0.001 0.2 0 0.2, filterAmount = 3.5, velocityToCutoff = 1.2
+  , amp = Velocity :* adsr 0.002 0.4 0 0.3
+  , cutoff = filterCutoff 450 0.5 (adsr 0.001 0.2 0 0.2) 3.5 1.2, resonance = 0.3
   , stereoWidth = 0.6 }
 
 -- | Seven detuned saws plus a sub-octave, slow attack, wide stereo.
 supersaw :: Patch
 supersaw = basicPatch
   { oscillators = [Osc SawWave 0 1 7 38, Osc SawWave (-12) 0.35 1 0]
-  , ampEnvelope = Envelope 0.4 0.6 0.8 1.2
-  , cutoff = 900, resonance = 0.15, keyTrack = 0.3
-  , filterEnvelope = Envelope 0.5 1.5 0.4 1, filterAmount = 1.5, velocityToCutoff = 2
+  , amp = Velocity :* adsr 0.4 0.6 0.8 1.2
+  , cutoff = filterCutoff 900 0.3 (adsr 0.5 1.5 0.4 1) 1.5 2, resonance = 0.15
   , stereoWidth = 1 }
 
 -- | Two slowly beating saws over a sine sub, low-passed.
 reeseBass :: Patch
 reeseBass = basicPatch
   { oscillators = [Osc SawWave 0 1 2 22, Osc SineWave (-12) 0.8 1 0]
-  , ampEnvelope = Envelope 0.005 0.3 0.8 0.08
-  , cutoff = 160, resonance = 0.25
-  , filterEnvelope = Envelope 0.002 0.25 0 0.1, filterAmount = 2.5, velocityToCutoff = 1
+  , amp = Velocity :* adsr 0.005 0.3 0.8 0.08
+  , cutoff = filterCutoff 160 0 (adsr 0.002 0.25 0 0.1) 2.5 1, resonance = 0.25
   , stereoWidth = 0.3 }
 
 subBass :: Patch
 subBass = basicPatch
   { oscillators = [Osc SineWave 0 1 1 0, Osc TriangleWave 0 0.12 1 0]
-  , ampEnvelope = Envelope 0.01 0 1 0.1 }
+  , amp = Velocity :* adsr 0.01 0 1 0.1 }
 
 -- | Sine with a fast pitch drop: tune the note to the body frequency (~40-60 Hz).
 kick :: Patch
 kick = basicPatch
   { oscillators = [Osc SineWave 0 1 1 0]
-  , ampEnvelope = Envelope 0.001 0.35 0 0.05
-  , pitchDrop = 36, pitchTime = 0.035 }
+  , amp = Velocity :* adsr 0.001 0.35 0 0.05
+  , pitch = Approach 36 0 (4.6 * 0.035) }
 
 -- | Noise burst over a pitched triangle body.
 snare :: Patch
 snare = basicPatch
   { oscillators = [Osc NoiseWave 0 1 2 0, Osc TriangleWave 0 0.6 1 0]
-  , ampEnvelope = Envelope 0.001 0.22 0 0.08
-  , cutoff = 8000, highpass = 180, pitchDrop = 7, pitchTime = 0.03, stereoWidth = 0.3 }
+  , amp = Velocity :* adsr 0.001 0.22 0 0.08
+  , pitch = Approach 7 0 (4.6 * 0.03)
+  , cutoff = cutoffHz 8000, highpass = 180, stereoWidth = 0.3 }
 
 -- | Closed hi-hat: short high-passed noise (pitch is ignored).
 hat :: Patch
 hat = basicPatch
   { oscillators = [Osc NoiseWave 0 1 2 0]
-  , ampEnvelope = Envelope 0.001 0.05 0 0.03
+  , amp = Velocity :* adsr 0.001 0.05 0 0.03
   , highpass = 7000, stereoWidth = 0.4 }
 
 -- | Noise swell whose resonant filter sweeps up over about four seconds.
 noiseSweep :: Patch
 noiseSweep = basicPatch
   { oscillators = [Osc NoiseWave 0 1 2 0]
-  , ampEnvelope = Envelope 3 0 1 0.3
-  , cutoff = 250, resonance = 0.55
-  , filterEnvelope = Envelope 4 0 1 0.3, filterAmount = 5.5
+  , amp = Velocity :* adsr 3 0 1 0.3
+  , cutoff = filterCutoff 250 0 (adsr 4 0 1 0.3) 5.5 0, resonance = 0.55
   , highpass = 120, stereoWidth = 1 }
 
 sinePatch, sawPatch, squarePatch, pianoPatch :: Patch
-sinePatch = basicPatch { oscillators = [Osc SineWave 0 1 1 0], ampEnvelope = Envelope 0.005 0 1 0.015 }
+sinePatch = basicPatch { oscillators = [Osc SineWave 0 1 1 0], amp = Velocity :* adsr 0.005 0 1 0.015 }
 sawPatch = sinePatch { oscillators = [Osc SawWave 0 1 1 0] }
 squarePatch = sinePatch { oscillators = [Osc SquareWave 0 1 1 0] }
 -- A synthesized piano-like preset, not a sampled acoustic piano.
 pianoPatch = basicPatch
   { oscillators = [Osc SineWave 0 1 1 0, Osc SineWave 12 0.35 1 0, Osc SineWave 19 0.12 1 0]
-  , ampEnvelope = Envelope 0.002 1.2 0.15 0.15 }
+  , amp = Velocity :* adsr 0.002 1.2 0.15 0.15 }
 
 -- Mixing ----------------------------------------------------------------------
 
@@ -255,7 +407,7 @@ defaultMix :: Int -> Mix
 defaultMix rate = Mix rate noReverb 0 0.8 0 True
 
 tailOf :: Patch -> Double
-tailOf = max 0.002 . release . ampEnvelope
+tailOf = max 0.002 . releaseOf . amp
 
 -- | Stereo render. Each note is synthesised only over its own span into
 -- left/right/send buffers; the send bus feeds the reverb, then the master stage.
@@ -317,21 +469,6 @@ sampleRange fr len t0 t1 = (max 0 (ceiling (t0 * fr)), min len (ceiling (t1 * fr
 renderNote :: Double -> Word32 -> Note -> Buffer s -> Buffer s -> Buffer s -> ST s ()
 renderNote fr seed v = renderSynth fr seed v (sound v)
 
--- | Linear attack, exponential decay to sustain, quadratic release after the gate.
-adsr :: Envelope -> Double -> Double -> Double
-adsr (Envelope a d s r) gate t
-  | t < 0 = 0
-  | t < gate = held t
-  | t < gate + r' = let u = (t - gate) / r' in held gate * (1 - u) * (1 - u)
-  | otherwise = 0
-  where
-    a' = max 0.001 a
-    r' = max 0.002 r
-    held x
-      | x < a' = x / a'
-      | d <= 0 = s
-      | otherwise = s + (1 - s) * exp (-4.6 * (x - a') / d)
-
 renderSynth :: Double -> Word32 -> Note -> Patch -> Buffer s -> Buffer s -> Buffer s -> ST s ()
 renderSynth fr seed v p left right sends = do
   let voices =
@@ -347,45 +484,54 @@ renderSynth fr seed v p left right sends = do
       nv = VU.length table
   phases <- VU.thaw (VU.fromList (map snd voices))
   let (i0, i1) = sampleRange fr (MV.length left) (start v) (start v + duration v + tailOf p)
-      amp = velocity v * gain v
       (gl, gr) = panGains (pan v)
-      lowpassOn = cutoff p < 0.45 * fr || filterAmount p > 0 || velocityToCutoff p > 0
+      -- The patch's modulations, compiled for this note's note-off and velocity.
+      ampAt = compileMod (duration v) (velocity v) (amp p)
+      pitchAt = compileMod (duration v) (velocity v) (pitch p)
+      cutoffAt = compileMod (duration v) (velocity v) (cutoff p)
+      patchPitchMoves = pitch p /= K 0
+      pitchKeyed = usesKey (pitch p)
+      keyed = usesKey (amp p) || usesKey (cutoff p)
+      -- Skipped only when the cutoff is a constant at or above 0.45 x the rate.
+      lowpassOn = case cutoff p of
+        K c -> 261.63 * 2 ** c < 0.45 * fr
+        _ -> True
       pitchCurved = pitchMod v /= Flat 0
       kq = max 0.05 (sqrt 2 * (1 - resonance p))
       hpG = tan (pi * min (0.45 * fr) (highpass p) / fr)
-      oscillate !j !pitch !accL !accR !rng
+      oscillate !j !f0 !accL !accR !rng
         | j >= nv = pure (accL, accR, rng)
         | otherwise = do
             let (code, mult, g, vl, vr) = VU.unsafeIndex table j
-                dt = min 0.49 (pitch * mult / fr)
+                dt = min 0.49 (f0 * mult / fr)
                 rng' = if code == 4 then xorshift rng else rng
             ph <- MV.unsafeRead phases j
             let s = oscSample code ph dt rng'
             MV.unsafeWrite phases j (wrap (ph + dt))
-            oscillate (j + 1) pitch (accL + g * vl * s) (accR + g * vr * s) rng'
+            oscillate (j + 1) f0 (accL + g * vl * s) (accR + g * vr * s) rng'
       go !i !l1 !l2 !r1 !r2 !h1 !h2 !h3 !h4 !rng
         | i >= i1 = pure ()
         | otherwise = do
             let t = fromIntegral i / fr - start v
                 u = max 0 (min 1 (t / duration v))
-                dropped
-                  | pitchDrop p == 0 = hz v
-                  | otherwise = hz v * 2 ** (pitchDrop p * exp (-t / pitchTime p) / 12)
-                pitch
-                  | not pitchCurved = dropped
-                  | otherwise = dropped * 2 ** contourAt (pitchMod v) u
-            (oscL, oscR, rng') <- oscillate 0 pitch 0 0 rng
-            let fc = cutoff p * (pitch / 261.63) ** keyTrack p
-                     * 2 ** (filterAmount p * adsr (filterEnvelope p) (duration v) t
-                             + velocityToCutoff p * velocity v)
+                -- The score's pitch first, then the patch's (whose Key is the score's pitch).
+                scored
+                  | not pitchCurved = hz v
+                  | otherwise = hz v * 2 ** contourAt (pitchMod v) u
+                freqNow
+                  | not patchPitchMoves = scored
+                  | otherwise = scored * 2 ** (pitchAt t (if pitchKeyed then logBase 2 (scored / 261.63) else 0) / 12)
+                key = if keyed then logBase 2 (freqNow / 261.63) else 0
+            (oscL, oscR, rng') <- oscillate 0 freqNow 0 0 rng
+            let fc = 261.63 * 2 ** cutoffAt t key
                 lpG = tan (pi * min (0.45 * fr) fc / fr)
                 (lowL, l1', l2') = if lowpassOn then lowpass lpG kq oscL l1 l2 else (oscL, l1, l2)
                 (lowR, r1', r2') = if lowpassOn then lowpass lpG kq oscR r1 r2 else (oscR, r1, r2)
                 (outL, h1', h2') = if highpass p > 0 then highpassed hpG lowL h1 h2 else (lowL, h1, h2)
                 (outR, h3', h4') = if highpass p > 0 then highpassed hpG lowR h3 h4 else (lowR, h3, h4)
                 e
-                  | loudness v == Flat 1 = amp * adsr (ampEnvelope p) (duration v) t
-                  | otherwise = amp * contourAt (loudness v) u * adsr (ampEnvelope p) (duration v) t
+                  | loudness v == Flat 1 = gain v * ampAt t key
+                  | otherwise = gain v * contourAt (loudness v) u * ampAt t key
                 yl = e * gl * outL
                 yr = e * gr * outR
             addTo left i yl

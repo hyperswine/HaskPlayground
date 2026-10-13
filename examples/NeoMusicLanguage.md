@@ -158,7 +158,7 @@ Modules, each depending only on the ones above it:
 | Module | Contents |
 |---|---|
 | `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
-| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Patch` and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export |
+| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names

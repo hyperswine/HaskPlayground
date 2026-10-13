@@ -1,7 +1,7 @@
 -- | Strict 12-TET SMF type 1 view. No microtonal pitch rounding.
 module NeoMusic.Midi (midi, midiPitch, tempoChanges) where
 
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Data.Bits ((.|.))
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Builder
@@ -48,8 +48,8 @@ midi perf score = do
   where
     instrumentLanes es name = do
       i <- maybe (Left "missing instrument") Right (M.lookup name (instruments perf))
-      unless (A.pitchDrop (timbre i) == 0 && all ((/= A.NoiseWave) . A.wave) (A.oscillators (timbre i)))
-        (Left "noise/pitch-drop percussion requires an explicit MIDI percussion mapping")
+      when (A.percussive (timbre i))
+        (Left "unpitched sounds (noise, or a pitch that sweeps into the note) need an explicit MIDI percussion mapping")
       notes <- concat <$> mapM (convert i) [e | e <- es, instrument e == name]
       -- A separate channel prevents one unison's note-off cutting another
       -- short, and pitch bend and expression act on a whole channel, so a
