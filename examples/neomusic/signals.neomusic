@@ -1,0 +1,13 @@
+-- Signals: pitch adds, level multiplies; shapes stretch with the note,
+-- oscillators keep to the beat. Things the old per-note fields couldn't say.
+tempo 80
+tuning 12 at C4
+instrument lead = sine staff treble
+instrument pad  = piano staff bass
+
+tremolo #r x = level (3/4 + 1/4 * sine r) [x]     -- loudness wobble, r cycles a beat
+trill #r x   = pitch (1/2 + 1/2 * square r) [x]   -- alternate with the step above
+deepen x     = pitch ({0:0 1:1/2} * sine 3) [x]   -- vibrato that grows through the note
+
+lead: tremolo 4 [7:2] trill 8 [4:2] deepen [9:4] pitch (2 + cents 14) [0:2]
+pad:  (-12 -5):4 (-17 -10):4 (-12 -5):2

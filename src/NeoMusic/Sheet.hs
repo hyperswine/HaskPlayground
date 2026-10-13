@@ -153,7 +153,7 @@ engrave perf view score = do
           sliding = bendMotion ev `elem` [Rising, Falling] && followed
           curveFront = concat
             [ if bendMotion ev /= Flat && not sliding then "^\\markup \\italic \"bend\"" else ""
-            , if vibrato ev > 0 then "^\\markup \\italic \"vib.\"" else ""
+            , if vibrates ev then "^\\markup \\italic \"vib.\"" else ""
             , case swellMotion ev of
                 Rising -> "_\\markup \\italic \"cresc.\""
                 Falling -> "_\\markup \\italic \"dim.\""
@@ -165,8 +165,10 @@ engrave perf view score = do
             [x] -> "_\\markup \\small \"" ++ show x ++ "\""
             xs -> "_\\markup \\small \\override #'(baseline-skip . 1.7) \\center-column { " ++ unwords ["\"" ++ show x ++ "\"" | x <- xs] ++ " }"
           centsAbove
-            | cents ev == 0 = ""
-            | otherwise = "^\\markup \\small \"" ++ (if cents ev > 0 then "+" else "") ++ centsNumber (cents ev) ++ "¢\""
+            | offsetCents == 0 = ""
+            | otherwise = "^\\markup \\small \"" ++ (if offsetCents > 0 then "+" else "") ++ centsNumber offsetCents ++ "¢\""
+          -- The staff is 12-TET, so a constant step offset is 100 cents a step.
+          offsetCents = let (steps, cs, _) = pitchParts (pitchShift ev) in cs + 100 * steps
        in (front ++ (if t `elem` fermatas then "\\fermata" else "") ++ curveFront ++ centsAbove ++ stepsBelow, back ++ (if sliding then "\\glissando" else ""))
     centsNumber c = show (numerator c) ++ (if denominator c == 1 then "" else "/" ++ show (denominator c))
     gateMarks g

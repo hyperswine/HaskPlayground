@@ -53,14 +53,30 @@ A `key` or `meter` header affects only the sheet view.
 - `:d` multiplies durations by positive rational `d`; a bare event is one beat.
   Thus `7:2` lasts two beats and `[0 2 4]:1/2` contains three half-beat notes.
 - `+ k` and `- k` transpose; `* k` repeats a nonnegative integer number of times.
-- `stretch d`, `rev`, `inv`, `vel v` transform the following term. Group a
-  multi-event argument in brackets. `vel v` takes a finite level in 0..1 and
-  *multiplies* the velocities inside it, so nested levels compose:
-  `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5. Notes start at 1, so a
-  single `vel` still sets the level. Accents are written as relative levels
-  inside an outer level; nothing can exceed the level around it.
+- `stretch d`, `rev`, `inv` transform the following term. Group a
+  multi-event argument in brackets.
+- Two **signals** shape each note while it sounds: `pitch s [...]` *adds* `s`
+  to every note's pitch, in steps, and `level s [...]` *multiplies* every
+  note's loudness by `s`. Nesting composes exactly: pitches add, levels
+  multiply. A signal is a number (a constant), breakpoints `{u:v ...}` over the
+  note's sounding time (u from 0 to 1, linear between), `a -> b` (short for
+  `{0:a 1:b}`), a wave `sine r` or `square r` (unit amplitude, `r` cycles per
+  beat), `cents c` (a part in cents rather than steps), and `+ - * /` of these
+  (dividing only by a constant). For example: `level (3/4 + 1/4 * sine 4)` is
+  tremolo, `pitch (1/2 + 1/2 * square 8)` a trill with the step above, and
+  `pitch (2 + cents 14)` two steps and 14 cents in any tuning. A level's
+  constant part is the note's strength (0..1); a level that could go below 0
+  is an error. Shapes stretch with the note; oscillation keeps to the beat.
+  See `neomusic-signals.md`.
+- The prelude names the common signals. `vel v` is `level v`, multiplying, so
+  `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5 (notes start at 1, so a
+  single `vel` sets the level, and nothing can exceed the level around it).
+  `swell s` is `level s` (`swell 1/4 -> 1`), `bend s` is `pitch s`
+  (`bend 0 -> -1`, `bend {0:0 1/4:1 1:0}`), `vibrato d` is
+  `pitch (d * sine 3)` (depth `d` steps, 3 cycles a beat), and `cents c` is
+  `pitch (cents c)`.
 - `gate r` sets how long notes *sound* as a ratio `r` of the time they occupy,
-  multiplying like `vel`: `gate 1/2 [...]` is staccato, `gate 3/2 [...]` rings
+  multiplying like `level`: `gate 1/2 [...]` is staccato, `gate 3/2 [...]` rings
   into the next note. It never moves onsets or changes a passage's length.
   `pedal [...]` holds every note in the group until the group ends, as a
   sustain pedal held through it; rests and the passage's length are unchanged.
@@ -75,23 +91,17 @@ A `key` or `meter` header affects only the sheet view.
   beats, in every voice, so it doesn't matter which hand's line you write it in
   and the hands can't drift apart. Nested changes multiply. See
   `examples/neomusic/tempo.neomusic` and `neomusic-timemap.md`.
-- Curves shape each note *while it sounds*, over its sounding time from 0 to 1.
-  `bend a -> b [...]` moves each note's pitch from `a` to `b` steps (fractions
-  and negatives allowed); `bend {0:0 1/4:1 1:0} [...]` gives explicit
-  breakpoints `u:value`. Bends add when nested. `swell a -> b [...]` (or
-  `{...}`) scales each note's loudness, and swells multiply. `vibrato d [...]`
-  adds `d` steps of vibrato depth; its rate is the instrument's `vibrato-rate`
-  in Hz (default 5.5). `glide f [...]` makes each single note slide into the note
-  that directly follows it in the same instrument, over the last fraction `f` of
-  its sound; chords, rests, the last note, and a note with two possible
-  successors don't glide. See `examples/neomusic/curves.neomusic` and
-  `neomusic-curves.md`.
-- `cents c [...]` adds a fixed fine offset of `c` cents (1/100 of an
-  equal-tempered semitone, any sign, fractions allowed) to every note: the
-  second tier under the integer steps, the same whatever the tuning. Offsets
-  add, transposing keeps them, and `inv` negates them. It applies to every
-  note of an event, so to detune one note of a chord write it as a parallel
-  part: `0:4 & cents -14 [4:4] & 7:4`. See `examples/neomusic/cents.neomusic`.
+- `glide f [...]` makes each single note slide into the note that directly
+  follows it in the same instrument, over the last fraction `f` of its sound
+  (a pitch shape added to the note); chords, rests, the last note, and a note
+  with two possible successors don't glide. See
+  `examples/neomusic/curves.neomusic`.
+- Cents (1/100 of an equal-tempered semitone, any sign, fractions allowed) are
+  the fine tier under the integer steps, the same whatever the tuning. Offsets
+  add, transposing keeps them, and `inv` mirrors a note's whole pitch signal,
+  cents included. A signal applies to every note of an event, so to detune one
+  note of a chord write it as a parallel part: `0:4 & cents -14 [4:4] & 7:4`.
+  See `examples/neomusic/cents.neomusic`.
 - `rev` reverses durations and velocities with pitches. When reversing a parallel
   expression, shorter branches are delayed so the whole passage is mirrored.
 - Bindings may refer forward to other bindings. Functions have fixed positional
@@ -137,8 +147,7 @@ is an exact number expression.
 Presets: `piano`, `sine`, `saw`, `square`, `pluck`, `supersaw`, `reeseBass`,
 `subBass`, `kick`, `snare`, `hat`, `noiseSweep`. `piano` is a simple synthesized
 piano-like sound, not a sampled acoustic instrument. Attributes are `staff`
-(`treble`/`bass`), `gain` (nonnegative), `pan` (-1..1), `send` (0..1), and
-`vibrato-rate` (Hz, positive).
+(`treble`/`bass`), `gain` (nonnegative), `pan` (-1..1), and `send` (0..1).
 Custom patches, per-instrument tuning, and mix/reverb settings remain available
 in Haskell; this first text format does not serialize arbitrary patches or mixes.
 
@@ -153,7 +162,7 @@ Modules, each depending only on the ones above it:
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names
-(`gain`, `pan`, `send`, `swells`, `vibratoRate`): an instrument's and a rendered
+(`gain`, `pan`, `send`): an instrument's and a rendered
 note's. Qualify one of them, e.g. `import qualified NeoMusic.Score as S`.
 
 ```haskell
@@ -169,7 +178,7 @@ S.writeAudio "music.wav" perf music
 S.render perf music
 ```
 
-`Event { dur, vel, pitches, gate }` keeps all axes together. Empty `pitches`
+`Event { dur, gate, pitches, pitchShift, level }` keeps all axes together. Empty `pitches`
 means rest. `dur` is the time the event occupies, so the next event starts after
 it; `gate` is how long it sounds, as a ratio of `dur` (1 as written, below 1
 detached, above 1 ringing on). Because the gate is a ratio, `stretch` keeps
@@ -177,9 +186,8 @@ articulation unchanged.
 A `Phrase` is a list, so concatenation and reversal preserve the association.
 `transpose`/`invert` affect only pitch; `stretch` affects only duration.
 `withRhythm` cycles a positive, nonempty pattern and returns `Either` for invalid
-patterns. `scaleVelocity` multiplies event velocities (what `vel` does);
-`withVelocity` overwrites them. `scaleGate` (what `gate` does), `withGate`,
-`staccato` (gate × 1/2) and `pedal :: Score -> Score` do the same for gates;
+patterns. `scaleGate` (what `gate` does), `withGate`, `staccato` (gate ×
+1/2) and `pedal :: Score -> Score` act on gates;
 `scoreLength` gives a score's length in beats.
 
 `Tempo shape score` shapes how fast `score` is performed; `Shape` is
@@ -192,14 +200,16 @@ is the only place the clock meets `bpm`. `rev` reverses ramps and mirrors swing
 (exact when the swung extent is a whole number of periods); `stretch` scales a
 node's extent and swing period.
 
-`Event` also carries `cents` (added by `detune`), `bends` and `swells` (lists of `Curve`, breakpoints
-`(u, value)`) and a `vibrato` depth in steps; `bend`, `swell` and `addVibrato`
-add to them, and `glide :: Rational -> Score -> Score` works on a whole score
-so it can join notes that sit in separate lines. `Instrument` has
-`vibratoRate`. `render` merges an event's bends into one curve in octaves for
-the audio `Note`; the synthesiser applies bend and vibrato to the pitch and the
-swells to the amplitude every sample, and skips all of it for notes without
-curves, so those render exactly as before.
+`pitchShift` and `level` are `Signal`s (`NeoMusic.Signal`, re-exported by
+`Score`): `Const`, `Points`, `Osc Sine|Square rate`, `:+:`, `:*:` and `Cents`.
+`addPitch` (what `pitch` does) and `scaleLevel` (what `level` does) add and
+multiply them; `vel` is a level's constant part, the note's strength.
+`glide :: Rational -> Score -> Score` works on a whole score so it can join
+notes that sit in separate lines. `render` splits each signal: constant pitch
+terms go into the note's frequency and a level's constant factors into its
+velocity, and only the varying parts become the audio `Note`'s `pitchMod`
+(octaves) and `loudness` contours, evaluated every sample. Notes without
+varying parts take the plain path and render exactly as before.
 
 `Score` has `Line name phrase`, `Silence beats`, sequential `:>>:` and parallel
 `:||:`. Sequential composition has `Semigroup`/`Monoid` instances with `Silence 0`

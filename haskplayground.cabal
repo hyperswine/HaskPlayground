@@ -24,6 +24,7 @@ extra-source-files:
     examples/neomusic/curves.neomusic
     examples/neomusic/numeric-preview.neomusic
     examples/neomusic/scale.neomusic
+    examples/neomusic/signals.neomusic
     examples/neomusic/tempo.neomusic
     examples/neomusic/ties.neomusic
     examples/neomusic/twinkle.neomusic
@@ -55,6 +56,7 @@ library
       NeoMusic.Prelude
       NeoMusic.Score
       NeoMusic.Sheet
+      NeoMusic.Signal
       PsramRegs
       QuantUI
       SdramSimpleRisc

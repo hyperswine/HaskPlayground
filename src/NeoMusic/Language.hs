@@ -27,22 +27,23 @@ data SheetView = SheetView { meter :: Int, key :: String, staves :: M.Map Name S
 data Document = Document { performance :: Performance, sheetView :: SheetView, score :: Score }
   deriving (Eq, Show)
 
--- | A number expression, kept exact until it is evaluated.
+-- | A signal expression, kept exact until it is evaluated. A number is a
+-- constant signal.
 data NumE = NLit Rational | NVar Name | NBin Char NumE NumE | NNeg NumE
+  | NPoints [(NumE, NumE)] | NOsc Wave NumE | NCents NumE | NArrow NumE NumE
   deriving (Eq, Show)
 data Param = MusicParam Name | NumberParam Name deriving (Eq, Show)
 data Arg = MusicArg Expr | NumberArg NumE deriving (Eq, Show)
-data ShapeE = SpeedS NumE | RampS NumE NumE | SwingS NumE deriving (Eq, Show)
+data ShapeE = SpeedS NumE | SwingS NumE deriving (Eq, Show)
 data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr Expr
-  | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr | Vel NumE Expr
+  | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr
   | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
-  | BendE [(NumE, NumE)] Expr | SwellE [(NumE, NumE)] Expr | VibratoE NumE Expr | GlideE NumE Expr
-  | CentsE NumE Expr
+  | PitchE NumE Expr | LevelE NumE Expr | GlideE NumE Expr
   deriving (Eq, Show)
 -- | Parameters, body, and whether it came from the prelude (whose bodies only
 -- see prelude definitions, so a document can't change what they mean).
 data Definition = Definition [Param] Expr Bool deriving (Eq, Show)
-data Value = MusicV Score | NumberV Rational
+data Value = MusicV Score | SignalV Signal
 
 paramName :: Param -> Name
 paramName (MusicParam p) = p
@@ -100,27 +101,29 @@ decimal = lexeme $ do
       scaled = if exponentPart >= 0 then mantissa * 10 ^ exponentPart else mantissa / 10 ^ negate exponentPart
   pure (sign scaled)
 
--- | A full number expression: @+ -@ over @* /@ over atoms. A @-@ only
--- subtracts when followed by a space, so @-2@ is always a negative number.
+-- | A full signal expression: @a -> b@ over @+ -@ over @* /@ over atoms. A @-@
+-- only subtracts when followed by a space, so @-2@ is always a negative number.
 numExpr :: Parser NumE
-numExpr = chainl1 numTerm addOp
+numExpr = do
+  a <- chainl1 numTerm addOp
+  option a (NArrow a <$> (try (symbol "->") *> chainl1 numTerm addOp))
   where
     addOp = (NBin '+' <$ symbol "+") <|> (NBin '-' <$ try (lexeme (char '-' <* lookAhead (oneOf " \t"))))
     numTerm = chainl1 numAtom (NBin '*' <$ symbol "*" <|> NBin '/' <$ symbol "/")
 
--- | One atom: a literal, a name, a parenthesised expression, or a negation.
--- A literal fraction @a/b@ counts as one atom, so @x:1/2@ still reads as before.
+-- | One atom: a literal, a name, a parenthesised expression, a negation,
+-- breakpoints @{u:value ...}@ over the note (u from 0 to 1), or a wave
+-- (@sine r@, @square r@, r cycles per beat), or @cents c@. A literal fraction
+-- @a/b@ counts as one atom, so @x:1/2@ still reads as before.
 numAtom :: Parser NumE
 numAtom = between (symbol "(") (symbol ")") numExpr
   <|> try (do a <- decimal; b <- optionMaybe (try (symbol "/" *> decimal)); pure (maybe (NLit a) (NBin '/' (NLit a) . NLit) b))
+  <|> (NPoints <$> between (symbol "{") (symbol "}") (many1 ((,) <$> numAtom <* symbol ":" <*> numAtom)))
+  <|> (keyword "sine" *> (NOsc Sine <$> numAtom))
+  <|> (keyword "square" *> (NOsc Square <$> numAtom))
+  <|> (keyword "cents" *> (NCents <$> numAtom))
   <|> (NVar <$> ident)
   <|> (NNeg <$> (try (char '-' <* lookAhead (letter <|> char '(')) *> numAtom))
-
--- | @a -> b@ (from a at the start to b at the end) or explicit breakpoints
--- @{u:value u:value ...}@ over the note's sounding time, u from 0 to 1.
-curveP :: Parser [(NumE, NumE)]
-curveP = between (symbol "{") (symbol "}") (many1 ((,) <$> numAtom <* symbol ":" <*> numAtom))
-  <|> (do a <- numAtom; _ <- try (symbol "->"); b <- numAtom; pure [(NLit 0, a), (NLit 1, b)])
 
 keyword :: String -> Parser ()
 keyword word = void (try (lexeme (string word <* notFollowedBy (alphaNum <|> oneOf "_-"))))
@@ -138,17 +141,14 @@ expression kinds numberNames = parallel
     prefix = (keyword "stretch" *> (Scale <$> numExpr <*> term))
       <|> (keyword "rev" *> (Rev <$> term))
       <|> (keyword "inv" *> (Inv <$> term))
-      <|> (keyword "vel" *> (Vel <$> numExpr <*> term))
       <|> (keyword "gate" *> (Gate <$> numExpr <*> term))
       <|> (keyword "pedal" *> (Pedal <$> term))
       -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
-      <|> (keyword "speed" *> (TempoE <$> (numExpr >>= \a -> option (SpeedS a) (RampS a <$> (try (symbol "->") *> numExpr))) <*> term))
+      <|> (keyword "speed" *> (TempoE . SpeedS <$> numExpr <*> term))
       <|> (keyword "swing" *> (TempoE . SwingS <$> numExpr <*> term))
-      <|> (keyword "bend" *> (BendE <$> curveP <*> term))
-      <|> (keyword "swell" *> (SwellE <$> curveP <*> term))
-      <|> (keyword "vibrato" *> (VibratoE <$> numExpr <*> term))
+      <|> (keyword "pitch" *> (PitchE <$> numExpr <*> term))
+      <|> (keyword "level" *> (LevelE <$> numExpr <*> term))
       <|> (keyword "glide" *> (GlideE <$> numExpr <*> term))
-      <|> (keyword "cents" *> (CentsE <$> numExpr <*> term))
     atom = (Notes . pure <$> integer)
       <|> (symbol "_" >> pure (Notes []))
       <|> between (symbol "(") (symbol ")") (Notes <$> many integer)
@@ -186,7 +186,7 @@ presets = M.fromList
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","vel","gate","pedal","speed","swing","bend","swell","vibrato","glide","cents"]
+reserved = ["tempo","tuning","meter","key","instrument","stretch","rev","inv","gate","pedal","speed","swing","pitch","level","glide","sine","square"]
 
 -- | Source lines without comments or blank lines, numbered from 1.
 sourceLines :: String -> [(Int, String)]
@@ -298,7 +298,6 @@ parseDocument input = do
       "gain" -> do x <- runLine 0 number value; pure (i {gain=x},staff)
       "pan" -> do x <- runLine 0 number value; pure (i {pan=x},staff)
       "send" -> do x <- runLine 0 number value; pure (i {send=x},staff)
-      "vibrato-rate" -> do x <- runLine 0 number value; pure (i {vibratoRate=x},staff)
       _ -> Left ("unknown instrument attribute: "++attr)
 
 -- | What evaluation can see: the document's and the prelude's definitions,
@@ -308,24 +307,43 @@ data Env = Env
   { userDefs :: M.Map Name Definition, preludeDefs :: M.Map Name Definition, inPrelude :: Bool
   , locals :: M.Map Name Value, active :: [Name] }
 
--- | The value of a number expression.
-numberValue :: Env -> NumE -> Either String Rational
-numberValue env e = case e of
-  NLit r -> Right r
+-- | The value of a signal expression.
+signalValue :: Env -> NumE -> Either String Signal
+signalValue env e = case e of
+  NLit r -> Right (Const r)
   NVar v -> case M.lookup v (locals env) of
-    Just (NumberV r) -> Right r
+    Just (SignalV sig) -> Right sig
     Just (MusicV _) -> Left (v ++ " is music, not a number")
     Nothing -> Left ("unknown number: " ++ v)
-  NNeg a -> negate <$> numberValue env a
+  NNeg a -> negateSignal <$> recur a
   NBin op a b -> do
-    x <- numberValue env a
-    y <- numberValue env b
+    x <- recur a
+    y <- recur b
     case op of
-      '+' -> Right (x + y)
-      '-' -> Right (x - y)
-      '*' -> Right (x * y)
-      _ | y == 0 -> Left "division by zero"
-        | otherwise -> Right (x / y)
+      '+' -> Right (plus x y)
+      '-' -> Right (plus x (negateSignal y))
+      '*' -> Right (times x y)
+      _ -> do
+        k <- constantNumber "a divisor" y
+        if k == 0 then Left "division by zero" else Right (times x (Const (1 / k)))
+  NPoints ps -> Points <$> mapM (\(u, v) -> (,) <$> (recur u >>= constantNumber "a point") <*> (recur v >>= constantNumber "a point")) ps
+  NOsc w r -> Osc w <$> (recur r >>= constantNumber "a wave's rate")
+  NCents a -> do
+    x <- recur a
+    pure (maybe (Cents x) (Cents . Const) (constantValue x))
+  NArrow a b -> do
+    x <- recur a >>= constantNumber "the start of a -> b"
+    y <- recur b >>= constantNumber "the end of a -> b"
+    pure (Points [(0, x), (1, y)])
+  where recur = signalValue env
+
+-- | A signal that must be a plain constant here.
+constantNumber :: String -> Signal -> Either String Rational
+constantNumber what sig = maybe (Left (what ++ " must be a constant number")) Right (constantValue sig)
+
+-- | The value of an expression that must be a plain number.
+numberValue :: Env -> NumE -> Either String Rational
+numberValue env e = signalValue env e >>= constantNumber "this value"
 
 ratText :: Rational -> String
 ratText x = show (numerator x) ++ if denominator x == 1 then "" else "/" ++ show (denominator x)
@@ -357,26 +375,29 @@ evaluate env name expr = case expr of
     pure (mconcat (replicate k' x))
   Rev e -> reverseScore <$> recur e
   Inv e -> mapPhrases invert <$> recur e
-  Vel v e -> do v' <- num v; mapPhrases (scaleVelocity (fromRational v')) <$> recur e
   Gate g e -> do g' <- num g >>= positiveNumber "a gate"; mapPhrases (scaleGate g') <$> recur e
   Pedal e -> pedal <$> recur e
   TempoE shape e -> do
     s <- case shape of
-      SpeedS r -> Speed <$> (num r >>= positiveNumber "a speed")
-      RampS a b -> Ramp <$> (num a >>= positiveNumber "a speed") <*> (num b >>= positiveNumber "a speed")
+      SpeedS r -> do
+        sig <- signalValue env r
+        case (constantValue sig, sig) of
+          (Just k, _) -> Speed <$> positiveNumber "a speed" k
+          (_, Points [(0, a), (1, b)]) -> Ramp <$> positiveNumber "a speed" a <*> positiveNumber "a speed" b
+          _ -> Left "speed takes a constant or a -> b"
       SwingS sh -> Swing 1 <$> num sh
     Tempo s <$> recur e
-  BendE c e -> do c' <- curve c; mapPhrases (bend c') <$> recur e
-  SwellE c e -> do c' <- curve c; mapPhrases (swell c') <$> recur e
-  VibratoE d e -> do d' <- num d >>= positiveNumber "a vibrato depth"; mapPhrases (addVibrato d') <$> recur e
-  CentsE c e -> do c' <- num c; mapPhrases (detune c') <$> recur e
+  PitchE p e -> do sig <- signalValue env p; mapPhrases (addPitch sig) <$> recur e
+  LevelE l e -> do sig <- signalValue env l; mapPhrases (scaleLevel sig) <$> recur e
   GlideE f e -> do
     f' <- num f >>= positiveNumber "a glide fraction"
     when (f' > 1) (Left "glide fraction must be within 0..1")
     glide f' <$> recur e
   Ref ref args -> case M.lookup ref (locals env) of
     Just (MusicV x) | null args -> Right x
-    Just (NumberV r) | null args -> do x <- wholeNumber "a number used as a note" r; pure (Line name (chord [x]))
+    Just (SignalV sig) | null args -> do
+      x <- constantNumber "a number used as a note" sig >>= wholeNumber "a number used as a note"
+      pure (Line name (chord [x]))
     Just _ -> Left (ref ++ " is a parameter and cannot be called")
     Nothing -> do
       unless (ref `notElem` active env) (Left ("recursive definition: "++intercalate " -> " (reverse (ref:active env))))
@@ -389,9 +410,8 @@ evaluate env name expr = case expr of
   where
     recur = evaluate env name
     num = numberValue env
-    curve = mapM (\(u, y) -> (,) <$> num u <*> num y)
     argument (MusicArg e) = MusicV <$> recur e
-    argument (NumberArg e) = NumberV <$> num e
+    argument (NumberArg e) = SignalV <$> signalValue env e
 
 scaleScore :: Rational -> Score -> Score
 scaleScore k (Silence d) = Silence (k*d)
@@ -441,17 +461,19 @@ prettyScore s = do
     shapeText (Swing 1 sh) = Right ("swing "++rat sh)
     shapeText (Swing _ _) = Left "swing with a period other than one beat has no text form yet"
     rat = ratText
+    -- Every compound is parenthesised, so it reads back as one atom.
+    signalText sig = case sig of
+      Const k -> rat k
+      Points ps -> "{"++unwords [rat u++":"++rat y | (u, y) <- ps]++"}"
+      Osc w r -> "("++(case w of Sine -> "sine "; Square -> "square ")++rat r++")"
+      a :+: b -> "("++signalText a++" + "++signalText b++")"
+      a :*: b -> "("++signalText a++" * "++signalText b++")"
+      Cents a -> "(cents "++signalText a++")"
     silence 0 = ""
     silence d = " _:"++rat d++" "
-    token e = "vel "++show (vel e)++" ["++curved e (gated e (pitch (pitches e)++":"++rat (dur e)))++"]"
-    -- Bends add, swells multiply and vibrato depths add, so each nests on its own.
-    curved e body = foldr (\c b -> "bend "++curveText c++" ["++b++"]") (
-                      foldr (\c b -> "swell "++curveText c++" ["++b++"]") (
-                        detuned e (if vibrato e == 0 then body else "vibrato "++rat (vibrato e)++" ["++body++"]"))
-                      (swells e))
-                    (bends e)
-    curveText c = "{"++unwords [rat u++":"++rat y | (u, y) <- c]++"}"
-    detuned e body = if cents e == 0 then body else "cents "++rat (cents e)++" ["++body++"]"
+    token e = "["++leveled e (pitched e (gated e (pitch (pitches e)++":"++rat (dur e))))++"]"
+    leveled e body = if level e == Const 1 then body else "level "++signalText (level e)++" ["++body++"]"
+    pitched e body = if pitchShift e == Const 0 then body else "pitch "++signalText (pitchShift e)++" ["++body++"]"
     gated e body = if gate e == 1 then body else "gate "++rat (gate e)++" ["++body++"]"
     pitch [] = "_"
     pitch [A.Step x] = show x

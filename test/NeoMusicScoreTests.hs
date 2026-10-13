@@ -20,6 +20,17 @@ import NeoMusic.Sheet
 
 perf :: Performance
 perf = defaultPerformance {instruments=M.singleton "right" defaultInstrument}
+-- | The old per-note features, as the signals they now are.
+bendBy, swellBy :: [(Rational, Rational)] -> Phrase -> Phrase
+bendBy = addPitch . Points
+swellBy = scaleLevel . Points
+vibratoBy, detuneBy :: Rational -> Phrase -> Phrase
+vibratoBy d = addPitch (Const d :*: Osc Sine 3)
+detuneBy c = addPitch (Cents (Const c))
+
+centsOf :: Event -> Rational
+centsOf e = let (_, c, _) = pitchParts (pitchShift e) in c
+
 -- | The numeric view with its reading marks on.
 marked :: NumericView
 marked = plain {showMarks = True}
@@ -138,13 +149,13 @@ scoreGroup = Group "NeoMusic score and views"
       microPage <- evalEither (numericPage plain (performance micro) (score micro))
       assert ("m: 24-EDO, 0 = 440.0 Hz" `isInfixOf` microPage && not ("keys:" `isInfixOf` microPage))
       assert (isLeft (numericPage plain perf (Line "nobody" (n 0)))))
-  , ("vel scales, so nested levels compose", property $ do
+  , ("level scales, so nested levels compose", property $ do
       a <- forAll (Gen.double (Range.linearFrac 0 1))
       b <- forAll (Gen.double (Range.linearFrac 0 1))
       let phrase = hit [0] 1 0.8 <> hit [4] 1 0.4
+          by x = scaleLevel (Const (toRational x))
           close x y = abs (x - y) < 1e-12
-      assert (and (zipWith close (map vel (scaleVelocity a (scaleVelocity b phrase)))
-                                 (map vel (scaleVelocity (a*b) phrase))))
+      assert (and (zipWith close (map vel (by a (by b phrase))) (map vel (by (a*b) phrase))))
       doc <- evalEither (parseDocument (header++"right: vel 0.5 [0 vel 0.6 [4] 7]\n"))
       (_,es) <- evalEither (flatten (score doc))
       map (vel . event) es === [0.5, 0.3, 0.5])
@@ -300,95 +311,135 @@ scoreGroup = Group "NeoMusic score and views"
       -- A score without tempo changes prints no tempo lane.
       plain <- evalEither (numeric plain (Line "right" (n 0)))
       assert (not ("tempo" `isInfixOf` plain)))
-  , ("curves: bends add, swells multiply, glide joins successors", withTests 1 $ property $ do
+  , ("signals: pitch adds, level multiplies, glide joins successors", withTests 1 $ property $ do
       let up = [(0, 0), (1, 2)]
           scoop = [(0, -1), (1/2, 0)]
-          [single] = bend up (bend scoop (n 0))
-      bends single === [up, scoop]
+          [single] = bendBy up (bendBy scoop (n 0))
+      pitchShift single === Points up :+: Points scoop
       merged <- evalEither (render perf (Line "right" [single]))
-      let near xs ys = length xs == length ys && and [abs (a - c) < 1e-9 && abs (b - d) < 1e-9 | ((a, b), (c, d)) <- zip xs ys]
-      -- One merged curve in octaves: the sum of both at every breakpoint.
-      assert (near [(u, y * 12) | v <- A.notes merged, (u, y) <- A.bend v] [(0, -1), (1/2, 1), (1, 2)])
-      quiet <- evalEither (render perf (Line "right" (swell [(0, 1/2), (1, 1/2)] (swell [(0, 1), (1, 1/2)] (n 0)))))
-      map (length . A.swells) (A.notes quiet) === [2]
+      -- One pitch contour in octaves: the sum of both shapes everywhere.
+      let near x y = abs (x - y) < 1e-9
+          [bent] = A.notes merged
+      assert (and [near (12 * A.contourAt (A.pitchMod bent) u) y | (u, y) <- [(0, -1), (1/2, 1), (1, 2), (3/4, 3/2)]])
+      quiet <- evalEither (render perf (Line "right" (swellBy [(0, 1/2), (1, 1/2)] (swellBy [(0, 1), (1, 1/2)] (n 0)))))
+      [near (A.contourAt (A.loudness v) 1) (1/4) && near (A.contourAt (A.loudness v) 0) (1/2) | v <- A.notes quiet] === [True]
+      -- Constant parts stay note properties: strength, and frequency.
+      strong <- evalEither (render perf (Line "right" (scaleLevel (Const (1/2)) (addPitch (Const 12) (n 0)))))
+      octaveUp <- evalEither (render perf (Line "right" (n 12)))
+      [(A.velocity v, A.pitchMod v, A.loudness v) | v <- A.notes strong] === [(0.5, A.Flat 0, A.Flat 1)]
+      assert (and [near (A.hz u) (A.hz v) | (u, v) <- zip (A.notes strong) (A.notes octaveUp)])
       -- glide: 0 slides to 4, 4 to 7, 7 has no successor; the chord and the rest stop it.
       (_, es) <- evalEither (flatten (glide (1/4) (Line "right" (n 0 <> n 4 <> n 7 <> chord [0, 4] <> rest <> n 2))))
-      map (bends . event) es === [[[(0,0),(3/4,0),(1,4)]], [[(0,0),(3/4,0),(1,3)]], [], [], [], []]
+      map (pitchShift . event) es === [Points [(0,0),(3/4,0),(1,4)], Points [(0,0),(3/4,0),(1,3)], Const 0, Const 0, Const 0, Const 0]
       -- Across separate lines too (the language makes one line per note), but not
       -- when two parallel notes could follow.
       (_, gs) <- evalEither (flatten (glide (1/2) (Line "right" (n 0) :>>: Line "right" (n 2))))
-      map (bends . event) gs === [[[(0,0),(1/2,0),(1,2)]], []]
+      map (pitchShift . event) gs === [Points [(0,0),(1/2,0),(1,2)], Const 0]
       (_, amb) <- evalEither (flatten (glide (1/2) (Line "right" (n 0) :>>: (Line "right" (n 2) :||: Line "right" (n 5)))))
-      map (bends . event) amb === [[], [], []]
-      assert (isLeft (render perf (Line "right" (swell [(0, -1)] (n 0)))))
-      assert (isLeft (render perf (Line "right" (bend [(1, 0), (0, 1)] (n 0))))))
-  , ("curves: a bend really moves the pitch", withTests 1 $ property $ do
+      map (pitchShift . event) amb === [Const 0, Const 0, Const 0]
+      -- Bounds: a level that can go below 0 is rejected; tremolo above 0 is fine.
+      assert (isLeft (render perf (Line "right" (swellBy [(0, -1)] (n 0)))))
+      assert (isLeft (render perf (Line "right" (scaleLevel (Osc Sine 2) (n 0)))))
+      _ <- evalEither (render perf (Line "right" (scaleLevel (Const (3/4) :+: Const (1/4) :*: Osc Sine 4) (n 0))))
+      assert (isLeft (render perf (Line "right" (scaleLevel (Cents (Const 3)) (n 0)))))
+      assert (isLeft (render perf (Line "right" (bendBy [(1, 0), (0, 1)] (n 0))))))
+  , ("signals: a bend really moves the pitch; oscillators count beats", withTests 1 $ property $ do
       -- A sine at C4 bending up an octave over 1 s: twice the zero crossings by the end.
       let sinePerf = perf {bpm = 60, instruments = M.singleton "right" defaultInstrument {timbre = A.sinePatch}}
-      (l, _) <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (bend [(0, 0), (1, 12)] (n 0))))
+      (l, _) <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (bendBy [(0, 0), (1, 12)] (n 0))))
       let crossings a b = length [() | i <- [a .. b - 2], l VU.! i <= 0, l VU.! (i + 1) > 0]
           early = crossings 0 800
           late = crossings 7200 8000
       assert (early >= 25 && early <= 29 && late >= 47 && late <= 53)
       plain <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (n 0)))
-      vibrated <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (addVibrato (1/2) (n 0))))
-      assert (fst plain /= fst vibrated))
-  , ("curves in the language, MIDI, staff and numeric views", withTests 1 $ property $ do
-      doc <- evalEither (parseDocument (header++"instrument left = piano staff bass vibrato-rate 6\nright: glide 1/2 [0 4] bend {0:0 1/2:1 1:0} [7] swell 1 -> 1/2 [9]\nleft: vibrato 1/4 [-12:4]\n"))
+      vibrated <- evalEither (A.renderTimelineMix (A.defaultMix 8000) =<< render sinePerf (Line "right" (vibratoBy (1/2) (n 0))))
+      assert (fst plain /= fst vibrated)
+      -- A square trill at 8 cycles a beat: cycles over a note = rate x sounding beats.
+      let trill = addPitch (Const (1/2) :+: Const (1/2) :*: Osc Square 8)
+          cyclesIn phrase = do
+            t <- evalEither (render perf (Line "right" phrase))
+            let [v] = A.notes t
+                ys = [A.contourAt (A.pitchMod v) (fromIntegral k / 4096) | k <- [0 .. 4096 :: Int]]
+            -- The constant half goes to the frequency, so the varying part swings
+            -- around 0; each cycle ends with a rise into the next (the last at u = 1).
+            pure (length [() | (a, b) <- zip ys (drop 1 ys), a < 0, b > 0])
+      one <- cyclesIn (trill (n 0))
+      two <- cyclesIn (trill (hit [0] 2 1))
+      half <- cyclesIn (trill (withGate (1/2) (hit [0] 2 1)))
+      (one, two, half) === (8, 16, 8))
+  , ("signals in the language, prelude, MIDI, staff and numeric views", withTests 1 $ property $ do
+      doc <- evalEither (parseDocument (header++"instrument left = piano staff bass\nright: glide 1/2 [0 4] bend {0:0 1/2:1 1:0} [7] swell 1 -> 1/2 [9]\nleft: vibrato 1/4 [-12:4]\n"))
       (_, es) <- evalEither (flatten (score doc))
-      [bends (event e) | e <- es, instrument e == "right"] ===
-        [[[(0,0),(1/2,0),(1,4)]], [], [[(0,0),(1/2,1),(1,0)]], []]
-      [swells (event e) | e <- es, instrument e == "right"] === [[], [], [], [[(0,1),(1,1/2)]]]
-      [vibrato (event e) | e <- es, instrument e == "left"] === [1/4]
-      vibratoRate (instruments (performance doc) M.! "left") === 6
+      [pitchShift (event e) | e <- es, instrument e == "right"] ===
+        [Points [(0,0),(1/2,0),(1,4)], Const 0, Points [(0,0),(1/2,1),(1,0)], Const 0]
+      [level (event e) | e <- es, instrument e == "right"] === [Const 1, Const 1, Const 1, Points [(0,1),(1,1/2)]]
+      [pitchShift (event e) | e <- es, instrument e == "left"] === [Const (1/4) :*: Osc Sine 3]
+      -- The primitives directly, and the forms the old fields couldn't say.
+      let first src = do
+            d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))
+            (_, xs) <- evalEither (flatten (score d))
+            pure (event (head xs))
+      mixed <- first "pitch (2 + cents 14) [0]"
+      pitchParts (pitchShift mixed) === (2, 14, Const 0)
+      arrow <- first "pitch 0 -> 1 [0]"
+      braces <- first "pitch {0:0 1:1} [0]"
+      pitchShift arrow === pitchShift braces
+      tremolo <- first "level (3/4 + 1/4 * sine 4) [0]"
+      level tremolo === Const (3/4) :+: Const (1/4) :*: Osc Sine 4
       mapM_ (assert . isLeft . parseDocument . (header++))
-        ["right: glide 2 [0 4]", "right: bend 1 -> [0]", "right: bend {0:0 0} [0]", "right: vibrato 0 [0]"]
+        [ "right: glide 2 [0 4]", "right: bend 1 -> [0]", "right: bend {0:0 0} [0]"
+        , "right: level (sine 2) [0]", "right: stretch (sine 1) [0]", "right: [0]*{0:1 1:2}"
+        , "right: pitch 1 / (sine 1) [0]", "right: level (cents 3) [0]" ]
+      assert (isLeft (parseDocument "instrument x = sine vibrato-rate 6\nx: 0"))
       text <- evalEither (prettyScore (score doc))
-      again <- evalEither (parseDocument (header++"instrument left = piano staff bass vibrato-rate 6\n"++text))
+      again <- evalEither (parseDocument (header++"instrument left = piano staff bass\n"++text))
       (_, rs) <- evalEither (flatten (score again))
-      sort [(instrument e, onset e, bends (event e), swells (event e), vibrato (event e)) | e <- rs, not (null (pitches (event e)))]
-        === sort [(instrument e, onset e, bends (event e), swells (event e), vibrato (event e)) | e <- es]
+      sort [(instrument e, onset e, show (pitchShift (event e)), show (level (event e))) | e <- rs, not (null (pitches (event e)))]
+        === sort [(instrument e, onset e, show (pitchShift (event e)), show (level (event e))) | e <- es]
       -- MIDI: a bend sets the channel's range, then moves the bend wheel.
-      bent <- evalEither (midi perf (Line "right" (bend [(0, 0), (1, 2)] (n 0))))
+      bent <- evalEither (midi perf (Line "right" (bendBy [(0, 0), (1, 2)] (n 0))))
       let bytes = BL.toStrict bent
       assert (BS.pack [0,0xb0,101,0,0,0xb0,100,0,0,0xb0,6,2] `BS.isInfixOf` bytes)
       assert (BS.pack [0,0xe0,0,64,0,0x90,60,127] `BS.isInfixOf` bytes)
       assert (BS.pack [1,0xe0,0,96] `BS.isInfixOf` bytes)  -- halfway: one semitone of two
-      -- A curved note never shares a channel with a note it overlaps.
-      shared <- evalEither (midi perf (Line "right" (bend [(0, 0), (1, 1)] (n 0)) :||: Line "right" (n 4)))
+      -- A curved note never shares a channel with a note it overlaps; a plain
+      -- strength is velocity, not expression.
+      shared <- evalEither (midi perf (Line "right" (bendBy [(0, 0), (1, 1)] (n 0)) :||: Line "right" (n 4)))
       BL.take 2 (BL.drop 10 shared) === BL.pack [0,3]
-      plainBoth <- evalEither (midi perf (Line "right" (n 0) :||: Line "right" (n 4)))
-      BL.take 2 (BL.drop 10 plainBoth) === BL.pack [0,2]
-      sheet <- evalEither (engrave perf view (Line "right" (bend [(0,0),(1,4)] (n 0) <> n 4 <> addVibrato (1/4) (n 7) <> swell [(0,1),(1,1/2)] (n 9))))
+      softer <- evalEither (midi perf (Line "right" (scaleLevel (Const (1/2)) (n 0)) :||: Line "right" (n 4)))
+      BL.take 2 (BL.drop 10 softer) === BL.pack [0,2]
+      sheet <- evalEither (engrave perf view (Line "right" (bendBy [(0,0),(1,4)] (n 0) <> n 4 <> vibratoBy (1/4) (n 7) <> swellBy [(0,1),(1,1/2)] (n 9))))
       assert (all (`isInfixOf` sheet) ["c'4\\glissando e'4", "g'4^\\markup \\italic \"vib.\"", "a'4_\\markup \\italic \"dim.\""])
-      numeric marked (Line "right" (bend [(0,0),(1,1)] (n 0) <> addVibrato (1/4) (n 2) <> swell [(0,1),(1,0)] (n 4) <> bend [(0,0),(1/2,1),(1,0)] (n 5)))
+      numeric marked (Line "right" (bendBy [(0,0),(1,1)] (n 0) <> vibratoBy (1/4) (n 2) <> swellBy [(0,1),(1,0)] (n 4) <> bendBy [(0,0),(1/2,1),(1,0)] (n 5)))
         === Right "right: 0/ 2w 4> 5^\n"
-      page <- evalEither (numericPage marked perf (Line "right" (addVibrato (1/4) (n 2))))
-      plainPage <- evalEither (numericPage plain perf (Line "right" (addVibrato (1/4) (n 2))))
+      -- A constant step offset reads exactly, like cents.
+      numeric plain (Line "right" (addPitch (Const (1/2)) (n 4))) === Right "right: 4+1/2\n"
+      page <- evalEither (numericPage marked perf (Line "right" (vibratoBy (1/4) (n 2))))
+      plainPage <- evalEither (numericPage plain perf (Line "right" (vibratoBy (1/4) (n 2))))
       assert (not ("vibrato" `isInfixOf` plainPage) && "right: 2" `isInfixOf` plainPage)
       assert ("w = vibrato" `isInfixOf` page && not ("/ = pitch" `isInfixOf` page)))
   , ("cents: a fine offset under the steps, in every view", withTests 1 $ property $ do
       -- 100 cents is one 12-EDO step; offsets add; transposing keeps them; inverting mirrors them.
-      a <- evalEither (render perf (Line "right" (detune 100 (n 0))))
+      a <- evalEither (render perf (Line "right" (detuneBy 100 (n 0))))
       b <- evalEither (render perf (Line "right" (n 1)))
       assert (and [abs (A.hz u / A.hz v - 1) < 1e-12 | (u, v) <- zip (A.notes a) (A.notes b)])
-      map cents (detune 5 (detune (-19) (n 4))) === [-14]
-      map cents (transpose 7 (detune 3 (n 0))) === [3]
-      [(pitches e, cents e) | e <- invert (detune 3 (n 4))] === [([A.Step (-4)], -3)]
-      map cents (detune 9 rest) === [0]
+      map centsOf (detuneBy 5 (detuneBy (-19) (n 4))) === [-14]
+      map centsOf (transpose 7 (detuneBy 3 (n 0))) === [3]
+      [(pitches e, centsOf e) | e <- invert (detuneBy 3 (n 4))] === [([A.Step (-4)], -3)]
+      map centsOf (detuneBy 9 rest) === [0]
       doc <- evalEither (parseDocument (header++"right: 0:4 & cents -14 [4:4] & cents 1/2 [7:4]\n"))
       (_, es) <- evalEither (flatten (score doc))
-      sort (map (cents . event) es) === [-14, 0, 1/2]
+      sort (map (centsOf . event) es) === [-14, 0, 1/2]
       text <- evalEither (prettyScore (score doc))
       again <- evalEither (parseDocument (header++text))
       (_, rs) <- evalEither (flatten (score again))
-      sort [cents (event e) | e <- rs, not (null (pitches (event e)))] === [-14, 0, 1/2]
+      sort [centsOf (event e) | e <- rs, not (null (pitches (event e)))] === [-14, 0, 1/2]
       -- MIDI: the key is the step, the offset a constant bend on its own channel.
-      half <- evalEither (midi perf (Line "right" (detune 50 (n 0))))
+      half <- evalEither (midi perf (Line "right" (detuneBy 50 (n 0))))
       assert (BS.pack [0,0xb0,6,1] `BS.isInfixOf` BL.toStrict half)
       assert (BS.pack [0,0xe0,0,96,0,0x90,60,127] `BS.isInfixOf` BL.toStrict half)
-      numeric plain (Line "right" (detune (-14) (n 4) <> n 7)) === Right "right: 4-14c 7\n"
-      sheet <- evalEither (engrave perf view (Line "right" (detune (-14) (n 4))))
+      numeric plain (Line "right" (detuneBy (-14) (n 4) <> n 7)) === Right "right: 4-14c 7\n"
+      sheet <- evalEither (engrave perf view (Line "right" (detuneBy (-14) (n 4))))
       assert ("e'4^\\markup \\small \"-14¢\"" `isInfixOf` sheet))
   , ("staff carries the numeric notation under the notes", withTests 1 $ property $ do
       let numbered = view {numbers = True}

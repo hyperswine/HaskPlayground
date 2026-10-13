@@ -60,7 +60,6 @@ midi perf score = do
       | all (\n1 -> (noteKey n0 /= noteKey n1 && not (curved n0 || curved n1)) || noteOff n0 <= noteOn n1 || noteOff n1 <= noteOn n0) lane = (n0:lane):lanes
       | otherwise = lane:place lanes n0
     clock = timeMap score
-    clockSeconds b = performed clock b * 60 / bpm perf
     makeTrack ticks total (notes,channel) = do
       let bendRange = maximum (0 : [ceiling (maximum (0 : map abs (bendSamples n))) | n <- notes, curved n]) :: Integer
       unless (bendRange <= 127) (Left "a bend exceeds the MIDI pitch-bend range of 127 semitones")
@@ -75,17 +74,16 @@ midi perf score = do
       track (ticks total) ((0,[0xc0+channel,0]) : (if any curved notes then rpn else []) ++ [(t,bytes) | (t,_,bytes) <- events])
     -- Sample times: every 1/64 beat from the onset, up to the note-off.
     sampleBeats n = takeWhile (< noteOff n) [noteOn n, noteOn n + 1/64 ..]
-    -- Position within the sounding time and seconds since onset, through the clock.
+    -- Position within the sounding time, through the clock, as the audio measures it.
     position n b =
       let p0 = performed clock (noteOn n)
           span' = performed clock (noteOff n) - p0
-      in (if span' > 0 then (performed clock b - p0) / span' else 0, clockSeconds b - clockSeconds (noteOn n))
-    bendSamples n =
-      [ fromRational (sum [curveValue c (toRational u) | c <- bends (noteEvent n)])
-          + fromRational (vibrato (noteEvent n)) * sin (2 * pi * vibratoRate (noteInstrument n) * secs)
-          + fromRational (cents (noteEvent n)) / 100
-      | b <- sampleBeats n, let (u, secs) = position n b ] :: [Double]
-    swellSamples n = [product [fromRational (curveValue c (toRational u)) | c <- swells (noteEvent n)] | b <- sampleBeats n, let (u, _) = position n b] :: [Double]
+      in if span' > 0 then (performed clock b - p0) / span' else 0
+    soundingBeats n = fromRational (noteOff n - noteOn n)
+    -- The whole pitch signal in semitones (12-EDO: a step is a semitone, a cent 1/100).
+    bendSamples n = [valueAt (1 / 100) (soundingBeats n) (position n b) (pitchShift (noteEvent n)) | b <- sampleBeats n] :: [Double]
+    -- The level's varying part; its constant part is the note's velocity.
+    swellSamples n = [valueAt 0 (soundingBeats n) (position n b) (varyingLevel n) | b <- sampleBeats n] :: [Double]
     curveEvents ticks channel range n =
       let bendValue x = max 0 (min 16383 (8192 + round (8191 * x / fromInteger range))) :: Int
           bendsAt = [ (ticks b, 2, [0xe0+channel, v `mod` 128, v `div` 128]) | (b, x) <- zip (sampleBeats n) (bendSamples n), let v = bendValue x ]
@@ -94,20 +92,24 @@ midi perf score = do
           dedupe xs = [x | (x, prev) <- zip xs (Nothing : map Just xs), fmap thd prev /= Just (thd x)]
           thd (_, _, x) = x
           resets = [(ticks (noteOff n), 1, [0xe0+channel, 0, 64]), (ticks (noteOff n), 1, [0xb0+channel, 11, 127])]
-      in dedupe bendsAt ++ (if null (swells (noteEvent n)) then [] else dedupe exprAt) ++ resets
+      in dedupe bendsAt ++ (if varyingLevel n == Const 1 then [] else dedupe exprAt) ++ resets
     convert i e = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
-      pure [ MidiNote (onset e) (onset e+dur (event e)*gate (event e)) p (max 1 (round (127 * vel (event e)))) (event e) i
+      pure [ MidiNote (onset e) (onset e+dur (event e)*gate (event e)) p (max 1 (round (127 * vel (event e)))) (event e)
            | p <- ps, vel (event e) > 0]
 
 -- | One sounding note on its way into a track.
 data MidiNote = MidiNote
   { noteOn :: Rational, noteOff :: Rational, noteKey :: Int, noteVel :: Int
-  , noteEvent :: Event, noteInstrument :: Instrument }
+  , noteEvent :: Event }
 
+-- | Any pitch signal (a constant offset is a constant bend) or a varying level
+-- needs a channel of its own.
 curved :: MidiNote -> Bool
--- A cents offset is a constant bend, so it needs a channel of its own too.
-curved n = let e = noteEvent n in not (null (bends e) && null (swells e) && vibrato e == 0 && cents e == 0)
+curved n = pitchShift (noteEvent n) /= Const 0 || varyingLevel n /= Const 1
+
+varyingLevel :: MidiNote -> Signal
+varyingLevel = snd . levelParts . level . noteEvent
 
 -- | The conductor track as (written beat, microseconds per quarter) changes.
 --
