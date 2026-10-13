@@ -1510,14 +1510,15 @@ data MemoryStage = MemoryStage
   deriving (Generic, NFDataX)
 
 -- | A branch target buffer entry: a taken branch or jump at the tagged pc
--- went to the target last time.
-data BtbEntry = BtbEntry {bValid :: Bool, bTag :: Unsigned 27, bTarget :: Word32}
+-- went to the target last time. The tag is pc bits 12..5 only: an alias
+-- costs a redirect, never correctness (execute checks every prediction).
+data BtbEntry = BtbEntry {bValid :: Bool, bTag :: Unsigned 8, bTarget :: Word32}
   deriving (Generic, NFDataX, Show, Eq)
 
 btbIndex :: Word32 -> Index 8
 btbIndex pc = fromIntegral (resize (pc `shiftR` 2) :: Unsigned 3)
 
-btbTag :: Word32 -> Unsigned 27
+btbTag :: Word32 -> Unsigned 8
 btbTag pc = resize (pc `shiftR` 5)
 
 data Pipe = Pipe
@@ -1805,8 +1806,11 @@ pipeStep machine memoryWord =
       portBusy = mWriting || e2Reading
       fetchPc = fromMaybe (pFetchPc pipe) flushing
       issue = not portBusy && pOutstanding pipe < 4
-      entry = btb !! btbIndex fetchPc
-      predicted = if bValid entry && bTag entry == btbTag fetchPc then bTarget entry else fetchPc + 4
+      -- The lookup reads the fetch pc register only: a redirect's target
+      -- is followed by target + 4.
+      entry = btb !! btbIndex (pFetchPc pipe)
+      hit = isNothing flushing && bValid entry && bTag entry == btbTag (pFetchPc pipe)
+      predicted = if hit then bTarget entry else fetchPc + 4
       issued = if issue then Just (fetchPc, predicted) else Nothing
       pipe'
         | handover = restartPipe 0 pipe
