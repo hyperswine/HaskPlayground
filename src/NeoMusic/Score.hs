@@ -4,7 +4,7 @@ module NeoMusic.Score
   , steady, swung, speedOf, swingOf, shapeSource
   , TimeMap, timeMap, timePieces, performed, tempoNodes, hold
   , module NeoMusic.Signal
-  , addPitch, scaleLevel, levelAcross, pitchAcross, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
+  , addPitch, scaleLevel, levelAcross, pitchAcross, addLag, lagAcross, glide, vel, pitchParts, levelParts, bendMotion, swellMotion, vibrates
   , BeatEvent(..), n, chord, rest, hit, hush, transpose, invert, retro, stretch
   , withRhythm, withGate, scaleGate, staccato, pedal
   , mapPhrases, scoreLength, flatten, validate, render, writeAudio
@@ -23,13 +23,16 @@ type Name = String
 -- 'gate' is how long it sounds, as a ratio of 'dur': 1 is as written, below 1
 -- is detached (staccato), above 1 rings into what follows (legato, pedal).
 -- Because the gate is a ratio, 'stretch' leaves articulation unchanged.
+-- 'lag' is how many beats after its written onset the note sounds (before, if
+-- negative): a performance nuance, like the gate, that the reading views
+-- leave out. 'stretch' scales it with the durations.
 --
 -- Two signals shape a note while it sounds: 'pitchShift' is added to every
 -- pitch, in steps ('Cents' parts in cents), and 'level' multiplies its
 -- loudness. Pitch signals add and level signals multiply, so nesting composes
 -- exactly. Rests have level 0 and ignore both.
 data Event = Event
-  { dur :: Rational, gate :: Rational, pitches :: [Step]
+  { dur :: Rational, gate :: Rational, lag :: Rational, pitches :: [Step]
   , pitchShift :: Signal, level :: Signal }
   deriving (Eq, Show)
 
@@ -104,9 +107,9 @@ chord xs = hit xs 1 1
 rest :: Phrase
 rest = hush 1
 hit :: [Int] -> Rational -> Double -> Phrase
-hit xs d v = [Event d 1 (map Step xs) (Const 0) (Const (toRational v))]
+hit xs d v = [Event d 1 0 (map Step xs) (Const 0) (Const (toRational v))]
 hush :: Rational -> Phrase
-hush d = [Event d 1 [] (Const 0) (Const 0) | d /= 0]
+hush d = [Event d 1 0 [] (Const 0) (Const 0) | d /= 0]
 transpose :: Int -> Phrase -> Phrase
 transpose k = map (\e -> e {pitches = [Step (x+k) | Step x <- pitches e]})
 invert :: Phrase -> Phrase
@@ -115,7 +118,7 @@ invert = map (\e -> e {pitches = [Step (negate x) | Step x <- pitches e], pitchS
 retro :: Phrase -> Phrase
 retro = reverse
 stretch :: Rational -> Phrase -> Phrase
-stretch k = map (\e -> e {dur = k * dur e})
+stretch k = map (\e -> e {dur = k * dur e, lag = k * lag e})
 -- | Set every event's gate, replacing whatever was there.
 withGate :: Rational -> Phrase -> Phrase
 withGate g = map (\e -> e {gate = g})
@@ -216,7 +219,7 @@ pedal score = fst (go 0 score)
 -- a crescendo plays louder (velocity, and velocity-to-cutoff), and only the
 -- rest of the shape varies within the note. See neomusic-phrase.md.
 levelAcross :: Signal -> Score -> Either String Score
-levelAcross = across (\piece e -> e {level = times (strengthFirst piece) (level e)})
+levelAcross = across (\piece e -> Right e {level = times (strengthFirst piece) (level e)})
   where
     strengthFirst piece = case piece of
       Points ps@((_, v0) : _) | v0 /= 0 ->
@@ -226,10 +229,20 @@ levelAcross = across (\piece e -> e {level = times (strengthFirst piece) (level 
 
 -- | A pitch signal spanning the whole score rather than each note.
 pitchAcross :: Signal -> Score -> Either String Score
-pitchAcross = across (\piece e -> e {pitchShift = plus piece (pitchShift e)})
+pitchAcross = across (\piece e -> Right e {pitchShift = plus piece (pitchShift e)})
+
+-- | Every note sounds this many beats later (earlier, if negative).
+addLag :: Rational -> Phrase -> Phrase
+addLag k = map (\e -> if null (pitches e) then e else e {lag = lag e + k})
+
+-- | Each note's lag grows by a score-long signal's value where the note starts.
+lagAcross :: Signal -> Score -> Either String Score
+lagAcross = across $ \piece e -> case exactAt 0 0 piece of
+  Just k -> Right e {lag = lag e + k}
+  Nothing -> Left "a lag must be a number at each note's start (no waves, no cents)"
 
 -- | Apply a score-long signal note by note, each note getting its own span of it.
-across :: (Signal -> Event -> Event) -> Signal -> Score -> Either String Score
+across :: (Signal -> Event -> Either String Event) -> Signal -> Score -> Either String Score
 across apply sig score = fst <$> go 0 score
   where
     total = scoreLength score
@@ -237,7 +250,7 @@ across apply sig score = fst <$> go 0 score
       let onsets = scanl (+) at (map dur xs)
           place t e
             | null (pitches e) || total <= 0 = Right e
-            | otherwise = (`apply` e) <$> restrictTo (t / total) ((t + dur e * gate e) / total) sig
+            | otherwise = restrictTo total (t / total) ((t + dur e * gate e) / total) sig >>= (`apply` e)
       xs' <- sequence (zipWith place onsets xs)
       pure (Line name xs', at + sum (map dur xs))
     go at (Silence d) = Right (Silence d, at + d)
@@ -281,7 +294,10 @@ flatten = go 0
         (Left "a note's level must have a constant part within 0..1")
       unless (all (\e -> fst (signalBounds (snd (levelParts (level e)))) >= 0) xs)
         (Left "a level cannot go below 0")
-      pure (sum (map dur xs), zipWith (\t e -> BeatEvent t name e) (scanl (+) at (map dur xs)) xs)
+      let onsets = scanl (+) at (map dur xs)
+      unless (and [t + lag e >= 0 | (t, e) <- zip onsets xs, not (null (pitches e))])
+        (Left "a note's lag cannot move it before the start of the piece")
+      pure (sum (map dur xs), zipWith (\t e -> BeatEvent t name e) onsets xs)
     go _ (Silence d)
       | d < 0 = Left "silence cannot have negative duration"
       | otherwise = Right (d, [])
@@ -393,8 +409,8 @@ render performance score = do
       seconds beats = performed clock beats * (60 / bpm performance)
       -- Constant parts become the note's frequency and strength; only the
       -- varying parts reach the engine's per-sample path.
-      ns = [ A.Note (seconds (onset e)) hz
-               (seconds (onset e + dur ev * gate ev) - seconds (onset e))
+      ns = [ A.Note (seconds (onset e + lag ev)) hz
+               (seconds (onset e + lag ev + dur ev * gate ev) - seconds (onset e + lag ev))
                (timbre i) (fromRational strength) (gain i) (pan i) (send i) pitchMod loud
            | e <- es, let ev = event e, let i = instruments performance M.! instrument e, step <- pitches ev
            , let octavesPerStep = logBase 2 (ratio (tuning i))
@@ -421,6 +437,14 @@ contour stepsPerCent beats sig = case sig of
   a :+: b -> contour stepsPerCent beats a A.:+. contour stepsPerCent beats b
   a :*: b -> contour stepsPerCent beats a A.:*. contour stepsPerCent beats b
   Cents a -> A.Flat stepsPerCent A.:*. contour stepsPerCent beats a
+  -- Noise is straight lines between its knots, so its knots are breakpoints.
+  Noise seed rate offset ->
+    let r = fromRational rate
+        o = fromRational offset
+        inner = [ ((fromIntegral k / r - o) / beats, fromRational (noiseKnot seed k))
+                | beats > 0, k <- [floor (o * r) + 1 .. ceiling ((o + beats) * r) - 1 :: Integer] ]
+    in A.Breaks ((0, valueAt 0 beats 0 sig) : inner ++ [(1, valueAt 0 beats 1 sig)])
+  Start a -> A.Flat (valueAt stepsPerCent beats 0 a)
 
 finite, positive :: Double -> Bool
 finite x = not (isNaN x || isInfinite x)

@@ -35,6 +35,7 @@ data Document = Document { performance :: Performance, sheetView :: SheetView, s
 -- constant signal.
 data NumE = NLit Rational | NVar Name | NBin Char NumE NumE | NNeg NumE
   | NPoints [(NumE, NumE)] | NOsc Wave NumE | NCents NumE | NArrow NumE NumE
+  | NNoise NumE NumE (Maybe NumE) | NStart NumE
   deriving (Eq, Show)
 data Param = MusicParam Name | NumberParam Name deriving (Eq, Show)
 data Arg = MusicArg Expr | NumberArg NumE deriving (Eq, Show)
@@ -45,6 +46,7 @@ data Expr = Notes [Int] | NoteE NumE | Ref Name [Arg] | SeqE [Expr] | ParE Expr 
   | Scale NumE Expr | Trans NumE Expr | Repeat NumE Expr | Rev Expr | Inv Expr
   | Gate NumE Expr | Pedal Expr | TempoE ShapeE Expr
   | PitchE NumE Expr | LevelE NumE Expr | PitchAcrossE NumE Expr | LevelAcrossE NumE Expr | GlideE NumE Expr
+  | LagE NumE Expr | LagAcrossE NumE Expr
   deriving (Eq, Show)
 -- | Parameters, body, and whether it came from the prelude (whose bodies only
 -- see prelude definitions, so a document can't change what they mean).
@@ -128,6 +130,9 @@ numAtom = between (symbol "(") (symbol ")") numExpr
   <|> (keyword "sine" *> (NOsc Sine <$> numAtom))
   <|> (keyword "square" *> (NOsc Square <$> numAtom))
   <|> (keyword "cents" *> (NCents <$> numAtom))
+  -- noise seed rate [at beats]: repeatable random, rate knots a beat
+  <|> (keyword "noise" *> (NNoise <$> numAtom <*> numAtom <*> optionMaybe (keyword "at" *> numAtom)))
+  <|> (keyword "start" *> (NStart <$> numAtom))
   <|> (NVar <$> ident)
   <|> (NNeg <$> (try (char '-' <* lookAhead (letter <|> char '(')) *> numAtom))
 
@@ -148,6 +153,8 @@ expression kinds numberNames = parallel
       <|> (keyword "rev" *> (Rev <$> term))
       <|> (keyword "inv" *> (Inv <$> term))
       <|> (keyword "gate" *> (Gate <$> numExpr <*> term))
+      -- lag b: sound b beats late (early if negative); lag across s: by s where each note starts
+      <|> (keyword "lag" *> ((keyword "across" *> (LagAcrossE <$> numExpr <*> term)) <|> (LagE <$> numExpr <*> term)))
       <|> (keyword "pedal" *> (Pedal <$> term))
       -- speed r: constant; speed a -> b: a ramp (rit. or accel.).
       -- speed r; speed a -> b (rit. or accel.); speed cycle {len:shape ...}.
@@ -203,7 +210,7 @@ presets = M.fromList
   ,("kick",A.kick),("snare",A.snare),("hat",A.hat),("noiseSweep",A.noiseSweep)]
 
 reserved :: [String]
-reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","across","glide","sine","square"]
+reserved = ["tempo","tuning","meter","key","instrument","sound","reverb","master","stretch","rev","inv","gate","pedal","speed","cycle","pitch","level","across","glide","sine","square","noise","start","lag"]
 
 -- | Source lines without comments or blank lines, numbered from 1. A line
 -- that starts with whitespace continues the statement above it.
@@ -641,6 +648,14 @@ signalValue env e = case e of
     x <- recur a >>= constantNumber "the start of a -> b"
     y <- recur b >>= constantNumber "the end of a -> b"
     pure (Points [(0, x), (1, y)])
+  NNoise seed rate offset -> do
+    k <- recur seed >>= constantNumber "a noise's seed"
+    unless (denominator k == 1) (Left "a noise's seed must be a whole number")
+    r <- recur rate >>= constantNumber "a noise's rate"
+    unless (r > 0) (Left "a noise's rate must be positive")
+    o <- maybe (Right 0) (\x -> recur x >>= constantNumber "where a noise starts") offset
+    pure (Noise (numerator k) r o)
+  NStart a -> Start <$> recur a
   where recur = signalValue env
 
 -- | A signal that must be a plain constant here.
@@ -690,6 +705,8 @@ evaluate env name expr = case expr of
   LevelE l e -> do sig <- signalValue env l; mapPhrases (scaleLevel sig) <$> recur e
   PitchAcrossE p e -> do sig <- signalValue env p; recur e >>= pitchAcross sig
   LevelAcrossE l e -> do sig <- signalValue env l; recur e >>= levelAcross sig
+  LagE l e -> do k <- num l; mapPhrases (addLag k) <$> recur e
+  LagAcrossE l e -> do sig <- signalValue env l; recur e >>= lagAcross sig
   GlideE f e -> do
     f' <- num f >>= positiveNumber "a glide fraction"
     when (f' > 1) (Left "glide fraction must be within 0..1")
@@ -772,9 +789,13 @@ prettyScore s = do
       a :+: b -> "("++signalText a++" + "++signalText b++")"
       a :*: b -> "("++signalText a++" * "++signalText b++")"
       Cents a -> "(cents "++signalText a++")"
+      Noise seed r o -> "(noise "++show seed++" "++rat r++(if o == 0 then "" else " at "++rat o)++")"
+      Start a -> "(start "++signalText a++")"
     silence 0 = ""
     silence d = " _:"++rat d++" "
-    token e = "["++leveled e (pitched e (gated e (pitch (pitches e)++":"++rat (dur e))))++"]"
+    token e = "["++lagged e (leveled e (pitched e (gated e (pitch (pitches e)++":"++rat (dur e)))))++"]"
+    lagged e body = if lag e == 0 then body else "lag "++signedRat (lag e)++" ["++body++"]"
+    signedRat k = if k < 0 then "(-"++rat (negate k)++")" else rat k
     leveled e body = if level e == Const 1 then body else "level "++signalText (level e)++" ["++body++"]"
     pitched e body = if pitchShift e == Const 0 then body else "pitch "++signalText (pitchShift e)++" ["++body++"]"
     gated e body = if gate e == 1 then body else "gate "++rat (gate e)++" ["++body++"]"

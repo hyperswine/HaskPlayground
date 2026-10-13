@@ -85,6 +85,26 @@ A `key` or `meter` header affects only the sheet view.
   `dim a b [...]` are `level across a -> b`. The staff marks a run of notes
   that continues one crescendo or diminuendo once, where it starts. See
   `examples/neomusic/orchestral.neomusic` and `neomusic-phrase.md`.
+- **Humanizing.** Players are never exactly even, and three primitives say so
+  (see `neomusic-humanize.md`):
+  - `noise seed rate` is a signal: random knots within -1..1, `rate` to a
+    beat, joined by lines, the same on every render.
+  - `start s` holds the value `s` has at a note's start through the note.
+  - `lag b [...]` sounds each note `b` beats after its written onset (before,
+    if negative), and `lag across s [...]` by `s`'s value where each note
+    starts.
+
+  Across a group, noise continues from where each note starts, so neighbours
+  get related values, as a player's are. The prelude builds the usual
+  gestures from them:
+  - `vary seed a` makes each note up to `a` softer;
+  - `loose seed b` makes it up to `b` beats late;
+  - `drift seed c` lets the intonation wander within `c` cents;
+  - `humanize seed [...]` is `loose seed 1/48 [vary seed 0.15 [...]]`.
+
+  Give each part its own seed. The staff and numeric views leave all of this
+  out: a humanized score engraves exactly as written. MIDI plays the
+  strengths, and rounds each lag to the written rhythm's ticks.
 - `gate r` sets how long notes *sound* as a ratio `r` of the time they occupy,
   multiplying like `level`: `gate 1/2 [...]` is staccato, `gate 3/2 [...]` rings
   into the next note. It never moves onsets or changes a passage's length.
@@ -291,13 +311,14 @@ S.writeAudio "music.wav" perf music
 S.render perf music
 ```
 
-`Event { dur, gate, pitches, pitchShift, level }` keeps all axes together. Empty `pitches`
+`Event { dur, gate, lag, pitches, pitchShift, level }` keeps all axes together. Empty `pitches`
 means rest. `dur` is the time the event occupies, so the next event starts after
 it; `gate` is how long it sounds, as a ratio of `dur` (1 as written, below 1
 detached, above 1 ringing on). Because the gate is a ratio, `stretch` keeps
-articulation unchanged.
+articulation unchanged. `lag` is how many beats after its onset the note sounds
+(a performance nuance the reading views leave out); `stretch` scales it.
 A `Phrase` is a list, so concatenation and reversal preserve the association.
-`transpose`/`invert` affect only pitch; `stretch` affects only duration.
+`transpose`/`invert` affect only pitch; `stretch` affects only timing (durations and lags).
 `withRhythm` cycles a positive, nonempty pattern and returns `Either` for invalid
 patterns. `scaleGate` (what `gate` does), `withGate`, `staccato` (gate ×
 1/2) and `pedal :: Score -> Score` act on gates;

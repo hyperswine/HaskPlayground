@@ -146,7 +146,8 @@ engrave perf view score = do
         go at previous ((_, t, d, ps, ev) : xs) =
           emit gap True ("", "") at (t - at) [] ++ emit gap True (articulation ev t (continues (t + d) xs) (continuing previous ev)) t d ps
             ++ go (t + d) (swellMotion ev, levelAt ev 1) xs
-        levelAt ev u = valueAt 0 1 u (level ev)
+        -- Without noise: a humanized note's scatter isn't a written dynamic.
+        levelAt ev u = valueAt 0 1 u (withoutOsc (level ev))
         continuing (before, end) ev = case (before, swellMotion ev) of
           (Rising, Rising) -> levelAt ev 0 >= end - 1e-9
           (Falling, Falling) -> levelAt ev 0 <= end + 1e-9

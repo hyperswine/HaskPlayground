@@ -52,9 +52,11 @@ hornTune = -5:2 -2 2   5:3 2   2:2 0 -2   1:4
            -5:2 -2 2   5 7 9 5   4:2 1:2   2:4
 roll = cresc 0.3 0.9 [[-15:1/4]*16]      -- one crescendo across the whole roll
 
-strings: prog1 prog1 cresc 1/3 1 [prog2] rit 2/3 [Gm:4 Dm:4 A:4 hold 2 [Dm:4]]
-pizz:    [pz -22 pz -26 pz -19 pz -24]*2 pz -17 pz -22 pz -26 pz -15 pz -17 pz -22 pz -15 -22:4
-harp:    [arpm -10 arpM -14 arpM -7 arpM -12]*2 arpm -17 arpm -10 arpM -14 arpM -15 _:16
-flute:   tune _:16 echo2
-horn:    _:32 hornTune
-timp:    -22:4 _:12 -22:4 _:12 _:12 roll -22:4 _:4 -15:4 -22:4
+-- Played, not sequenced: each part a little uneven in timing and strength,
+-- each with its own pattern (see humanize in the prelude).
+strings: humanize 1 [prog1 prog1 cresc 1/3 1 [prog2] rit 2/3 [Gm:4 Dm:4 A:4 hold 2 [Dm:4]]]
+pizz:    humanize 2 [[pz -22 pz -26 pz -19 pz -24]*2 pz -17 pz -22 pz -26 pz -15 pz -17 pz -22 pz -15 -22:4]
+harp:    humanize 3 [[arpm -10 arpM -14 arpM -7 arpM -12]*2 arpm -17 arpm -10 arpM -14 arpM -15 _:16]
+flute:   humanize 4 [tune _:16 echo2]
+horn:    humanize 5 [_:32 hornTune]
+timp:    humanize 6 [-22:4 _:12 -22:4 _:12 _:12 roll -22:4 _:4 -15:4 -22:4]

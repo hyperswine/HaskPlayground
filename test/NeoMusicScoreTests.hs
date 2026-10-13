@@ -5,7 +5,7 @@ import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
 import Data.Either (isLeft)
-import Data.List (sort, sortOn, isInfixOf, isPrefixOf, tails)
+import Data.List (nub, sort, sortOn, isInfixOf, isPrefixOf, tails)
 import qualified Data.Map.Strict as M
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString as BS
@@ -690,6 +690,70 @@ scoreGroup = Group "NeoMusic score and views"
       -- A note outside every region is an error when rendering.
       far <- evalEither outside
       assert (isLeft (render (performance far) (score far) >>= A.renderTimelineMix (mix (performance far)))))
+  , ("humanizing: noise, start and lag", withTests 1 $ property $ do
+      -- Noise: knots within -1..1, the same on every run, joined by lines.
+      let knots = [noiseKnot 5 k | k <- [0 .. 99]]
+      assert (all (\v -> v >= -1 && v <= 1) knots && length (nub knots) > 90)
+      knots === [noiseKnot 5 k | k <- [0 .. 99]]
+      assert (knots /= [noiseKnot 6 k | k <- [0 .. 99]])
+      exactAt 1 (1/2) (Noise 5 2 0) === Just (noiseKnot 5 1)
+      exactAt 1 (1/4) (Noise 5 2 0) === Just ((noiseKnot 5 0 + noiseKnot 5 1) / 2)
+      -- Across a group, noise continues where each note starts; start holds it.
+      restrictTo 4 (1/2) (3/4) (Noise 5 2 0) === Right (Noise 5 2 2)
+      restrictTo 4 (1/2) (3/4) (Start (Noise 5 2 0)) === Right (Start (Noise 5 2 2))
+      constantValue (Start (Noise 5 2 2)) === Just (noiseKnot 5 4)
+      -- humanize: each note a little late (up to 1/48 beat) and a little softer
+      -- (down to 0.85), repeatably, and the reading views don't change.
+      let source h = header ++ "right: " ++ h ++ "[0 2 4 5 7 9 11 12 0:1/2 2:1/2 (0 4 7):2 cresc 1/3 1 [0 2 4 5 7 9]]\n"
+      plainDoc <- evalEither (parseDocument (source ""))
+      doc <- evalEither (parseDocument (source "humanize 3 "))
+      again <- evalEither (parseDocument (source "humanize 3 "))
+      score again === score doc
+      (_, es) <- evalEither (flatten (score doc))
+      (_, plainEs) <- evalEither (flatten (score plainDoc))
+      let lags = map (lag . event) es
+          strengths = zipWith (\a b -> vel (event a) / vel (event b)) es plainEs   -- against the same note unhumanized
+      annotateShow (lags, strengths)
+      assert (all (\x -> x >= 0 && x <= 1/48) lags && length (nub lags) > 5)
+      assert (all (\x -> x >= 0.85 - 1e-12 && x <= 1 + 1e-12) strengths && length (nub strengths) > 5)
+      map onset es === map onset plainEs
+      -- Performed: each note starts its lag later, through the clock.
+      timeline <- evalEither (render (performance doc) (score doc))
+      plainTimeline <- evalEither (render (performance plainDoc) (score plainDoc))
+      let starts = sort (map A.start (A.notes timeline))
+          expected = sort [A.start v + 0.5 * fromRational (lag (event e)) | (v, e) <- zip (A.notes plainTimeline) (concat [replicate (length (pitches (event e))) e | e <- es])]
+      assert (and (zipWith (\a b -> abs (a - b) < 1e-9) starts expected))
+      sheet <- evalEither (engrave (performance doc) (sheetView doc) (score doc))
+      plainSheet <- evalEither (engrave (performance plainDoc) (sheetView plainDoc) (score plainDoc))
+      sheet === plainSheet
+      page <- evalEither (numeric plain (score doc))
+      plainPage <- evalEither (numeric plain (score plainDoc))
+      page === plainPage
+      -- MIDI rounds each lag to the written rhythm's grid instead of refining it.
+      bytes <- evalEither (midi (performance doc) (score doc))
+      plainBytes <- evalEither (midi (performance plainDoc) (score plainDoc))
+      -- The same resolution (header bytes 12-13); lags may change how many channels curved notes need.
+      assert (bytes /= plainBytes && BL.take 2 (BL.drop 12 bytes) == BL.take 2 (BL.drop 12 plainBytes))
+      -- Lag on its own; nothing may start before the piece; a wave has no single value.
+      (_, late) <- evalEither (parseDocument (header ++ "right: lag 1/4 [0 2]\n") >>= flatten . score)
+      map (lag . event) late === [1/4, 1/4]
+      mapM_ (assert . isLeft . parseDocument . (header ++))
+        [ "right: lag -1/2 [0]", "right: lag across (sine 2) [0 2]", "right: level (noise 1/2 1) [0]"
+        , "right: level (noise 1 0) [0]", "start x = x\nright: start [0]" ]
+      -- The source form keeps lags, noise and start, and reads back the same.
+      text <- evalEither (prettyScore (score doc))
+      back <- evalEither (parseDocument (header ++ text))
+      (_, backEs) <- evalEither (flatten (score back))
+      [event e | e <- backEs, not (null (pitches (event e)))] === [event e | e <- es]
+      wavy <- evalEither (parseDocument (header ++ "right: level across (1 + 0.2 * noise 9 2) [0:2 2:2]\n"))
+      wavyText <- evalEither (prettyScore (score wavy))
+      wavyBack <- evalEither (parseDocument (header ++ wavyText))
+      (_, w1) <- evalEither (flatten (score wavy))
+      (_, w2) <- evalEither (flatten (score wavyBack))
+      [event e | e <- w2, not (null (pitches (event e)))] === map event w1
+      -- Noise within a note renders as its knots.
+      _ <- evalEither (render (performance wavy) (score wavy) >>= A.renderTimelineMix (A.defaultMix 8000))
+      success)
   , ("phrase signals: across a group, not each note", withTests 1 $ property $ do
       let events src = do
             d <- evalEither (parseDocument (header ++ "right: " ++ src ++ "\n"))

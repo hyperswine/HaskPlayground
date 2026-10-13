@@ -30,27 +30,31 @@ midi perf score = do
   let names = nub [instrument e | e <- es]
       -- A note sounds until onset + dur * gate, which may pass the score's end.
       release e = onset e + dur (event e) * gate (event e)
-      end = maximum (total : map release es)
   changes <- tempoChanges perf score
-  lanes <- concat <$> mapM (instrumentLanes es) names
-  unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments, overlapping unisons and curved notes")
-  -- Curves are sampled every 1/64 beat, so they need that resolution.
-  let anyCurved = any (any curved) lanes
+  -- The written rhythm sets the resolution; curves are sampled every 1/64
+  -- beat, so they need that too. A lag (a performance nuance) is rounded to
+  -- the nearest tick rather than refining the grid.
+  let sounding e = not (null (pitches (event e))) && vel (event e) > 0
+      anyCurved = any (\e -> sounding e && curvedEvent (event e)) es
       division = foldl lcm (if anyCurved then 64 else 1)
         (map denominator (total : map fst changes ++ concat [[onset e,release e] | e <- es]))
       ticks x = numerator (x * fromInteger division)
+      lagOf e = fromInteger (round (lag (event e) * fromInteger division)) / fromInteger division
+      end = maximum (total : [release e + lagOf e | e <- es])
   unless (division <= 32767) (Left "exact rhythm needs MIDI resolution above 32767 ticks/quarter")
+  lanes <- concat <$> mapM (instrumentLanes lagOf es) names
+  unless (length lanes <= 15) (Left "MIDI needs more than 15 pitched channels for instruments, overlapping unisons and curved notes")
   tracks <- mapM (makeTrack ticks end) (zip lanes ([0..8]++[10..15]))
   conductor <- track (ticks end) [(ticks at, [0xff,0x51,3] ++ bytes3 micros) | (at, micros) <- changes]
   pure $ toLazyByteString (string8 "MThd" <> word32BE 6 <> word16BE 1
     <> word16BE (fromIntegral (length tracks+1)) <> word16BE (fromInteger division)
     <> conductor <> mconcat tracks)
   where
-    instrumentLanes es name = do
+    instrumentLanes lagOf es name = do
       i <- maybe (Left "missing instrument") Right (M.lookup name (instruments perf))
       when (A.percussive (timbre i))
         (Left "unpitched sounds (noise, or a pitch that sweeps into the note) need an explicit MIDI percussion mapping")
-      notes <- concat <$> mapM (convert i) [e | e <- es, instrument e == name]
+      notes <- concat <$> mapM (convert lagOf i) [e | e <- es, instrument e == name]
       -- A separate channel prevents one unison's note-off cutting another
       -- short, and pitch bend and expression act on a whole channel, so a
       -- curved note shares its channel with nothing that overlaps it.
@@ -93,9 +97,10 @@ midi perf score = do
           thd (_, _, x) = x
           resets = [(ticks (noteOff n), 1, [0xe0+channel, 0, 64]), (ticks (noteOff n), 1, [0xb0+channel, 11, 127])]
       in dedupe bendsAt ++ (if varyingLevel n == Const 1 then [] else dedupe exprAt) ++ resets
-    convert i e = do
+    convert lagOf i e = do
       ps <- mapM (midiPitch (tuning i)) (pitches (event e))
-      pure [ MidiNote (onset e) (onset e+dur (event e)*gate (event e)) p (max 1 (round (127 * vel (event e)))) (event e)
+      let on = onset e + lagOf e
+      pure [ MidiNote on (on + dur (event e)*gate (event e)) p (max 1 (round (127 * vel (event e)))) (event e)
            | p <- ps, vel (event e) > 0]
 
 -- | One sounding note on its way into a track.
@@ -106,7 +111,10 @@ data MidiNote = MidiNote
 -- | Any pitch signal (a constant offset is a constant bend) or a varying level
 -- needs a channel of its own.
 curved :: MidiNote -> Bool
-curved n = pitchShift (noteEvent n) /= Const 0 || varyingLevel n /= Const 1
+curved = curvedEvent . noteEvent
+
+curvedEvent :: Event -> Bool
+curvedEvent e = pitchShift e /= Const 0 || snd (levelParts (level e)) /= Const 1
 
 varyingLevel :: MidiNote -> Signal
 varyingLevel = snd . levelParts . level . noteEvent

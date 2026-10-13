@@ -26,6 +26,15 @@ legato x      = gate 3/2 [x]           -- each note rings into the next
 up #n x       = [x + n]                -- transpose by n steps
 octave x      = up 12 [x]              -- up an octave in 12-EDO
 
+-- Humanizing: players are never exactly even. noise seed rate is a repeatable
+-- random signal (rate knots a beat, joined by lines, within -1..1); start holds
+-- a signal's value through each note. Neighbouring notes get related values,
+-- as a player's do. The seed picks the pattern: give each part its own.
+vary #seed #a x  = level across (1 - a * (1 - start (noise seed 3)) / 2) [x]   -- each note up to a softer
+loose #seed #b x = lag across (b * (1 + noise (seed + 7919) 3) / 2) [x]       -- each note up to b beats late
+drift #seed #c x = pitch across (cents (c * noise (seed + 15838) 1/2)) [x]    -- intonation wandering within c cents
+humanize #seed x = loose seed 1/48 [vary seed 0.15 [x]]                       -- both, gently
+
 -- Repetition
 twice x       = [x]*2
 echo #n #v x  = [x vel v [x]]*n        -- x, then a quieter copy, n times
