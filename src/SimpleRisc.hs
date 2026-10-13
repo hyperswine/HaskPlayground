@@ -1479,9 +1479,6 @@ data ExecuteTwo = ExecuteTwo
   { e2Pc :: Word32, e2Predicted :: Word32, e2Control :: ExecuteControl, e2Computed :: Computed,
     e2Candidates :: Vec 8 Word32, e2AluCompare :: CompareResults, e2BranchCompare :: CompareResults,
     e2B :: Word32, e2Op2 :: Word32, e2Imm :: Word32,
-    -- | A multiply's four 17 x 17 partial products (DSP blocks), summed in
-    -- the second execute stage.
-    e2Products :: Vec 4 (Signed 34),
     e2A :: Word32, e2Word :: Word32,
     e2Rd :: Index 32, e2Writes :: Bool, e2FetchFault :: Bool,
     -- | Its result is selected here (an ALU result other than a shift or a
@@ -1505,6 +1502,10 @@ data MemoryStage = MemoryStage
     mFunct3 :: BitVector 3, mOffset :: Unsigned 2,
     mIndex :: MemAddr, mData :: Word32, mMask :: Word32,
     mShift :: Bool, mArith :: Bool, mAmount :: Word32,
+    -- | A multiply: its four 17 x 17 partial products (DSP blocks, fed
+    -- from this stage's operand registers), summed at commit.
+    mMultiply :: Bool,
+    mProducts :: Vec 4 (Signed 34),
     -- | Cycles until the word read for a load or a sub-word store is on
     -- the memory bus.
     mWait :: Unsigned 2,
@@ -1650,6 +1651,7 @@ pipeStep machine memoryWord =
         Nothing -> False
       committedValue m
         | mLoad m = loadValue (mFunct3 m) (mOffset m) memoryWord
+        | mMultiply m = productHalf (mFunct3 m) (mProducts m)
         | mShift m = shiftResult (mFunct3 m) (if mArith m then 0x20 else 0) (mValue m) (fromIntegral (mAmount m .&. 0x1c))
         | otherwise = mValue m
       registerWriteNow = case pM pipe of
@@ -1675,7 +1677,8 @@ pipeStep machine memoryWord =
             kind = execKind control
             funct3 = execFunct3 control
             aluResult
-              | execMulDiv control = Just (productHalf funct3 (e2Products x))
+              -- (a multiply's product is summed at commit)
+              | execMulDiv control = Just 0
               | execLui control = Just (e2Imm x)
               | execAuipc control = Just (cTarget comp)
               | execAluOp control = selectedAlu control (e2Candidates x) (e2AluCompare x)
@@ -1716,15 +1719,17 @@ pipeStep machine memoryWord =
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
             -- (MULH shares SLL's funct3; execShift marks it too)
             shifting = execShift control && not (execMulDiv control)
+            multiplying = execMulDiv control && not (testBit funct3 2)
             stage = MemoryStage
               { mPc = e2Pc x, mNext = if taken then target else cLink comp,
                 mValue = value, mRd = e2Rd x, mWrites = e2Writes x && not slow,
-                mFinal = not load && not shifting,
+                mFinal = not load && not shifting && not multiplying,
                 mLoad = load, mStore = store, mStoreWord = storeWord,
                 mFunct3 = funct3, mOffset = resize address,
                 mIndex = ramWordIndex address, mData = storeLanes funct3 (resize address) (e2B x),
                 mMask = storeMask funct3 (resize address),
                 mShift = shifting, mArith = execArithmeticShift control, mAmount = e2Op2 x,
+                mMultiply = multiplying, mProducts = partialProducts funct3 (e2A x) (e2B x),
                 mWait = if load || (store && not storeWord) then 2 else 0,
                 mAction = action, mWord = e2Word x, mA = e2A x, mB = e2B x, mAddress = address }
             actual = if taken then target else cLink comp
@@ -1772,7 +1777,6 @@ pipeStep machine memoryWord =
                 e2AluCompare = compareOperands a op2,
                 e2BranchCompare = compareOperands a b,
                 e2B = b, e2Op2 = op2, e2Imm = imm,
-                e2Products = partialProducts (execFunct3 control) a b,
                 e2A = a, e2Word = e1Word x,
                 e2Rd = e1Rd x, e2Writes = e1Writes x, e2FetchFault = e1FetchFault x,
                 e2Forwards = e1Writes x && case execKind control of
