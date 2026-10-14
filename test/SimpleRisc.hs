@@ -93,6 +93,19 @@ runUntilHalt fuel = go 0
       | romAddress (cpuPc (simMachine sim)) || cycles >= fuel = (cycles, sim)
       | otherwise = go (cycles + 1) (stepSim sim Nothing)
 
+-- | A program has just ended (the pc entered the ROM): every RAM
+-- instruction has committed, since commit is in order. But if the branch
+-- target buffer predicted the jump into the ROM, ROM instructions are
+-- already in flight and could commit during the drain that lets the
+-- program's last writes land. Squash them, as a misprediction would, so
+-- the drain sees only the program's own effects.
+settled :: Sim -> Sim
+settled sim
+  | cpuPipelined m && cpuFast m = sim {simMachine = m {cpuPipe = restartPipe (cpuPc m) (cpuPipe m)}}
+  | otherwise = sim
+  where
+    m = simMachine sim
+
 -- | Keep running (the boot ROM, after a program ends) until "DONE" has been
 -- sent.
 runUntilDone :: Int -> Sim -> Sim
@@ -1246,8 +1259,10 @@ genInstruction i n = Gen.frequency
           <$> Gen.element [0, 1, 4, 5, 6, 7] <*> forward <*> Gen.frequency [(30, P.pure False), (1, P.pure True)]
           <*> genReg <*> genReg),
     (3, (\k rd -> [jType (4 * k) rd]) <$> forward <*> genReg),
+    -- the target is k words past the JALR, one word after the AUIPC: at most
+    -- the final ECALL, never the handler after it
     (3, (\k odd rd -> [(9 `shiftL` 7) .|. 0x17, iType (4 * (k + 1) + (if odd then 2 else 0)) 9 0 rd 0x67])
-          <$> forward <*> Gen.frequency [(20, P.pure False), (1, P.pure True)] <*> genReg),
+          <$> forwardFromNext <*> Gen.frequency [(20, P.pure False), (1, P.pure True)] <*> genReg),
     (6, (\csr f3 src rd -> [csrInstruction csr f3 rd src]) <$> Gen.element [0x340, 0x341, 0x342, 0x343, 0x304, 0x300]
           <*> Gen.element [1, 2, 3, 5, 6, 7] <*> genReg <*> genReg),
     (2, (\csr f3 rd -> [csrInstruction csr f3 rd 0]) <$> Gen.element [0x301, 0xf11, 0xf14, 0x310, 0x344]
@@ -1260,8 +1275,10 @@ genInstruction i n = Gen.frequency
         (1, (: []) <$> Gen.integral Range.linearBounded) ]) ]
   where
     rOps = [(0, f) | f <- [0 .. 7]] P.++ [(0x20, 0), (0x20, 5)] P.++ [(1, f) | f <- [0 .. 7]]
+    -- forward targets reach at most body index n, the final ECALL
     remaining = fromIntegral (P.max 1 (n - i)) :: Word32
     forward = Gen.integral (Range.linear 1 remaining)
+    forwardFromNext = Gen.integral (Range.linear 1 (fromIntegral (P.max 1 (n - i - 1))))
     genOffset = Gen.frequency
       [ (30, (* 4) <$> Gen.integral (Range.linearFrom 0 (-128) 127)),
         (1, Gen.integral (Range.linearFrom 0 (-512) 511)) ]
@@ -1277,7 +1294,12 @@ genItem i n = Gen.frequency
     (3, do
         trips <- Gen.integral (Range.linear 1 4)
         m <- Gen.integral (Range.linear 1 6)
-        inner <- P.concat <$> P.mapM (\k -> genInstruction (i + 1 + k) n) [0 .. m - 1]
+        -- each instruction is generated for where it lands (a jump pair is two words)
+        let from _ 0 = P.pure []
+            from at c = do
+              ws <- genInstruction at n
+              (ws P.++) <$> from (at P.+ P.length ws) (c P.- 1 :: Int)
+        inner <- from (i + 1) m
         let loopBody = P.take m inner
             back = 0 - 4 * fromIntegral (P.length loopBody + 1)
         P.pure ([addi 17 0 trips] P.++ loopBody P.++ [addi 17 17 (0 - 1), bne 17 0 back])) ]
@@ -1341,8 +1363,8 @@ matchesReferenceModel configure = withTests 300 . property $ do
       (_, halted) = runUntilHalt 200000 (startSim (configure (runningMachine [(fromIntegral r, v) | (r, v) <- regs])) (Ram 0 memory))
       -- the last register write and retirement land a cycle or two after
       -- the pc enters the ROM; three cycles cannot commit a ROM instruction
-      -- (the pipeline's first takes six)
-      drained = runInputs halted (P.replicate 3 Nothing)
+      -- (the pipeline's first takes six once 'settled')
+      drained = runInputs (settled halted) (P.replicate 3 Nothing)
       core = simMachine drained
       trapRegs = cpuTrapRegisters core
       coreMemory = ramWords (simRam halted)
@@ -1361,6 +1383,8 @@ matchesReferenceModel configure = withTests 300 . property $ do
   classify "runs a loop" (P.any (\word -> word .&. 0x7f == 0x63 && testBit word 31) program)
   -- a branch landing on a jalr can skip its auipc and loop: not a test
   when (Model.mPc model >= Model.ramBase) discard
+  -- a computed address reached a device register the model can't predict
+  when (Model.mDevice model) discard
   assert (romAddress (cpuPc core))
   [cpuRegs core !! (r :: Index 32) | r <- [1 .. 31]] === [modelReg r | r <- [1 .. 31 :: Int]]
   (trapEpc trapRegs, trapCause trapRegs, trapValue trapRegs) === (w (Model.mEpc model), w (Model.mCause model), w (Model.mTval model))
@@ -1401,7 +1425,7 @@ interruptsAreTransparent configure = withTests 100 . property $ do
                 poked = if P.null now then sim else sim {simMachine = m {cpuDevices = (cpuDevices m) {devMsip = True}}}
                 next = stepSim poked Nothing
              in simMachine next `seq` cpuRegs (simMachine next) `seq` ramWords (simRam next) `seq` run next (cycle P.+ 1) later
-      finish sim = runInputs sim (P.replicate 3 Nothing)
+      finish sim = runInputs (settled sim) (P.replicate 3 Nothing)
       quiet = finish (run start (0 :: Int) [])
       noisy = finish (run start (0 :: Int) raiseAt)
       keep m = [cpuRegs m !! (r :: Index 32) | r <- [1 .. 31], r /= 10, r /= 13]

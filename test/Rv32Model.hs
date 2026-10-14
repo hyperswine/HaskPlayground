@@ -12,6 +12,10 @@
 -- specification leaves a choice, the comments say which one SimpleRisc
 -- made: mtval holds the instruction for an illegal instruction and the pc
 -- for EBREAK; a misaligned address traps before an unmapped one.
+--
+-- SimpleRisc's other device registers (timer, PLIC, UART, I/O, exit) are
+-- mapped, so an access to one doesn't fault, but their values aren't
+-- modelled: the model stops there ('mDevice') and a test can't compare.
 module Rv32Model
   ( Model (..),
     initialModel,
@@ -45,7 +49,9 @@ data Model = Model
     -- | The boot ROM's words, readable by loads at 0x0000_0000.
     mRom :: IM.IntMap Word32,
     -- | The CLINT's msip (0x0200_0000, word accesses).
-    mMsip :: Bool
+    mMsip :: Bool,
+    -- | Stopped at an access to a device register it doesn't model.
+    mDevice :: Bool
   }
   deriving (Show, Eq)
 
@@ -58,7 +64,7 @@ ramWords = 16384
 initialModel :: [(Int, Word32)] -> IM.IntMap Word32 -> [Word32] -> Model
 initialModel regs mem rom =
   Model ramBase (IM.fromList [(r, v) | (r, v) <- regs, r /= 0]) mem 0 0 0 0 0 0 False False 0
-    (IM.fromList (zip [0 ..] rom)) False
+    (IM.fromList (zip [0 ..] rom)) False False
 
 clintMsip :: Word32
 clintMsip = 0x0200_0000
@@ -92,11 +98,26 @@ sext bits v = if testBit v (bits - 1) then v .|. complement (bit bits - 1) else 
 field :: Int -> Int -> Word32 -> Word32
 field hi lo w = (w `shiftR` lo) .&. (bit (hi - lo + 1) - 1)
 
--- | Run until a trap reaches mtvec 0 (SimpleRisc's boot ROM) or fuel ends.
+-- | Run until the pc enters SimpleRisc's boot ROM (a trap reaching mtvec 0,
+-- or a jump there) or fuel ends. The ROM is the first 2 KiB, as the core's
+-- 'romAddress' says; any other pc outside RAM is fetched, and faults.
 runModel :: Int -> Model -> Model
 runModel fuel m
-  | fuel <= 0 || mPc m < ramBase = m
+  | fuel <= 0 || inRom (mPc m) || mDevice m = m
   | otherwise = runModel (fuel - 1) (step m)
+
+inRom :: Word32 -> Bool
+inRom address = address .&. 0xffff_f800 == 0
+
+-- | SimpleRisc's device registers, msip included (other widths than a word
+-- aren't modelled): the exit and boot-cause devices, the CLINT, the PLIC's
+-- UART source, the UART, and the I/O window at 0x1000_1000.
+deviceAddress :: Word32 -> Bool
+deviceAddress address =
+  address `elem` [ 0x0010_0000, 0x0010_0004, 0x0200_0000, 0x0200_4000, 0x0200_4004, 0x0200_bff8, 0x0200_bffc
+                 , 0x0c00_0028, 0x0c00_1000, 0x0c00_2000, 0x0c20_0000, 0x0c20_0004
+                 , 0x1000_0000, 0x1000_0004, 0x1000_0008, 0x1000_000c ]
+    || address .&. 0xffff_f000 == 0x1000_1000
 
 -- | One instruction, or the software interrupt before it.
 step :: Model -> Model
@@ -180,7 +201,9 @@ execute ins m = case opcode of
             Just n
               | address .&. (n - 1) /= 0 -> trap 4 address m
               | otherwise -> case loadable address of
-                  Nothing -> trap 5 address m
+                  Nothing
+                    | deviceAddress address -> m {mDevice = True}
+                    | otherwise -> trap 5 address m
                   Just word ->
                     let
                         shift = fromIntegral (8 * (address .&. 3))
@@ -202,7 +225,9 @@ execute ins m = case opcode of
               | address .&. (n - 1) /= 0 -> trap 6 address m
               | address == clintMsip && n == 4 -> retire next (m {mMsip = testBit b 0})
               | otherwise -> case ramIndex address of
-                  Nothing -> trap 7 address m
+                  Nothing
+                    | deviceAddress address -> m {mDevice = True}
+                    | otherwise -> trap 7 address m
                   Just i ->
                     let shift = fromIntegral (8 * (address .&. 3))
                         mask = (if n == 4 then 0xffff_ffff else bit (8 * fromIntegral n) - 1) `shiftL` shift
