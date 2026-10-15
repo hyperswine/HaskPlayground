@@ -1,0 +1,238 @@
+{
+  "board": "Tang Nano 20K",
+  "frequency_mhz": 27,
+  "isa": "RV32IMC",
+  "capture": "Before CAS2 burst capture correction",
+  "bitstream_sha256": "568ce034914287338829fd480b01e35ef4a73119d151e4fae6f0c22dd857b916",
+  "method": "Independent UART recorder; first line0 read, accepted writes, SDRAM WRITE pins and LOAD MODE pins; CPU loads not used for observation",
+  "trace": {
+    "format": "BDBG v2",
+    "frame_bytes": 202,
+    "prefix_bytes": 0,
+    "trailing_bytes": 0,
+    "snapshot_at_first_line0_resume": true,
+    "next_nonzero_ring_slot": 2,
+    "valid_slots": 2,
+    "cache_a0": {
+      "port_word": "0x000002",
+      "region": "RAM",
+      "byte_address": "0x80000008"
+    },
+    "cache_a1": {
+      "port_word": "0x000001",
+      "region": "RAM",
+      "byte_address": "0x80000004"
+    },
+    "cache_a2": {
+      "port_word": "0x000000",
+      "region": "RAM",
+      "byte_address": "0x80000000"
+    },
+    "cache_state": "IDLE",
+    "hold_cpu": false,
+    "read_capture_active": false,
+    "cpu_rdata": "0x02100313",
+    "entry_word": "0x00000000",
+    "fill_target": "0x02100313",
+    "physical_clocks": 432448896,
+    "records": [
+      {
+        "slot": 0,
+        "persistent_first_line0": true,
+        "valid": true,
+        "physical_word_address": "0x000000",
+        "physical_byte_address": "0x80000000",
+        "beats_by_index": [
+          "0x02100313",
+          "0x0062a023",
+          "0x001002b7",
+          "0x001002b7"
+        ],
+        "arrival_index_order": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "seen_index_mask": "0xf",
+        "done": true,
+        "more_than_four_beats": false,
+        "cpu_port_at_accept": {
+          "port_word": "0x200000",
+          "region": "ROM",
+          "byte_offset": "0x00000000"
+        },
+        "cache_state_at_accept": "READ_SEND",
+        "hold_at_accept": true,
+        "accepted_read_sequence_mod256": 0
+      },
+      {
+        "slot": 1,
+        "persistent_first_line0": false,
+        "valid": true,
+        "physical_word_address": "0x000004",
+        "physical_byte_address": "0x80000010",
+        "beats_by_index": [
+          "0x55530313",
+          "0x0062a023",
+          "0x0000006f",
+          "0x0000006f"
+        ],
+        "arrival_index_order": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "seen_index_mask": "0xf",
+        "done": true,
+        "more_than_four_beats": false,
+        "cpu_port_at_accept": {
+          "port_word": "0x200000",
+          "region": "ROM",
+          "byte_offset": "0x00000000"
+        },
+        "cache_state_at_accept": "READ_SEND",
+        "hold_at_accept": true,
+        "accepted_read_sequence_mod256": 1
+      },
+      {
+        "slot": 2,
+        "persistent_first_line0": false,
+        "valid": false,
+        "physical_word_address": "0x000000",
+        "physical_byte_address": "0x80000000",
+        "beats_by_index": [
+          "0x00000000",
+          "0x00000000",
+          "0x00000000",
+          "0x00000000"
+        ],
+        "arrival_index_order": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "seen_index_mask": "0x0",
+        "done": false,
+        "more_than_four_beats": false,
+        "cpu_port_at_accept": {
+          "port_word": "0x000000",
+          "region": "RAM",
+          "byte_address": "0x80000000"
+        },
+        "cache_state_at_accept": "IDLE",
+        "hold_at_accept": false,
+        "accepted_read_sequence_mod256": 0
+      },
+      {
+        "slot": 3,
+        "persistent_first_line0": false,
+        "valid": false,
+        "physical_word_address": "0x000000",
+        "physical_byte_address": "0x80000000",
+        "beats_by_index": [
+          "0x00000000",
+          "0x00000000",
+          "0x00000000",
+          "0x00000000"
+        ],
+        "arrival_index_order": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "seen_index_mask": "0x0",
+        "done": false,
+        "more_than_four_beats": false,
+        "cpu_port_at_accept": {
+          "port_word": "0x000000",
+          "region": "RAM",
+          "byte_address": "0x80000000"
+        },
+        "cache_state_at_accept": "IDLE",
+        "hold_at_accept": false,
+        "accepted_read_sequence_mod256": 0
+      }
+    ],
+    "physical_load_mode": {
+      "valid": true,
+      "bank": 0,
+      "address": "0x222",
+      "cas_latency": 2,
+      "burst_length_encoding": 2,
+      "burst_sequential": true,
+      "single_location_writes": true
+    },
+    "accepted_writes": [
+      {
+        "word_index": 0,
+        "valid": true,
+        "physical_word_address": "0x000000",
+        "physical_byte_address": "0x80000000",
+        "data": "0x100002b7",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 1,
+        "valid": true,
+        "physical_word_address": "0x000001",
+        "physical_byte_address": "0x80000004",
+        "data": "0x02100313",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 2,
+        "valid": true,
+        "physical_word_address": "0x000002",
+        "physical_byte_address": "0x80000008",
+        "data": "0x0062a023",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 3,
+        "valid": true,
+        "physical_word_address": "0x000003",
+        "physical_byte_address": "0x8000000c",
+        "data": "0x001002b7",
+        "byte_enable": "0xf"
+      }
+    ],
+    "physical_pin_writes": [
+      {
+        "word_index": 0,
+        "valid": true,
+        "physical_word_address": "0x000000",
+        "physical_byte_address": "0x80000000",
+        "data": "0x100002b7",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 1,
+        "valid": true,
+        "physical_word_address": "0x000001",
+        "physical_byte_address": "0x80000004",
+        "data": "0x02100313",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 2,
+        "valid": true,
+        "physical_word_address": "0x000002",
+        "physical_byte_address": "0x80000008",
+        "data": "0x0062a023",
+        "byte_enable": "0xf"
+      },
+      {
+        "word_index": 3,
+        "valid": true,
+        "physical_word_address": "0x000003",
+        "physical_byte_address": "0x8000000c",
+        "data": "0x001002b7",
+        "byte_enable": "0xf"
+      }
+    ]
+  }
+}

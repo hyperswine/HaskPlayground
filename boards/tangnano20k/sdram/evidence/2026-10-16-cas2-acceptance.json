@@ -1,0 +1,347 @@
+{
+  "board": "Tang Nano 20K",
+  "local_date": "2026-10-16",
+  "method": "Physical FPGA SRAM programming and host-verified UART output; no flash programming",
+  "controller_sha256": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+  "accepted": {
+    "c27": {
+      "image": "sdram-pipeline-c27-cas2",
+      "sha256": "4930fb5df74f9fa4fdb6cf4a2eb0c76402e78d59eb4429067655a2b3e89e14b1",
+      "frequency_mhz": 27,
+      "sdram_phase_degrees": 225,
+      "fmax_mhz": 44.132,
+      "setup_slack_ns": 14.378,
+      "setup_violations": 0,
+      "hold_violations": 0,
+      "cache_cycles": 538765,
+      "codegen_revision": 42,
+      "fp_risc_stress": {
+        "finished_at": "2026-10-15T17:50:16.799737+00:00",
+        "frequency_mhz": 27.0,
+        "complete": true,
+        "ram": "sdram",
+        "compressed": true,
+        "legacy_codegen": false,
+        "baseline_heap_ref": null,
+        "requested_runs": 6,
+        "passed_runs": [
+          {
+            "program": "sieve",
+            "run": 1,
+            "seconds": 3.5457381249871105,
+            "expected_exit": 0,
+            "image_bytes": 9040,
+            "heap_bytes": 8308736,
+            "workload_bytes": 36001,
+            "expected": "SIEVE primes=3824 sum=64771067"
+          },
+          {
+            "program": "sort",
+            "run": 1,
+            "seconds": 7.288954042014666,
+            "expected_exit": 0,
+            "image_bytes": 11760,
+            "heap_bytes": 8306016,
+            "workload_bytes": 32768,
+            "expected": "SORT n=8192 hash=395872"
+          },
+          {
+            "program": "matrix",
+            "run": 1,
+            "seconds": 15.55590062495321,
+            "expected_exit": 0,
+            "image_bytes": 11880,
+            "heap_bytes": 8305888,
+            "workload_bytes": 24576,
+            "expected": "MATRIX n=64 hash=279822 sum=18182233"
+          },
+          {
+            "program": "tree",
+            "run": 1,
+            "seconds": 0.6299113329732791,
+            "expected_exit": 0,
+            "image_bytes": 7936,
+            "heap_bytes": 8309840,
+            "workload_bytes": 35760,
+            "expected": "TREE nodes=447 rounds=8 sum=100128"
+          },
+          {
+            "program": "tree_large",
+            "run": 1,
+            "seconds": 2.765554958023131,
+            "expected_exit": 0,
+            "image_bytes": 7960,
+            "heap_bytes": 8309808,
+            "workload_bytes": 655280,
+            "expected": "TREE nodes=8191 rounds=2 sum=33550336"
+          },
+          {
+            "program": "compute",
+            "run": 1,
+            "seconds": 32.413934875046834,
+            "expected_exit": 0,
+            "image_bytes": 7536,
+            "heap_bytes": 8310240,
+            "workload_bytes": 0,
+            "expected": "COMPUTE iterations=1000000 checksum=175362"
+          }
+        ]
+      },
+      "checks": [
+        "compressed integer forms and six precise traps, links, straddles, fence.i, RAM boundary",
+        "1 MiB working set, all banks, last word, byte lanes",
+        "instruction coherence"
+      ]
+    },
+    "c48": {
+      "image": "sdram-pipeline-c48-cas2-p135",
+      "sha256": "42d33b0108a73d434218c37d994bad92e297cc590bb926fa2eef9724e086adb4",
+      "frequency_mhz": 48,
+      "sdram_phase_degrees": 135,
+      "fmax_mhz": 50.987,
+      "setup_slack_ns": 1.221,
+      "setup_violations": 0,
+      "hold_violations": 0,
+      "cache_cycles": 538760,
+      "codegen_revision": 43,
+      "fp_risc_stress": {
+        "finished_at": "2026-10-15T18:00:01.684325+00:00",
+        "frequency_mhz": 48.0,
+        "complete": true,
+        "ram": "sdram",
+        "compressed": true,
+        "legacy_codegen": false,
+        "baseline_heap_ref": null,
+        "requested_runs": 6,
+        "passed_runs": [
+          {
+            "program": "sieve",
+            "run": 1,
+            "seconds": 1.9376329159131274,
+            "expected_exit": 0,
+            "image_bytes": 9024,
+            "heap_bytes": 8308752,
+            "workload_bytes": 36001,
+            "expected": "SIEVE primes=3824 sum=64771067",
+            "binary_sha256": "94455b07bb16d23f1b0f29077b92950ce0c90a017700866d9b741da46b6a68e3"
+          },
+          {
+            "program": "sort",
+            "run": 1,
+            "seconds": 4.103331042104401,
+            "expected_exit": 0,
+            "image_bytes": 11744,
+            "heap_bytes": 8306032,
+            "workload_bytes": 32768,
+            "expected": "SORT n=8192 hash=395872",
+            "binary_sha256": "80234d93ac76e40032fbdaa792644520d813242c4e827ca576827d1b73871b9f"
+          },
+          {
+            "program": "matrix",
+            "run": 1,
+            "seconds": 8.944965875009075,
+            "expected_exit": 0,
+            "image_bytes": 11904,
+            "heap_bytes": 8305872,
+            "workload_bytes": 24576,
+            "expected": "MATRIX n=64 hash=279822 sum=18182233",
+            "binary_sha256": "732db5f55518c7d79275f824cd4ee0891afa624ec1338e084cac77e738a5eedd"
+          },
+          {
+            "program": "tree",
+            "run": 1,
+            "seconds": 0.3597999169724062,
+            "expected_exit": 0,
+            "image_bytes": 7952,
+            "heap_bytes": 8309824,
+            "workload_bytes": 35760,
+            "expected": "TREE nodes=447 rounds=8 sum=100128",
+            "binary_sha256": "069f955c9b6e2d323cb025baebbc9f566f2e8f65ce19e7ba3e021e23224a642e"
+          },
+          {
+            "program": "tree_large",
+            "run": 1,
+            "seconds": 1.5656612910097465,
+            "expected_exit": 0,
+            "image_bytes": 7976,
+            "heap_bytes": 8309792,
+            "workload_bytes": 655280,
+            "expected": "TREE nodes=8191 rounds=2 sum=33550336",
+            "binary_sha256": "4087ba2c75abc2f2c02f2aadb7d675915e760584c3f22634ee9f3ac18362fdd7"
+          },
+          {
+            "program": "compute",
+            "run": 1,
+            "seconds": 18.32177562499419,
+            "expected_exit": 0,
+            "image_bytes": 7552,
+            "heap_bytes": 8310224,
+            "workload_bytes": 0,
+            "expected": "COMPUTE iterations=1000000 checksum=175362",
+            "binary_sha256": "73e67cfbea367f10005728ec6582ae487dba6a4ef949b0b473884f72ac31f795"
+          }
+        ]
+      },
+      "checks": [
+        "compressed integer forms and six precise traps, links, straddles, fence.i, RAM boundary",
+        "1 MiB working set, all banks, last word, byte lanes",
+        "instruction coherence"
+      ],
+      "counter_assertions": 270,
+      "initial_run": "No output after an incompatible IALIGN32-only trap fixture; a fresh FPGA reload passed isolated sieve and all six programs. Initial state cause not established."
+    },
+    "burst54": {
+      "image": "sdram-burst54-cas2-p135",
+      "sha256": "69b24da73a27999214dce5e15e09fbc9aebe31fd5a4d5e2608a0e6d4d00be31c",
+      "frequency_mhz": 54,
+      "sdram_phase_degrees": 135,
+      "fmax_mhz": 107.153,
+      "setup_slack_ns": 9.186,
+      "setup_violations": 0,
+      "hold_violations": 0,
+      "capacity_bytes": 8388608,
+      "word_comparisons": 12582912,
+      "mismatches": 0,
+      "checks": [
+        "zero",
+        "ones",
+        "address hash",
+        "complemented hash",
+        "poisoned byte masks",
+        "250 ms retention with refresh"
+      ]
+    },
+    "im54": {
+      "image": "sdram-pipeline54-cas2-p135-place2",
+      "sha256": "3aee29e7fd72d3239cb19829a6bd833ac7e60447c1916ec7a34333b90d7830b0",
+      "frequency_mhz": 54,
+      "sdram_phase_degrees": 135,
+      "placement_mode": 2,
+      "fmax_mhz": 54.006,
+      "setup_slack_ns": 0.002,
+      "setup_violations": 0,
+      "hold_violations": 0,
+      "cache_cycles": 362577,
+      "codegen_revision": 43,
+      "bounded_heap_oversize_guard": true,
+      "counter_assertions": 270,
+      "trap_assertions": 270,
+      "checks": [
+        "1 MiB working set, all banks, last word, byte lanes",
+        "instruction coherence"
+      ],
+      "fp_risc_stress": {
+        "finished_at": "2026-10-15T18:04:07.559549+00:00",
+        "frequency_mhz": 54.0,
+        "complete": true,
+        "ram": "sdram",
+        "compressed": false,
+        "legacy_codegen": false,
+        "baseline_heap_ref": null,
+        "requested_runs": 6,
+        "passed_runs": [
+          {
+            "program": "sieve",
+            "run": 1,
+            "seconds": 1.5656913339626044,
+            "expected_exit": 0,
+            "image_bytes": 12184,
+            "heap_bytes": 8305584,
+            "workload_bytes": 36001,
+            "expected": "SIEVE primes=3824 sum=64771067",
+            "binary_sha256": "464d2fd1cfdd6ddee6162c5cc5a464e6db8b5b262f1c43b204bb85dcb50b3940"
+          },
+          {
+            "program": "sort",
+            "run": 1,
+            "seconds": 4.181268542073667,
+            "expected_exit": 0,
+            "image_bytes": 15312,
+            "heap_bytes": 8302464,
+            "workload_bytes": 32768,
+            "expected": "SORT n=8192 hash=395872",
+            "binary_sha256": "55ecfebda7f39ef6ae7103dae7d9177286436c89dd9a114e20ab4bb5bb30bb85"
+          },
+          {
+            "program": "matrix",
+            "run": 1,
+            "seconds": 8.12293408298865,
+            "expected_exit": 0,
+            "image_bytes": 15360,
+            "heap_bytes": 8302416,
+            "workload_bytes": 24576,
+            "expected": "MATRIX n=64 hash=279822 sum=18182233",
+            "binary_sha256": "5746c2deaded968ec78483a369daee199bcfc2c000d66b4095eec26c55c5daa6"
+          },
+          {
+            "program": "tree",
+            "run": 1,
+            "seconds": 0.3058692499762401,
+            "expected_exit": 0,
+            "image_bytes": 10784,
+            "heap_bytes": 8306992,
+            "workload_bytes": 35760,
+            "expected": "TREE nodes=447 rounds=8 sum=100128",
+            "binary_sha256": "8eab183f7e2a56ee3124fdbf9680813b5deb98bf24ba9e8e69540003fad14824"
+          },
+          {
+            "program": "tree_large",
+            "run": 1,
+            "seconds": 1.4338409170741215,
+            "expected_exit": 0,
+            "image_bytes": 10816,
+            "heap_bytes": 8306960,
+            "workload_bytes": 655280,
+            "expected": "TREE nodes=8191 rounds=2 sum=33550336",
+            "binary_sha256": "67bb930dfcfe548922ebed2e0ed2b5ea8f77272a060fdd9980f5be05cb1d66e5"
+          },
+          {
+            "program": "compute",
+            "run": 1,
+            "seconds": 15.69995762500912,
+            "expected_exit": 0,
+            "image_bytes": 10232,
+            "heap_bytes": 8307536,
+            "workload_bytes": 0,
+            "expected": "COMPUTE iterations=1000000 checksum=175362",
+            "binary_sha256": "938073e379d33fa7d2fb9bc3a30319db5d0adf6542e8d8c7dd5a977a14fb36f1"
+          }
+        ]
+      }
+    }
+  },
+  "negative_results": [
+    {
+      "image": "sdram-pipeline-c48-cas2",
+      "sha256": "6c7dae51dec8e86adb27e907c87974124e2d0042a3c664b229a5c48b5d664e01",
+      "phase_degrees": 225,
+      "result": "DONE without required compressed guest output"
+    },
+    {
+      "image": "sdram-burst54-cas2",
+      "sha256": "f7a6ca7a6ee51d3a305e8f721616df9a11bd8fe4a9888ae3b1f0c5d8f3d5de46",
+      "phase_degrees": 225,
+      "first_pass_comparisons": 2097152,
+      "first_pass_mismatches": 524288,
+      "first_expected": "00000000",
+      "first_actual": "ffffffff"
+    },
+    {
+      "image": "sdram-pipeline54-cas2-p135",
+      "result": "Internal timing failed; not programmed",
+      "fmax_mhz": 48.776,
+      "setup_slack_ns": -1.983,
+      "setup_violations": 37,
+      "hold_violations": 0
+    },
+    {
+      "image": "sdram-pipeline54-cas2-p135-place4",
+      "result": "Internal timing failed; not programmed",
+      "fmax_mhz": 52.083,
+      "setup_slack_ns": -0.682,
+      "setup_violations": 22,
+      "hold_violations": 0
+    }
+  ],
+  "boundary": "Internal STA and finite board checks. SDRAM I/O setup/hold, jitter and PVT are not fully signed off. Historical IM54 speedup pairs use pre-capture-fix images."
+}

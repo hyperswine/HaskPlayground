@@ -7,7 +7,8 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 | Design | Source | Build script | Clock |
 |---|---|---|---|
 | SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 78 MHz (placement mode 2) |
-| SimpleRisc SDRAM (8 MiB, experimental) | `src/SdramSimpleRisc.hs` | `sdram/build.sh core` (Gowin) | 54 MHz |
+| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | Corrected IM at 54 MHz; IMC at 27/48 MHz; six FP-RISC stress programs each |
+| Earlier serial SDRAM core | `src/SdramSimpleRisc.hs` | `sdram/build.sh serial` (Gowin) | cached 66 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
 ```bash
@@ -330,18 +331,27 @@ The historical [vendor baseline](GOWIN-TIMING-2026-10-06.md) failed at
 96 MHz (84.444 MHz maximum). The
 [execution experiment](EXECUTE-TIMING-2026-10-06.md) records the staged ALU,
 split comparisons, registered CSR selection, timing trials and board results.
-Ordinary instructions now take nine clocks; this is still a serial core.
+Those measurements describe the earlier serial core; the current pipeline is
+described above.
 
 ## SDRAM main-memory experiment
 
 [The SDRAM report and build instructions](sdram/README.md) describe the
 standalone full-capacity test and the separate processor image.
-All 8 MiB passed 12,582,912 word comparisons. The processor runs at 54 MHz,
+All 8 MiB passed 12,582,912 word comparisons. The earlier serial processor runs at 54 MHz,
 or 66 MHz with its cache, with the same boot ROM and memory map as the BRAM
 image except that RAM is all 8 MiB at `0x80000000`. C uses a 1 MiB working
 set and FP-RISC uses a 2 MiB allocation on this image. Use `--freq-mhz 54`
 (or 66) with the board tools. The boot ROM loads images of at most 64 KiB, and
 `M` clears only the first 64 KiB. SRAM programming leaves flash unchanged.
+
+The [new SDRAM pipeline](sdram/PIPELINE-2026-10-16.md) overlaps instructions
+through a unified 2 KiB cache with 16-byte burst fills and four masked posted
+writes. Its corrected IM image is board-tested at 54 MHz and optional C mode
+at 27/48 MHz, including six FP-RISC stress programs. Its first board-loader
+failure exposed a one-clock-late SDRAM burst capture and pin model. Four-beat
+variants now use a 135-degree SDRAM clock. The report separates
+physical results, timing candidates and remaining limits.
 
 ## Separate RV64IM / Base host experiment
 

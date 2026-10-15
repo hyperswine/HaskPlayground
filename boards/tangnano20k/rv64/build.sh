@@ -3,20 +3,26 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 freq="${RV64_FREQ_MHZ:-27}"
+rvc="${RV64_RVC:-0}"
+case "$rvc" in 0|1) ;; *) echo "RV64_RVC must be 0 or 1" >&2;exit 1;; esac
 case "$freq" in 27|36|54) ;; *) echo "RV64 clocks: 27, 36, 54 MHz" >&2;exit 1;; esac
-out="${RV64_OUT:-$root/output/tangnano20k/rv64-$freq}"
+suffix=""; if [ "$rvc" = 1 ]; then suffix="-c"; fi
+out="${RV64_OUT:-$root/output/tangnano20k/rv64-$freq$suffix}"
 mkdir -p "$out"
-python3 - "$here/../sdram" "$out" "$freq" <<'PY'
+python3 - "$here/../sdram" "$out" "$freq" "$rvc" "$here" <<'PY'
 from pathlib import Path
 import sys
-src,out=map(Path,sys.argv[1:3]);f=int(sys.argv[3])
+src,out=map(Path,sys.argv[1:3]);f=int(sys.argv[3]);rvc=int(sys.argv[4]);here=Path(sys.argv[5])
+(out/'top.v').write_text((here/'top.v').read_text().replace('rv64_core core',f'rv64_core #(.RVC({rvc})) core'))
+# The shared BRAM constraints also contain microSD pins absent from this top.
+(out/'pins.cst').write_text('\n'.join(line for line in (here.parent/'tangnano20k.cst').read_text().splitlines() if '"sd_' not in line)+'\n')
 (out/'pll.v').write_text((src/'pll.v').read_text().replace('FBDIV_SEL=17',f'FBDIV_SEL={f//3-1}').replace('ODIV_SEL=16','ODIV_SEL=32' if f==27 else 'ODIV_SEL=16'))
 (out/'memory.v').write_text((src/'memory.v').read_text().replace('FREQ=54000000',f'FREQ={f*1000000}'))
 PY
 cat > "$out/clocks.sdc" <<SDC
 create_clock -name clk_27m -period 37.037037 [get_ports {clk_27m}]
 create_generated_clock -name clk_core -source [get_ports {clk_27m}] -multiply_by $((freq/3)) -divide_by 9 [get_pins {pll/pll_s2/CLKOUT}]
-create_generated_clock -name clk_sdram -source [get_ports {clk_27m}] -multiply_by $((freq/3)) -divide_by 9 [get_pins {pll/pll_s2/CLKOUTP}]
+create_generated_clock -name clk_sdram -source [get_ports {clk_27m}] -multiply_by $((freq/3)) -divide_by 9 -phase 225 [get_pins {pll/pll_s2/CLKOUTP}]
 SDC
 cat > "$out/build.tcl" <<TCL
 set_device -name GW2AR-18C GW2AR-LV18QN88C8/I7
@@ -26,14 +32,15 @@ set_option -opt_goal timing
 set_option -frequency $freq
 set_option -global_freq $freq
 set_option -num_critical_paths 20
-add_file "$here/top.v"
+add_file "$out/top.v"
 add_file "$here/core.v"
+add_file "$here/compressed.v"
 add_file "$here/uart.v"
 add_file "$out/memory.v"
 add_file "$out/pll.v"
 add_file "$here/../sdram/sdram.v"
 add_file "$here/../sdram/cache.v"
-add_file "$here/../tangnano20k.cst"
+add_file "$out/pins.cst"
 add_file "$out/clocks.sdc"
 run all
 exit

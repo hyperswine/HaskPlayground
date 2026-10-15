@@ -1,9 +1,13 @@
 # Tang Nano 20K SDRAM experiment
 
-The board's 64-Mbit, 32-bit SDR SDRAM is now usable as 8 MiB of main memory.
-This is a separate processor image with a unified 1 KiB word cache and
-54/60/66 MHz clock options. Code, data and loader writes share the cache. The established BRAM image
-and its 96/108 MHz build remain available.
+The board's 64-Mbit, 32-bit SDR SDRAM is usable as 8 MiB of main memory.
+The current [pipelined experiment](PIPELINE-2026-10-16.md) uses a unified 2 KiB
+cache with 16-byte lines, four posted masked writes and four-word SDRAM bursts.
+`build.sh core` or `pipeline` selects it; `serial` retains the earlier 1 KiB
+word-cache image described in the historical results below. The BRAM image
+remains separate. RV32IM is the default. The optional C frontend passes board
+checks and six FP-RISC stress programs at 27 and 48 MHz. Four-beat variants
+use a 135-degree SDRAM clock; the legacy single-word variants keep 225 degrees.
 
 ## Cached 66 MHz experiment (2026-10-06)
 
@@ -115,12 +119,14 @@ gone.
   operation; inside the ROM it is an ordinary byte.
 - Cycle counters count physical memory wait clocks, including cache lookup.
 
-`SdramSimpleRisc` wraps the existing serial core. It captures full addresses
+The retained `serial` image's `SdramSimpleRisc` wraps the serial core. It captures full addresses
 before the core's block RAM index, sends boot ROM reads to a small block RAM, stops controller advancement during an
 outstanding memory transaction, buffers received UART data and continues the
 cycle counter. One outstanding transaction and registered data keep instruction
 fetch, byte-store read/modify/write and loader accesses ordered. Refresh gets
 priority before accepting work and runs at least every roughly 10 us.
+The [new pipeline report](PIPELINE-2026-10-16.md) describes its fixed-latency
+port, physical holds, burst refills and posted writes.
 
 ## Build and test
 
@@ -138,15 +144,16 @@ python3 boards/tangnano20k/check_counters.py --freq-mhz 54 --sdram
 The host starts the standalone test after opening the UART, preventing lost
 initial reports. Build uses the licensed macOS Gowin flow and rejects internal
 timing violations. Programming is SRAM-only. Both clocks run at the selected frequency. The default remains 54 MHz.
-`SDRAM_CACHE=0` builds a comparison image that bypasses the cache.
-`SDRAM_FREQ_MHZ=66` selects the experimentally validated higher clock.
+`SDRAM_CACHE=0` with `build.sh serial` builds the earlier uncached comparison.
+The earlier serial image is board-tested at `SDRAM_FREQ_MHZ=66`; that result
+does not validate the new pipeline at the same clock.
 Larger loader frames (images over 64 KiB) remain future work.
 
-For the faster cached image:
+To reproduce the historical cached serial image:
 
 ```bash
 SDRAM_FREQ_MHZ=66 SDRAM_OUT="$PWD/output/tangnano20k/sdram-cache66" \
-  boards/tangnano20k/sdram/build.sh core
+  boards/tangnano20k/sdram/build.sh serial
 openFPGALoader -b tangnano20k output/tangnano20k/sdram-cache66/impl/pnr/sdram_test.fs
 python3 boards/tangnano20k/sdram/check_cache.py --freq-mhz 66
 python3 boards/tangnano20k/sdram/check_core.py --freq-mhz 66
@@ -162,7 +169,9 @@ The standalone tester bypasses the cache to exercise every SDRAM word.
 https://github.com/nand2mario/sdram-tang-nano-20k,
 commit `918ae4143eed676d29b706df6ec7ebcb61e257c1`. `LICENSE` retains its license.
 Changes here provide 32-bit writes with four byte enables and registered word
-readback. The PLL uses the reference's shifted SDRAM clock phase. `memory.v`
+readback. Four-word bursts use an earlier CAS2 capture and a 135-degree output
+clock to provide a wider read window; single-word mode retains its later capture
+and 225-degree clock. `memory.v`
 adds request/completion handling and autonomous refresh. The embedded-memory
 port names let Gowin connect the dedicated SDRAM pins; the pin report confirms
 those connections.

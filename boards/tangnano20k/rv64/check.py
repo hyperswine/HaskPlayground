@@ -7,8 +7,9 @@ p.add_argument('--freq-mhz',type=float,default=27)
 p.add_argument('--port',default='/dev/cu.usbserial-20250303171')
 p.add_argument('--simulate',action='store_true')
 p.add_argument('--traps',action='store_true')
+p.add_argument('--compressed',action='store_true')
 a=p.parse_args();here=Path(__file__).resolve().parent;root=here.parents[2]
-out=root/'output/tangnano20k/rv64-tests';out.mkdir(parents=True,exist_ok=True)
+out=root/('output/tangnano20k/rv64'+('c' if a.compressed else '')+('-trap' if a.traps else '')+'-tests');out.mkdir(parents=True,exist_ok=True)
 mask=(1<<64)-1
 ops=['add','sub','sll','srl','sra','slt','sltu','xor','or','and',
  'mul','mulh','mulhsu','mulhu','div','divu','rem','remu',
@@ -65,18 +66,18 @@ int main(void){
 }
 '''.replace('ROWS',',\n'.join(rows)).replace('SWITCH',switch)
 (out/'stress.c').write_text(source)
-subprocess.run(['riscv64-unknown-elf-gcc','-march=rv64im_zicsr_zifencei','-mabi=lp64','-mcmodel=medany','-Os',
+subprocess.run(['riscv64-unknown-elf-gcc','-march='+('rv64imc_zicsr_zifencei' if a.compressed else 'rv64im_zicsr_zifencei'),'-mabi=lp64','-mcmodel=medany','-Os',
  '-ffreestanding','-fno-builtin','-nostdlib','-nostartfiles','-Wl,--no-warn-rwx-segments',
- '-T',str(here/'link.ld'),'-I',str(here.parent/'c'),*([str(here/'traps.S')] if a.traps else [str(here/'crt0.S'),str(here.parent/'c/uart.c'),str(out/'stress.c')]),'-o',str(out/'stress.elf')],check=True)
+ '-T',str(here/'link.ld'),'-I',str(here.parent/'c'),*([str(here/('compressed_traps.S' if a.compressed else 'traps.S'))] if a.traps else [str(here/'crt0.S'),str(here.parent/'c/uart.c'),str(out/'stress.c')]),'-o',str(out/'stress.elf')],check=True)
 subprocess.run(['riscv64-unknown-elf-objcopy','-O','binary',str(out/'stress.elf'),str(out/'stress.bin')],check=True)
-expected='RV64 TRAPS HOLD\nDONE' if a.traps else f'RV64 HOLDS {len(rows)+4}\nDONE'
+expected=('RV64C TRAPS HOLD\nDONE' if a.compressed else 'RV64 TRAPS HOLD\nDONE') if a.traps else f'RV64 HOLDS {len(rows)+4}\nDONE'
 if a.simulate:
     image=(out/'stress.bin').read_bytes();image+=b'\0'*((-len(image))%4)
     (out/'image.hex').write_text('\n'.join(f'{int.from_bytes(image[i:i+4],"little"):08x}' for i in range(0,len(image),4)))
-    subprocess.run(['iverilog','-g2012','-s','rv64_tb','-o',str(out/'sim'),str(here/'core.v'),str(here.parent/'sdram/cache.v'),str(here/'testbench.v')],check=True)
+    subprocess.run(['iverilog','-g2012','-s','rv64_tb','-P',f'rv64_tb.RVC={int(a.compressed)}','-o',str(out/'sim'),str(here/'core.v'),str(here/'compressed.v'),str(here.parent/'sdram/cache.v'),str(here/'testbench.v')],check=True)
     r=subprocess.run(['vvp',str(out/'sim'),f'+IMAGE={out}/image.hex'],capture_output=True,text=True,timeout=120)
 else:
     r=subprocess.run(['python3',str(here.parent/'run_program.py'),str(out/'stress.bin'),'--port',a.port,'--freq-mhz',str(a.freq_mhz),'--ram-base','0x80000000','--timeout','120'],capture_output=True,text=True,timeout=135)
 assert r.returncode==0,(r.stdout,r.stderr)
 assert expected in r.stdout,(expected,r.stdout,r.stderr)
-print('PASS: RV64 precise traps, full-width CSRs, mret and fault recovery' if a.traps else f'PASS: {len(rows)+4} independent RV64I/M/W/load/store reference checks')
+print('PASS: '+('RV64C mixed fetch, raw illegal traps, pc+2 links, IALIGN16, fence.i and boundary faults' if a.compressed else 'RV64 precise traps, full-width CSRs, mret and fault recovery') if a.traps else f'PASS: {len(rows)+4} independent RV64I/M/W/load/store reference checks')

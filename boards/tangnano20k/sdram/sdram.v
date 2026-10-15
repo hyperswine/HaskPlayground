@@ -7,7 +7,9 @@
 //         changed to byte-based access.
 // 2022.9: iniital version.
 //
-// This is a word-based, low-latency and non-bursting controller for the embedded SDRAM
+// This is a word-based controller for the embedded SDRAM. BURST_WORDS=1
+// retains the original single-word port; BURST_WORDS=4 reads sequential lines
+// and keeps writes single-location with byte masks.
 // on Tang Nano 20K. The SDRAM module is 64Mbit 32bit. (2K rows x 256 columns x 4 banks x 32 bits).
 //
 // Under default settings (max 66.7Mhz):
@@ -22,8 +24,9 @@
 //   to not lose data. So the main circuit should invoke auto-refresh at least once 
 //   **every ~15us**.
 //
-// Finally you need a 180-degree phase-shifted clock signal (clk_sdram) for SDRAM. 
-// This can be generated with PLL's clkoutp output.
+// clk_sdram is phase shifted from clk using the PLL's clkoutp output. The
+// board builder uses 135 degrees for the earlier four-beat capture and
+// 225 degrees for the legacy single-word capture. I/O timing needs signoff.
 //
 
 module sdram
@@ -34,6 +37,8 @@ module sdram
     parameter         ROW_WIDTH = 11,  // 2K rows
     parameter         COL_WIDTH = 8,   // 256 words per row (1Kbytes)
     parameter         BANK_WIDTH = 2,  // 4 banks
+    // Read bursts are aligned by the caller. Writes remain single-location.
+    parameter         BURST_WORDS = 1,
 
     // Time delays for 66.7Mhz max clock (min clock cycle 15ns)
     // The SDRAM supports max 166.7Mhz (RP/RCD/RC need changes)
@@ -59,7 +64,7 @@ module sdram
     
     // Logic side interface
     input             clk,
-    input             clk_sdram,    // phase shifted from clk (normally 180-degrees)
+    input             clk_sdram,    // board-selected phase shift from clk
     input             resetn,
     input             rd,           // command: read
     input             wr,           // command: write
@@ -71,7 +76,9 @@ module sdram
                                     // output is buffered until next read request
     output reg [DATA_WIDTH-1:0] dout32, // registered word readback
     output reg        data_ready,   // pulse when read data is available
-    output reg        busy          // 0: ready for next command
+    output reg        busy,         // 0: ready for next command
+    output reg        burst_valid,
+    output reg [1:0]  burst_index
 );
 
 // Tri-state DQ input/output
@@ -108,9 +115,10 @@ localparam CMD_Write=3'b100;
 localparam CMD_Read=3'b101;
 localparam CMD_NOP=3'b111;
 
-localparam [2:0] BURST_LEN = 3'b0;      // burst length 1
+localparam [2:0] BURST_LEN = BURST_WORDS == 4 ? 3'b010 : 3'b000;
 localparam BURST_MODE = 1'b0;           // sequential
-localparam [10:0] MODE_REG = {4'b0, CAS[2:0], BURST_MODE, BURST_LEN};
+localparam [10:0] MODE_REG = {4'b0, CAS[2:0], BURST_MODE, BURST_LEN}
+                           | (BURST_WORDS == 4 ? 11'h200 : 11'h000);
 
 reg cfg_now;            // pulse for configuration
 reg [3:0] cycle;        // each operation (config/read/write) are max 7 cycles
@@ -125,6 +133,7 @@ always @(posedge clk) begin
     cycle <= cycle == 4'd15 ? 4'd15 : cycle + 4'd1;
     // defaults
     {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE} <= CMD_NOP; 
+    burst_valid <= 0;
     casex ({state, cycle})
         // wait 200 us on power-on
         {INIT, 4'bxxxx} : if (cfg_now) begin
@@ -152,6 +161,7 @@ always @(posedge clk) begin
         {CONFIG, T_RP+T_RC+T_RC} : begin
             // set register
             {SDRAM_nRAS, SDRAM_nCAS, SDRAM_nWE} <= CMD_SetModeReg;
+            SDRAM_BA <= 0; // select the base mode register deterministically
             SDRAM_A[10:0] <= MODE_REG;
         end
         {CONFIG, T_RP+T_RC+T_RC+T_MRD} : begin
@@ -200,9 +210,12 @@ always @(posedge clk) begin
         {READ, T_RCD+CAS+4'd1}: begin
             data_ready <= 1'b0;
             dout_buf <= next_dout;
-            dout32 <= dq_in;
-            busy <= 0;
-            state <= IDLE;
+            if (BURST_WORDS == 1) begin
+                dout32 <= dq_in;
+                burst_valid <= 1;
+                burst_index <= 0;
+                busy <= 0; state <= IDLE;
+            end
         end
 
         // write sequence
@@ -241,11 +254,27 @@ always @(posedge clk) begin
         end
     endcase
 
+    // CL2 starts driving after the first following SDRAM clock edge and
+    // is valid BY the second edge, not after it. With our shifted clock,
+    // capture the four beats at T_RCD+CAS through T_RCD+CAS+3. The legacy
+    // single-word mode keeps its later capture, when that word is still held.
+    if (BURST_WORDS == 4 && state == READ) begin
+        if (cycle >= T_RCD+CAS && cycle <= T_RCD+CAS+3) begin
+            dout32 <= dq_in;
+            burst_valid <= 1;
+            burst_index <= cycle-(T_RCD+CAS);
+        end
+        if (cycle == T_RCD+CAS+3) begin busy <= 0; state <= IDLE; end
+    end
+
     if (~resetn) begin
         busy <= 1'b1;
         dq_oen <= 1'b1;         // turn off DQ output
         SDRAM_DQM <= 4'b0;
         state <= INIT;
+        SDRAM_BA <= 0;
+        burst_valid <= 0;
+        burst_index <= 0;
     end
 end
 

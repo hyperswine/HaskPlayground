@@ -6,6 +6,8 @@ root="$(cd "$here/../.." && pwd)"
 ide="${GOWIN_IDE:-/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE}"
 freq="${FREQ_MHZ:-96}"
 placement="${GOWIN_PLACE_OPTION:-0}"
+rvc="${BRAM_RVC:-0}"
+case "$rvc" in 0|1) ;; *) echo "BRAM_RVC must be 0 or 1" >&2;exit 1;; esac
 if ! [[ "$placement" =~ ^[0-4]$ ]]; then
   echo "GOWIN_PLACE_OPTION must be 0, 1, 2, 3 or 4" >&2; exit 1
 fi
@@ -22,7 +24,9 @@ out="${GOWIN_OUT:-$root/output/tangnano20k/gowin-$freq}"
 echo "Gowin vendor build: core $freq MHz, VCO $((freq * odiv)) MHz, output $out"
 mkdir -p "$out"
 cd "$root"
-cabal run -v0 clash -- src/SimpleRisc.hs --verilog -outputdir "$root/output/tangnano20k/clash"
+generated="$root/output/tangnano20k/clash-$rvc"
+options=(-isrc -hide-package haskplayground);if [[ "$rvc" == 1 ]];then options+=(-DRISCV_COMPRESSED);fi
+cabal run -v0 clash -- "${options[@]}" src/SimpleRisc.hs --verilog -fclash-clear -outputdir "$generated"
 # The vendor PLL library uses GW2AR-18C for this device.
 python3 - "$here/top.v" "$out/top_vendor.v" "$freq" "$odiv" <<'PY'
 from pathlib import Path
@@ -56,14 +60,14 @@ add_file clocks.sdc
 run all
 exit
 TCL
-python3 - "$out/build.tcl" "$freq" "$placement" "$root" <<'PY'
+python3 - "$out/build.tcl" "$freq" "$placement" "$root" "$generated" <<'PY'
 from pathlib import Path
 import sys
 p = Path(sys.argv[1]); text = p.read_text()
 def tcl_quote(value):
     return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('[', '\\[') + '"'
 # every module Clash generated (the dual-port RAM is its own file)
-clash = Path(sys.argv[4]) / 'output/tangnano20k/clash/SimpleRisc.topEntity'
+clash = Path(sys.argv[5]) / 'SimpleRisc.topEntity'
 text = text.replace('add_file ../clash/SimpleRisc.topEntity/simple_risc.v',
     '\n'.join('add_file ' + tcl_quote(v) for v in sorted(clash.glob('*.v'))))
 text = text.replace('add_file ../../../boards/tangnano20k/tangnano20k.cst',

@@ -51,9 +51,9 @@ step s@State{..} (readWord,ready,done,received,txReady,emergency,romWord) =
         let (next,(_,wr,byte))=R.machineStepDecodedWith decodeTarget machine (word,received,txReady,emergency)
             bus=R.systemBus machine
             dataRead=case R.busPhase bus of R.BusLoadIssue -> True; R.BusStoreIssue -> True; _ -> False
-            fetch=(case R.cpuPhase machine of R.Fetch -> True; _ -> False) && not breaking
+            fetch=(case R.cpuPhase machine of R.Fetch -> True; R.FetchCross -> True; _ -> False) && not breaking
             busWriting=case R.busPhase bus of R.BusRamWrite -> True; _ -> False
-            byteAddress=if dataRead || busWriting then R.busAddress (R.busRequest bus) else R.cpuPc machine
+            byteAddress=if dataRead || busWriting then R.busAddress (R.busRequest bus) else R.cpuPc machine + (case R.cpuPhase machine of R.FetchCross -> 2; _ -> 0)
             access=fetch || (dataRead && not breaking) || isJust wr
             -- Bit 31 clear is the boot ROM: reads only, the bus refuses stores.
             fromRom=not (testBit byteAddress 31)

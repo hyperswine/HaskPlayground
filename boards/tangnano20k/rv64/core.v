@@ -1,18 +1,23 @@
-// Serial RV64IM + Zicsr/Zifencei experiment. The bus is physical 32-bit words.
+// Serial RV64IMC + Zicsr/Zifencei experiment. The bus is physical 32-bit words.
 // Every memory request is held to acceptance and its response is drained.
-module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
+module rv64_core #(parameter RVC=0)(input clk,reset,input rx_valid,input [7:0] rx_data,
  output reg rx_pop,input tx_ready,output reg tx_send,output reg [7:0] tx_data,
  output memory_req,output memory_write,output [20:0] memory_address,
  output [31:0] memory_wdata,input memory_ready,memory_done,input [31:0] memory_rdata);
  localparam HOST=0,COUNT0=1,COUNT1=2,UPLOAD=3,SEND=4,WAIT=5,
  FETCH=6,DECODE=7,OPERANDS=8,EXECUTE=9,RETIRE=10,
  LOAD=11,LOADHI=12,STORE=13,STOREHI=14,MERGE=15,TX=16,
- MDINIT=17,MDLOOP=18,MDCOMMIT=19,MDFIX=20,SHIFT=21,FINISH=22,CLEAR=23,COUNT2=24,COUNT3=25,VERIFY=26,VERIFYACC=27,VERIFYTX=28;
+ MDINIT=17,MDLOOP=18,MDCOMMIT=19,MDFIX=20,SHIFT=21,FINISH=22,CLEAR=23,COUNT2=24,COUNT3=25,VERIFY=26,VERIFYACC=27,VERIFYTX=28,FALIGN=29,FJOIN=30;
  reg [4:0] state,resume;
  reg running,abort_pending;
  reg [63:0] regs[0:31];
  reg [63:0] pc,next_pc,a,b,operand,result,effective,store_data;
- reg [31:0] instruction,low_word,bus_data;
+ reg [31:0] instruction,instruction_raw,fetch_word,low_word,bus_data;
+ reg [2:0] instruction_size;
+ reg fetch_valid;reg [20:0] fetch_address;
+ wire [15:0] compressed_half=pc[1] ? fetch_word[31:16]:fetch_word[15:0];
+ wire compressed_valid;wire [31:0] compressed_word;
+ rv_c_decompress decompressor(1'b1,compressed_half,compressed_valid,compressed_word);
  reg [20:0] bus_address;
  reg bus_write;
  reg [4:0] rd,rs1,rs2;
@@ -68,7 +73,7 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
    csr_valid=1;csr_readonly=0;
    case(instruction[31:20])
      12'h300:csr_old=mstatus;
-     12'h301:begin csr_old=64'h8000000000001100;csr_readonly=1;end
+     12'h301:begin csr_old=(RVC ? 64'h8000000000001104:64'h8000000000001100);csr_readonly=1;end
      12'h304,12'h344:begin csr_old=0;csr_readonly=1;end
      12'h305:csr_old=mtvec;
      12'h340:csr_old=mscratch;
@@ -91,12 +96,12 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
    rx_pop<=0;tx_send<=0;
    if(reset) begin
      state<=HOST;running<=0;abort_pending<=0;pc<=0;program_end<=0;upload_count<=0;
-     cycle_count<=0;retired<=0;mtvec<=0;mepc<=0;mcause<=0;mtval<=0;mstatus<=0;mscratch<=0;
+     fetch_valid<=0;cycle_count<=0;retired<=0;mtvec<=0;mepc<=0;mcause<=0;mtval<=0;mstatus<=0;mscratch<=0;
      for(i=0;i<32;i=i+1) regs[i]<=0;
    end else begin
      cycle_count<=cycle_count+1'b1;
      if(emergency) begin
-       rx_pop<=1;running<=0;mtvec<=0;mstatus<=0;retired<=0;
+       rx_pop<=1;running<=0;mtvec<=0;mstatus<=0;retired<=0;fetch_valid<=0;
        for(i=0;i<32;i=i+1) regs[i]<=0;
        // A coincident completion is already drained; do not wait for a
        // second pulse that will never arrive.
@@ -111,7 +116,7 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
            "V":begin upload_index<=0;verify_crc<=0;verify_digit<=0;state<=upload_count==0 ? VERIFYTX:VERIFY;end
            "H","R":begin
              running<=1;pc<=rx_data=="H" ? 64'h80000000:0;state<=FETCH;
-             mtvec<=0;mstatus<=0;retired<=0;abort_pending<=0;
+             mtvec<=0;mstatus<=0;retired<=0;abort_pending<=0;fetch_valid<=0;
              for(i=0;i<32;i=i+1) regs[i]<=0;
            end
            "M":begin upload_index<=0;state<=CLEAR;end
@@ -144,10 +149,11 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
          request(1,{41'b0,upload_index,2'b0},0,CLEAR);upload_index<=upload_index+1'b1;
          if(upload_index==16383) begin resume<=HOST;program_end<=0;end
        end
-       SEND:if(memory_ready) state<=WAIT;
+       SEND:if(memory_ready) begin state<=WAIT;if(bus_write && bus_address==fetch_address) fetch_valid<=0;end
        WAIT:if(memory_done) begin
          state<=abort_pending ? HOST:resume;abort_pending<=0;
-         if(resume==DECODE) instruction<=memory_rdata;
+         if(resume==FALIGN) begin fetch_word<=memory_rdata;fetch_address<=bus_address;fetch_valid<=1;end
+         if(resume==DECODE) begin instruction<=memory_rdata;instruction_raw<=memory_rdata;instruction_size<=4;end
        end
        VERIFY:request(0,{41'b0,upload_index,2'b0},0,VERIFYACC);
        VERIFYACC:begin
@@ -164,23 +170,33 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
            verify_digit<=verify_digit+1'b1;
          end
        end
-       FETCH:if(pc[1:0]!=0) trap(0,pc);
+       FETCH:if((RVC ? {1'b0,pc[0]}:pc[1:0])!=0) trap(0,pc);
          else if(!ram_address(pc)) trap(1,pc);
-         else request(0,pc,0,DECODE);
+         else if(RVC && fetch_valid && fetch_address==pc[22:2]) state<=FALIGN;
+         else request(0,pc,0,RVC ? FALIGN:DECODE);
+       FALIGN:begin
+         if(RVC && compressed_half[1:0]!=3) begin
+           if(compressed_valid) begin instruction<=compressed_word;instruction_raw<={16'b0,compressed_half};instruction_size<=2;state<=DECODE;end
+           else trap(2,{48'b0,compressed_half});
+         end else if(!pc[1]) begin instruction<=fetch_word;instruction_raw<=fetch_word;instruction_size<=4;state<=DECODE;end
+         else if(!ram_address(pc+2)) trap(1,pc+2);
+         else request(0,pc+2,0,FJOIN);
+       end
+       FJOIN:begin fetch_word<=memory_rdata;fetch_address<=bus_address;fetch_valid<=1;instruction<={memory_rdata[15:0],fetch_word[31:16]};instruction_raw<={memory_rdata[15:0],fetch_word[31:16]};instruction_size<=4;state<=DECODE;end
        DECODE:begin
          opcode<=instruction[6:0];rd<=instruction[11:7];funct3<=instruction[14:12];
          rs1<=instruction[19:15];rs2<=instruction[24:20];funct7<=instruction[31:25];state<=OPERANDS;
        end
        OPERANDS:begin
-         a<=rs1==0 ? 0:regs[rs1];b<=rs2==0 ? 0:regs[rs2];next_pc<=pc+4;state<=EXECUTE;
+         a<=rs1==0 ? 0:regs[rs1];b<=rs2==0 ? 0:regs[rs2];next_pc<=pc+instruction_size;state<=EXECUTE;
        end
        EXECUTE:begin
          state<=RETIRE;result<=0;
          case(opcode)
            7'h37:result<=sx32({instruction[31:12],12'b0});
            7'h17:result<=pc+sx32({instruction[31:12],12'b0});
-           7'h6f:begin result<=pc+4;next_pc<=pc+imm_j(instruction);end
-           7'h67:if(funct3==0) begin result<=pc+4;next_pc<=(a+imm_i(instruction)) & ~64'd1;end else trap(2,{32'b0,instruction});
+           7'h6f:begin result<=pc+instruction_size;next_pc<=pc+imm_j(instruction);end
+           7'h67:if(funct3==0) begin result<=pc+instruction_size;next_pc<=(a+imm_i(instruction)) & ~64'd1;end else trap(2,{32'b0,instruction_raw});
            7'h63:begin
              rd<=0;
              case(funct3)
@@ -190,34 +206,34 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
                5:if($signed(a)>=$signed(b)) next_pc<=pc+imm_b(instruction);
                6:if(a<b) next_pc<=pc+imm_b(instruction);
                7:if(a>=b) next_pc<=pc+imm_b(instruction);
-               default:trap(2,{32'b0,instruction});
+               default:trap(2,{32'b0,instruction_raw});
              endcase
            end
            7'h13,7'h33,7'h1b,7'h3b:begin
              if((opcode==7'h33 || opcode==7'h3b) && funct7==1) begin
-               if(word_op && funct3!=0 && !funct3[2]) trap(2,{32'b0,instruction});else state<=MDINIT;
+               if(word_op && funct3!=0 && !funct3[2]) trap(2,{32'b0,instruction_raw});else state<=MDINIT;
              end else case(funct3)
                0:if((opcode==7'h33 || opcode==7'h3b) && funct7==7'h20)
                  result<=word_op ? sx32(a[31:0]-alu_b[31:0]):a-alu_b;
-                 else if((opcode==7'h33 || opcode==7'h3b) && funct7!=0) trap(2,{32'b0,instruction});
+                 else if((opcode==7'h33 || opcode==7'h3b) && funct7!=0) trap(2,{32'b0,instruction_raw});
                  else result<=word_op ? sx32(a[31:0]+alu_b[31:0]):a+alu_b;
                1,5:begin
                  if((word_op && (funct7!=0 && !(funct3==5 && funct7==7'h20))) ||
                     (!word_op && ((opcode==7'h13 && instruction[31:26]!=0 && !(funct3==5 && instruction[31:26]==6'h10)) ||
-                    (opcode==7'h33 && funct7!=0 && !(funct3==5 && funct7==7'h20)))) ) trap(2,{32'b0,instruction});
+                    (opcode==7'h33 && funct7!=0 && !(funct3==5 && funct7==7'h20)))) ) trap(2,{32'b0,instruction_raw});
                  else begin result<=word_op ? sx32(a[31:0]):a;
                    shift_count<=word_op ? {1'b0,alu_b[4:0]}:alu_b[5:0];state<=SHIFT;end
                end
-               2:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction});else result<=($signed(a)<$signed(alu_b));
-               3:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction});else result<=(a<alu_b);
-               4:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction});else result<=a^alu_b;
-               6:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction});else result<=a|alu_b;
-               7:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction});else result<=a&alu_b;
+               2:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction_raw});else result<=($signed(a)<$signed(alu_b));
+               3:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction_raw});else result<=(a<alu_b);
+               4:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction_raw});else result<=a^alu_b;
+               6:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction_raw});else result<=a|alu_b;
+               7:if(word_op || (opcode==7'h33 && funct7!=0)) trap(2,{32'b0,instruction_raw});else result<=a&alu_b;
              endcase
            end
            7'h03,7'h23:begin
              effective<=address;store_data<=b;
-             if((opcode==3 && funct3==7) || (opcode==7'h23 && funct3>3)) trap(2,{32'b0,instruction});
+             if((opcode==3 && funct3==7) || (opcode==7'h23 && funct3>3)) trap(2,{32'b0,instruction_raw});
              else if((funct3[1:0]==1 && address[0]) || (funct3[1:0]==2 && address[1:0]!=0) || (funct3[1:0]==3 && address[2:0]!=0)) trap(opcode==3 ? 4:6,address);
              else if(ram_address(address)) begin
                if(opcode==3) request(0,address,0,LOAD);
@@ -232,21 +248,21 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
                rd<=0;if(b[15:0]==16'h5555 || b[15:0]==16'h3333) begin running<=0;state<=FINISH;finish_index<=0;end
              end else trap(opcode==3 ? 5:7,address);
            end
-           7'h0f:begin rd<=0;if(funct3!=0 && funct3!=1) trap(2,{32'b0,instruction});end
+           7'h0f:begin rd<=0;if(funct3==1) fetch_valid<=0;if(funct3!=0 && funct3!=1) trap(2,{32'b0,instruction_raw});end
            7'h73:begin
              if(funct3==0) begin
                if(instruction==32'h30200073) begin rd<=0;next_pc<=mepc;mstatus[3]<=mstatus[7];mstatus[7]<=1;mstatus[12:11]<=0;end
                else if(instruction==32'h00000073) trap(11,0);
                else if(instruction==32'h00100073) trap(3,pc);
-               else trap(2,{32'b0,instruction});
-             end else if(funct3==4 || !csr_valid || (csr_readonly && (funct3[1:0]==1 || rs1!=0))) trap(2,{32'b0,instruction});
+               else trap(2,{32'b0,instruction_raw});
+             end else if(funct3==4 || !csr_valid || (csr_readonly && (funct3[1:0]==1 || rs1!=0))) trap(2,{32'b0,instruction_raw});
              else begin
                result<=csr_old;
                if(funct3[1:0]==1 || rs1!=0) case(instruction[31:20])
                  12'h300:mstatus<=csr_new & 64'h1888;
                  12'h305:mtvec<=csr_new & ~64'd3;
                  12'h340:mscratch<=csr_new;
-                 12'h341:mepc<=csr_new & ~64'd3;
+                 12'h341:mepc<=csr_new & (RVC ? ~64'd1:~64'd3);
                  12'h342:mcause<=csr_new;
                  12'h343:mtval<=csr_new;
                  12'hb00:cycle_count<=csr_new;
@@ -254,7 +270,7 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
                endcase
              end
            end
-           default:trap(2,{32'b0,instruction});
+           default:trap(2,{32'b0,instruction_raw});
          endcase
        end
        SHIFT:if(shift_count==0) begin if(word_op) result<=sx32(result[31:0]);state<=RETIRE;end
@@ -308,7 +324,7 @@ module rv64_core(input clk,reset,input rx_valid,input [7:0] rx_data,
        end
        MDFIX:begin if(md_word) result<=sx32(result[31:0]);state<=RETIRE;end
        RETIRE:begin
-         if(next_pc[1:0]!=0) trap(0,next_pc);
+         if((RVC ? {1'b0,next_pc[0]}:next_pc[1:0])!=0) trap(0,next_pc);
          else begin
            if(rd!=0) regs[rd]<=result;retired<=retired+1'b1;
            pc<=next_pc;state<=FETCH;

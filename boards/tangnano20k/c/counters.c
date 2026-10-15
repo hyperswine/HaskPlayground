@@ -39,10 +39,11 @@ int main(void) {
      * which flushes the pipeline and runs the read and write as two
      * phases; then the pipeline restarts at the next instruction: 11 clocks
      * between two reads, 12 with a NOP between them (it commits in the
-     * pipeline on the way). (The SDRAM image runs the phases alone.) */
+     * pipeline on the way). The SDRAM pipeline can also hit these minima;
+     * its serial comparison image uses more phases. */
 #ifdef SIMPLE_RISC_SDRAM
-    /* Fetch waits and refresh add variable clocks; mcycle must count them. */
-    check(b - a > 11 && b - a < 256); check(c - b > 20 && c - b < 512);
+    /* Cache hits need not wait. Misses and refresh add physical clocks. */
+    check(b - a >= 11 && b - a < 256); check(c - b >= 12 && c - b < 512);
 #else
     check(b - a == 11); check(c - b == 12);
 #endif

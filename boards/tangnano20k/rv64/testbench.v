@@ -1,10 +1,10 @@
 `timescale 1ns/1ps
-module rv64_tb;
+module rv64_tb #(parameter RVC=0);
  reg clk=0;always #5 clk=~clk;
  reg reset=1,rx_valid=0;reg [7:0] rx_data;
  wire rx_pop,tx_send;wire [7:0] tx_data;
  wire req,wr,ready,done;wire [20:0] address;wire [31:0] wdata,rdata;
- rv64_core core(clk,reset,rx_valid,rx_data,rx_pop,1'b1,tx_send,tx_data,req,wr,address,wdata,ready,done,rdata);
+ rv64_core #(.RVC(RVC)) core(clk,reset,rx_valid,rx_data,rx_pop,1'b1,tx_send,tx_data,req,wr,address,wdata,ready,done,rdata);
  wire mr,mw;wire [20:0] ma;wire [31:0] md;
  wire mready;reg mdone=0;reg [31:0] mdata=0;
  sdram_cache cache(clk,reset,req,wr,address,wdata,ready,done,rdata,mr,mw,ma,md,mready,mdone,mdata);

@@ -25,6 +25,7 @@ import "haskplayground" SimpleRisc
 import qualified Prelude as P
 import qualified "haskplayground" SdramSimpleRisc as S
 import qualified Rv32Model as Model
+import qualified RiscVCompressed as C
 import Control.Monad (when)
 
 -- | The 64 KiB RAM as a sparse map: copying a 16384-entry vector on every
@@ -1767,11 +1768,131 @@ prop_sdram_reset_drains_pending_memory = withTests 1 . property $ do
   cpuBusRequest (S.machine drained) === Nothing
   cpuPendingWrite (S.machine drained) === Nothing
 
+-- RV32C frontend: these halfwords mix two C instructions per word with a
+-- 32-bit ADDI straddling words, taken compressed links, and a compressed trap.
+ramFromHalfwords :: [Unsigned 16] -> Ram
+ramFromHalfwords halves = ramFromList (pairs halves)
+ where
+  pairs [] = []
+  pairs [a] = [resize a]
+  pairs (a:b:rest) = (resize a .|. (resize b `shiftL` 16)):pairs rest
+
+prop_compressed_mixed_fetch_and_links :: Property
+prop_compressed_mixed_fetch_and_links = withTests 1 . property $ do
+  let program = [0x4419,0x449d,0x0533,0x0294,0x0505,0xc188,0x4190,0x0693,0x0016,
+                 0x2019,0x4681,0x4681,0x8706,0xa011,0x4701,0x9002]
+  P.mapM_ (\pipelined -> do
+    let before = (runningMachine [(11,ramBase+256)]) {cpuCompressed=True,cpuPipelined=pipelined}
+        (_,after) = runUntilHalt 4000 (startSim before (ramFromHalfwords program))
+        m = simMachine after
+        regs = cpuRegs m
+        traps = cpuTrapRegisters m
+    annotate ("pipelined=" P.++ P.show pipelined)
+    regs !! (10 :: Index 32) === 43
+    regs !! (12 :: Index 32) === 43
+    regs !! (13 :: Index 32) === 44
+    regs !! (14 :: Index 32) === ramBase+20
+    regs !! (1 :: Index 32) === ramBase+20
+    ramRead (simRam after) 64 === 43
+    trapCause traps === 3
+    trapEpc traps === ramBase+30
+    trapValue traps === ramBase+30) [False,True]
+
+prop_compressed_hints_and_illegal_raw :: Property
+prop_compressed_hints_and_illegal_raw = withTests 1 . property $ do
+  P.mapM_ (\pipelined -> do
+    let before = (runningMachine []) {cpuCompressed=True,cpuPipelined=pipelined}
+        hints = [0x0005,0x0081,0x4005,0x6005,0x0002,0x8006,0x9006,0x9002]
+        (_,after) = runUntilHalt 4000 (startSim before (ramFromHalfwords hints))
+    trapCause (cpuTrapRegisters (simMachine after)) === 3
+    counterLo (cpuInstret (simMachine after)) === 7
+    P.mapM_ (\illegal -> do
+      let (_,bad) = runUntilHalt 4000 (startSim before (ramFromHalfwords [0x0001,illegal]))
+          traps = cpuTrapRegisters (simMachine bad)
+      trapCause traps === 2
+      trapEpc traps === ramBase+2
+      trapValue traps === resize illegal) [0,0x4002,0x8002,0x9001,0x2000]) [False,True]
+
+prop_compressed_fetch_boundaries_and_mepc :: Property
+prop_compressed_fetch_boundaries_and_mepc = withTests 1 . property $ do
+  P.mapM_ (\pipelined -> do
+    let before = (runningMachine []) {cpuCompressed=True,cpuPipelined=pipelined,cpuPc=ramBase+65534}
+        run lastWord = snd (runUntilHalt 4000 (startSim before (ramWrite 16383 lastWord (blankRam 0))))
+        short = cpuTrapRegisters (simMachine (run 0x90020001))
+        cross = cpuTrapRegisters (simMachine (run 0x00930001))
+        written = writeCsr 0x341 (ramBase+3) before
+    trapCause short === 3
+    trapEpc short === ramBase+65534
+    trapCause cross === 1
+    trapEpc cross === ramBase+65534
+    trapValue cross === ramBase+65536
+    trapEpc (cpuTrapRegisters written) === ramBase+2
+    readCsr 0x301 before === Just (0x40001104,True)) [False,True]
+
+prop_compressed_handler_and_fence_i :: Property
+prop_compressed_handler_and_fence_i = withTests 1 . property $ do
+  let mainCode = [0x4401,0x0297,0x0000,0x8293,0x03e2,0x9073,0x3052,
+                  0x9002,0x0405,0x9002,0x0405,0x0067,0x0000]
+      handler = [0x22f3,0x3410,0x0289,0x9073,0x3412,0x0485,0x0073,0x3020]
+      handlerCode = mainCode P.++ P.replicate (32-P.length mainCode) 0 P.++ handler
+      modified = [0x4405,0x0001,0x9023,0x00a5,0x100f,0x0000,0xa011,0x0001,0x4409,0x9002]
+  P.mapM_ (\pipelined -> do
+    let before regs = (runningMachine regs) {cpuCompressed=True,cpuPipelined=pipelined}
+        (_,resumed) = runUntilHalt 4000 (startSim (before []) (ramFromHalfwords handlerCode))
+        (_,fenced) = runUntilHalt 4000 (startSim (before [(10,0x4425),(11,ramBase+16)]) (ramFromHalfwords modified))
+    annotate ("pipelined=" P.++ P.show pipelined)
+    cpuRegs (simMachine resumed) !! (8 :: Index 32) === 2
+    cpuRegs (simMachine resumed) !! (9 :: Index 32) === 2
+    cpuPc (simMachine resumed) === 0
+    cpuRegs (simMachine fenced) !! (8 :: Index 32) === 9
+    ramRead (simRam fenced) 4 === 0x90024425
+    trapValue (cpuTrapRegisters (simMachine fenced)) === ramBase+18) [False,True]
+
+prop_compressed_alu_matches_reference :: Property
+prop_compressed_alu_matches_reference = withTests 200 . property $ do
+  values <- forAll (Gen.list (Range.singleton 31) (Gen.integral Range.constantBounded))
+  halves <- forAll (Gen.list (Range.linear 1 60) (Gen.filter computational (Gen.integral Range.constantBounded)))
+  let regs = P.zip [1..31] values
+      expanded = P.map (\h -> case C.decompress32 h of Just w -> w; Nothing -> 0) halves P.++ [0x00100073]
+      reference = Model.runModel 200 (Model.initialModel
+        (P.map (\(r,v) -> (fromIntegral r,fromIntegral v)) regs)
+        (IntMap.fromList (P.zip [0..] (P.map fromIntegral expanded))) [])
+      expected = P.map (\r -> fromIntegral (IntMap.findWithDefault 0 r (Model.mRegs reference)) :: Word32) [0..31]
+  P.mapM_ (\pipelined -> do
+    let before = (runningMachine regs) {cpuCompressed=True,cpuPipelined=pipelined}
+        (_,after) = runUntilHalt 12000 (startSim before (ramFromHalfwords (halves P.++ [0x9002])))
+    annotate ("pipelined=" P.++ P.show pipelined)
+    toList (cpuRegs (simMachine after)) === expected
+    trapCause (cpuTrapRegisters (simMachine after)) === 3
+    counterLo (cpuInstret (simMachine after)) === fromIntegral (P.length halves)) [False,True]
+ where
+  computational half = case C.decompress32 half of
+    Just word -> word .&. 0x7f `P.elem` [0x13,0x33,0x37]
+    Nothing -> False
+
+prop_compressed_pipeline_word_bandwidth :: Property
+prop_compressed_pipeline_word_bandwidth = withTests 1 . property $ do
+  let halves = P.take 120 (P.cycle [0x4405,0x4485,0x4505,0x4585,0x4605,0x4685,0x4705,0x4785])
+      expanded = P.map (\h -> case C.decompress32 h of Just w -> w; Nothing -> 0) halves
+      run c ram = runUntilHalt 4000 (startSim ((runningMachine []) {cpuCompressed=c,cpuPipelined=True}) ram)
+      (shortCycles,short) = run True (ramFromHalfwords (halves P.++ [0x9002]))
+      (longCycles,long) = run False (ramFromList (expanded P.++ [0x00100073]))
+  annotateShow (shortCycles,longCycles)
+  assert (shortCycles <= longCycles+3)
+  toList (cpuRegs (simMachine short)) === toList (cpuRegs (simMachine long))
+  counterLo (cpuInstret (simMachine short)) === 120
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Bus completes once and preserves concurrent RX", prop_bus_completion_and_rx_race),
+    [ ("Compressed mret and FENCE.I discard stale halfwords", prop_compressed_handler_and_fence_i),
+      ("Compressed ALU stream matches independent RV32 interpreter", prop_compressed_alu_matches_reference),
+      ("Compressed pipeline retains straight-line instruction throughput", prop_compressed_pipeline_word_bandwidth),
+      ("Compressed mixed fetch, stores and pc+2 links", prop_compressed_mixed_fetch_and_links),
+      ("Compressed hints and precise raw illegal traps", prop_compressed_hints_and_illegal_raw),
+      ("Compressed boundary fetch and mepc IALIGN16", prop_compressed_fetch_boundaries_and_mepc),
+      ("Bus completes once and preserves concurrent RX", prop_bus_completion_and_rx_race),
       ("Bus waits, precise faults and cancellation", prop_bus_wait_faults_and_cancel),
       ("Registered memory target selection", prop_registered_memory_decode),
       ("Finisher exits reset into the ROM; BOOTCAUSE reads and clears", prop_finisher_commands),

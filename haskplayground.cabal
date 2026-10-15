@@ -93,7 +93,9 @@ library
       , NeoMusic.Signal
       , PsramRegs
       , QuantUI
+      , RiscVCompressed
       , SdramSimpleRisc
+      , SdramPipeline
       , SimpleRisc
       , WASM.Actors
       , WASM.Main

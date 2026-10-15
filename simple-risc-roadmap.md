@@ -58,8 +58,26 @@ unified write-through cache. A repeated-read workload is about 1.50x faster
 than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
 96 MHz completion gate. Since step 3 it shares the boot ROM and memory map
 (no zero alias or `H` command); loader images remain limited to 64 KiB.
-Next: recover CPU clock/throughput.
+This serial implementation remains available as `sdram/build.sh serial`.
 See [the measured results](boards/tangnano20k/sdram/README.md).
+
+## SDRAM pipeline experiment (2026-10-16)
+
+`SdramPipeline` now connects the single-datapath pipeline to all 8 MiB through a
+2 KiB unified cache, 16-byte burst fills and four queued masked writes. Misses
+freeze logical CPU/memory stages while physical time, UART and refresh continue.
+The IM image passes board checks at 54 MHz; the repeated-read benchmark is
+362,612 cycles versus the serial cached image's 2,389,660 at the same frequency.
+IM and optional IMC pass generated-RTL tests, including actual-ROM UART upload
+through the real burst controller and a functional SDRAM pin model. The first
+C-mode board failure exposed a one-clock-late burst capture and CAS model;
+corrected production C-mode passes physical execution, traps, 1 MiB/all-bank,
+coherence and six FP-RISC stress programs at 27 and 48 MHz. A 135-degree SDRAM
+clock restores the corrected burst read window at 48/54 MHz; the standalone
+54 MHz checker passes all 8 MiB. The corrected IM54 placement also passes its
+board and six FP-RISC checks, with only +0.002 ns internal setup slack. C-mode
+remains opt-in. This does not complete the
+96 MHz roadmap gate. See [the report and reproduction commands](boards/tangnano20k/sdram/PIPELINE-2026-10-16.md).
 
 ## Implementation status (2026-10-12): step 5 started
 
