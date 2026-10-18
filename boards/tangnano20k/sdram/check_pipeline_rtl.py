@@ -311,8 +311,9 @@ def run(args, expected=0, timeout=180):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--generated', type=Path,
-                        default=ROOT/'output/tangnano20k/sdram-generated/SdramPipeline-0/SdramPipeline.topEntity')
+                        help='generated Clash directory; defaults to SdramPipeline-0 or -1 matching --compressed')
     parser.add_argument('--compressed', action='store_true')
+    parser.add_argument('--cdc-bridge', action='store_true',help='cross into an offset half-speed backing-memory clock')
     parser.add_argument('--boot-loader', action='store_true', help='exercise the actual ROM and UART P/R upload')
     parser.add_argument('--uart-bit-cycles',type=int,default=868,
                         help='simulation-only UART timing override; hardware timing is 868')
@@ -339,11 +340,12 @@ def main():
         parser.error('pin timing overrides require --pin-model')
     if args.loader_command!='R' and not args.boot_loader:
         parser.error('--loader-command requires --boot-loader')
-    generated = args.generated.resolve()
+    generated = (args.generated or ROOT/f'output/tangnano20k/sdram-generated/SdramPipeline-{int(args.compressed)}/SdramPipeline.topEntity').resolve()
     sources = [generated] if generated.is_file() else sorted(generated.glob('*.v'))
     if not sources:
         raise SystemExit(f'No generated Clash Verilog in {generated}; build SdramPipeline first.')
     out = ROOT/('output/tangnano20k/pipeline-rtl'+('-c' if args.compressed else '')+('-loader' if args.boot_loader else '')+
+               ('-cdc' if args.cdc_bridge else '')+
                ('-pins' if args.pin_model else '')+(f'-uart{args.uart_bit_cycles}' if args.uart_bit_cycles!=868 else ''))
     if args.loader_command=='D':out=out.with_name(out.name+'-dump')
     if args.loader_command=='H':out=out.with_name(out.name+'-extended')
@@ -388,12 +390,13 @@ def main():
          '-P',f'pipeline_cpu_tb.LOADER_TEST={int(args.boot_loader)}',
          '-P',f'pipeline_cpu_tb.UART_BIT={args.uart_bit_cycles}',
          '-P',f'pipeline_cpu_tb.PIN_MODEL={int(args.pin_model)}',
+         '-P',f'pipeline_cpu_tb.CDC_BRIDGE={int(args.cdc_bridge)}',
          '-P',f'pipeline_cpu_tb.PIN_FREQ_MHZ={args.pin_freq_mhz}',
          '-P',f'pipeline_cpu_tb.PIN_PHASE_DEGREES={args.pin_phase_degrees}',
          '-P',f'pipeline_cpu_tb.PIN_TAC_NS={args.pin_tac_ns}',
          '-P',f'pipeline_cpu_tb.LOADER_DUMP={int(args.loader_command=="D")}',
          '-P',f'pipeline_cpu_tb.LOADER_EXTENDED={int(args.loader_command=="H")}',
-         '-o',out/'sim',*sources,HERE/'pipeline_cache.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v'])
+         '-o',out/'sim',*sources,HERE/'pipeline_cache.v',HERE/'clock_bridge.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v'])
     common=['vvp',out/'sim',f'+IMAGE={out}/image.hex',f'+WORDS={len(image)//4}']
     output=run(common,timeout=900 if args.boot_loader else 240)
     expected=('PASS: debug ROM memory dump' if args.loader_command=='D' else

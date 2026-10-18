@@ -17,7 +17,7 @@ module SimpleRisc where
 import Clash.Prelude hiding (And, Xor)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as List
-import Data.Maybe (isNothing)
+import Data.Maybe (fromMaybe, isNothing)
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
@@ -1506,6 +1506,26 @@ prop_pipeline_multiplier_is_exact = withTests 2000 . property $ do
       product64 = (x P.* y) `P.mod` (2 P.^ (64 :: Int))
       expected = if funct3 == 0 then product64 `P.mod` (2 P.^ (32 :: Int)) else product64 `P.div` (2 P.^ (32 :: Int))
   P.toInteger (productHalf funct3 (partialProducts funct3 a b)) === expected
+  let program = [rType 1 2 1 (fromIntegral funct3) 3,addi 4 3 1,0x00100073]
+      (_,halted) = runUntilHalt 1000 (startSim (pipelined (runningMachine [(1,a),(2,b)])) (ramFromList program))
+      regs = cpuRegs (simMachine halted)
+  P.toInteger (regs !! (3 :: Index 32)) === expected
+  regs !! (4 :: Index 32) === fromInteger expected + 1
+  trapCause (cpuTrapRegisters (simMachine halted)) === 3
+
+-- The lookahead hazard register must describe the producer stages that
+-- actually arrived on the same edge, including holds, redirects and slow
+-- handovers. Final-state differential properties separately check values.
+prop_registered_decode_hazard :: Property
+prop_registered_decode_hazard = withTests 200 . property $ do
+  program <- forAll genProgram
+  let start = startSim (pipelined (runningMachine [(31,dataPointer)])) (ramFromList program)
+      trace = P.take 700 (P.iterate (\sim -> stepSim sim Nothing) start)
+  P.mapM_ (\sim -> do
+    let machine = simMachine sim
+        pipe = cpuPipe machine
+    when (cpuFast machine) $
+      pDBlocked pipe === decodeHazard (pD pipe) (pE1 pipe) (pE2 pipe) (pM pipe)) trace
 
 -- Interpret the pipelined carry in the independent test reference only.
 counterValue :: Counter64 -> Unsigned 64
@@ -1928,11 +1948,50 @@ prop_compressed_pipeline_word_bandwidth = withTests 1 . property $ do
   toList (cpuRegs (simMachine short)) === toList (cpuRegs (simMachine long))
   counterLo (cpuInstret (simMachine short)) === 120
 
+-- The register-file address boundary must depend only on F's registered
+-- expanded word. An unrelated FIFO arrival, or a different compressed
+-- instruction in A, cannot select the operands belonging to next cycle's
+-- D instruction. Exercise every source address together with arbitrary
+-- compressed raw bits (including illegal encodings).
+prop_frontend_register_boundaries :: Property
+prop_frontend_register_boundaries = withTests 300 . property $ do
+  rs1 <- forAll (Gen.integral (Range.linear 0 31))
+  rs2 <- forAll (Gen.integral (Range.linear 0 31))
+  raw <- forAll (Gen.integral Range.constantBounded)
+  memoryWord <- forAll (Gen.integral Range.constantBounded)
+  let word = rType 0 rs2 rs1 0 9
+      decoded = fetchedWord (ramBase+2,ramBase+6) word
+      aligned = Fetched ramBase (resize raw) False False (ramBase+2) (resize raw) 2
+      pipe = emptyPipe {pA=Just aligned,pFQueue=decoded :> decoded :> Nil,pFCount=1,pFWrite=1}
+      before = (runningMachine []) {cpuCompressed=True,cpuPipe=pipe}
+      (after,_,_) = pipeStep before memoryWord
+      expectedWord = fromMaybe 0 (C.decompress32 raw)
+      expected = (fetchedWord (ramBase,ramBase+2) expectedWord) {fRaw=resize raw,fSize=2}
+  cpuReadIndices after === (fromIntegral rs1,fromIntegral rs2)
+  pD (cpuPipe after) === Just decoded
+  pF (cpuPipe after) === Just expected
+  pFCount (cpuPipe after) === 1
+  -- A full F FIFO can let D consume its head without making A depend on
+  -- that same cycle's D readiness. Its payload remains in place; only the
+  -- read pointer changes. A retries on the next cycle's registered space.
+  let full = pipe {pFQueue=decoded :> expected :> Nil,pFCount=2,pFWrite=0}
+      (popped,_,_) = pipeStep (before {cpuPipe=full}) memoryWord
+  pD (cpuPipe popped) === Just decoded
+  pF (cpuPipe popped) === Just expected
+  pFCount (cpuPipe popped) === 1
+  pA (cpuPipe popped) === Just aligned
+  pFQueue (cpuPipe popped) === pFQueue full
+  let reset = restartPipe (ramBase+14) (cpuPipe after)
+  (pA reset,pF reset,pD reset) === (Nothing,Nothing,Nothing)
+  pInstructionPc reset === ramBase+14
+
 simpleRiscGroup :: Group
 simpleRiscGroup =
   Group
     "SimpleRisc"
-    [ ("Compressed mret and FENCE.I discard stale halfwords", prop_compressed_handler_and_fence_i),
+    [ ("Frontend assembly, expansion and register reads have separate boundaries", prop_frontend_register_boundaries),
+      ("Registered decode hazards match arriving producer stages", prop_registered_decode_hazard),
+      ("Compressed mret and FENCE.I discard stale halfwords", prop_compressed_handler_and_fence_i),
       ("Compressed ALU stream matches independent RV32 interpreter", prop_compressed_alu_matches_reference),
       ("Compressed pipeline retains straight-line instruction throughput", prop_compressed_pipeline_word_bandwidth),
       ("Compressed mixed fetch, stores and pc+2 links", prop_compressed_mixed_fetch_and_links),

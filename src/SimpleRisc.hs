@@ -217,7 +217,10 @@ data MulDivUnit = MulDivUnit
     -- | Negate the high word (product high half or remainder) at the end.
     mdNegHi :: Bool,
     -- | The low word was zero before negation: the carry into the high word.
-    mdCarry :: Bool
+    mdCarry :: Bool,
+    -- | Registered at Prepare, so Finish's result mux does not decode the
+    -- global instruction register on the way to register-file writeback.
+    mdTakeLow :: Bool
   }
   deriving (Generic, NFDataX, Show, Eq)
 
@@ -380,7 +383,51 @@ data MemoryTarget = RamTarget | RomTarget | UartTxTarget | UartStatusTarget | Ua
   | ClintMsipTarget | ClintCompareLoTarget | ClintCompareHiTarget | ClintTimeLoTarget | ClintTimeHiTarget
   | PlicPriorityTarget | PlicPendingTarget | PlicEnableTarget | PlicThresholdTarget | PlicClaimTarget
   | UartControlTarget | IoTarget | UnmappedTarget
-  deriving (Generic, NFDataX, Show, Eq)
+  deriving (Generic, NFDataX, Show)
+
+-- GHC's derived equality for an enumeration uses dataToTag#, which Clash
+-- 1.8's Verilog backend cannot lower for a custom sum representation.
+-- Constructor matches preserve the custom decode-bit representation.
+instance Eq MemoryTarget where
+  a == b = case a of
+    RamTarget -> case b of RamTarget -> True; _ -> False
+    RomTarget -> case b of RomTarget -> True; _ -> False
+    UartTxTarget -> case b of UartTxTarget -> True; _ -> False
+    UartStatusTarget -> case b of UartStatusTarget -> True; _ -> False
+    UartRxTarget -> case b of UartRxTarget -> True; _ -> False
+    ExitTarget -> case b of ExitTarget -> True; _ -> False
+    BootCauseTarget -> case b of BootCauseTarget -> True; _ -> False
+    ClintMsipTarget -> case b of ClintMsipTarget -> True; _ -> False
+    ClintCompareLoTarget -> case b of ClintCompareLoTarget -> True; _ -> False
+    ClintCompareHiTarget -> case b of ClintCompareHiTarget -> True; _ -> False
+    ClintTimeLoTarget -> case b of ClintTimeLoTarget -> True; _ -> False
+    ClintTimeHiTarget -> case b of ClintTimeHiTarget -> True; _ -> False
+    PlicPriorityTarget -> case b of PlicPriorityTarget -> True; _ -> False
+    PlicPendingTarget -> case b of PlicPendingTarget -> True; _ -> False
+    PlicEnableTarget -> case b of PlicEnableTarget -> True; _ -> False
+    PlicThresholdTarget -> case b of PlicThresholdTarget -> True; _ -> False
+    PlicClaimTarget -> case b of PlicClaimTarget -> True; _ -> False
+    UartControlTarget -> case b of UartControlTarget -> True; _ -> False
+    IoTarget -> case b of IoTarget -> True; _ -> False
+    UnmappedTarget -> case b of UnmappedTarget -> True; _ -> False
+
+-- Each target retains its own decode bit. In particular testing RAM/ROM
+-- must not encode every peripheral through a binary priority tree first.
+{-# ANN module (DataReprAnn $(liftQ [t| MemoryTarget |]) 20
+  [ ConstrRepr 'RamTarget 1 1 [], ConstrRepr 'RomTarget 2 2 [],
+    ConstrRepr 'UartTxTarget 4 4 [], ConstrRepr 'UartStatusTarget 8 8 [],
+    ConstrRepr 'UartRxTarget 16 16 [], ConstrRepr 'ExitTarget 32 32 [],
+    ConstrRepr 'BootCauseTarget 64 64 [], ConstrRepr 'ClintMsipTarget 128 128 [],
+    ConstrRepr 'ClintCompareLoTarget 256 256 [], ConstrRepr 'ClintCompareHiTarget 512 512 [],
+    ConstrRepr 'ClintTimeLoTarget 1024 1024 [], ConstrRepr 'ClintTimeHiTarget 2048 2048 [],
+    ConstrRepr 'PlicPriorityTarget 4096 4096 [], ConstrRepr 'PlicPendingTarget 8192 8192 [],
+    ConstrRepr 'PlicEnableTarget 16384 16384 [], ConstrRepr 'PlicThresholdTarget 32768 32768 [],
+    ConstrRepr 'PlicClaimTarget 65536 65536 [], ConstrRepr 'UartControlTarget 131072 131072 [],
+    ConstrRepr 'IoTarget 262144 262144 [], ConstrRepr 'UnmappedTarget 524288 524288 []
+  ]) #-}
+
+isRamTarget :: MemoryTarget -> Bool
+isRamTarget target = case target of RamTarget -> True; _ -> False
 
 -- Single outstanding data transaction. The CPU registers the request and
 -- waits for a registered response; the bus alone owns device side effects.
@@ -954,7 +1001,7 @@ initialMachine =
       cpuInstret = initialCounter,
       cpuCountRetirement = False,
       cpuCounterWrite = Nothing,
-      cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False,
+      cpuMulDiv = MulDivUnit MdPrepare 0 0 0 0 False False False False,
       systemBus = initialBus,
       cpuBusRequest = Nothing,
       cpuBusResponse = Nothing,
@@ -1594,12 +1641,28 @@ data Pipe = Pipe
     -- | Words queued or in flight, kept as a register so fetch decides
     -- from it directly.
     pOutstanding :: Unsigned 3,
+    -- | Raw aligned instruction. Assembly of a cross-word instruction
+    -- ends here, before RV32C expansion. fWord/fRaw both hold the original
+    -- bits; fSize and fPc preserve precise compressed traps and links.
+    pA :: Maybe Fetched,
+    -- | Expanded instructions and source-use bits, in a two-entry FIFO.
+    -- A's readiness reads only its registered count; D's hazard/backpressure
+    -- cannot feed back into the wide A/F payload enables. The registered
+    -- head drives RF addresses and enters D on the same edge.
+    pFQueue :: Vec 2 Fetched,
+    pFRead :: Index 2,
+    pFWrite :: Index 2,
+    pFCount :: Unsigned 2,
     pD :: Maybe Fetched,
     -- | Decode's operands: on its first cycle (pDFresh) they come from the
     -- register file, read the cycle before at the entering word's sources;
     -- while it waits, from here, refreshed by forwarding.
     pDOperands :: (Word32, Word32),
     pDFresh :: Bool,
+    -- | D's hazard against these registered producer stages, calculated
+    -- from their next state on the preceding edge. Comparisons terminate
+    -- here rather than driving the wide D payload enable in the same cycle.
+    pDBlocked :: Bool,
     pE1 :: Maybe ExecuteOne,
     pE2 :: Maybe ExecuteTwo,
     pM :: Maybe MemoryStage,
@@ -1612,8 +1675,13 @@ data Pipe = Pipe
   deriving (Generic, NFDataX)
 
 emptyPipe :: Pipe
-emptyPipe = Pipe 0 0 (repeat Nothing) (repeat (Fetched 0 0 False False 0 0 4)) 0 0 0 Nothing (0, 0) False Nothing Nothing Nothing Nothing
+emptyPipe = Pipe 0 0 (repeat Nothing) (repeat (Fetched 0 0 False False 0 0 4)) 0 0 0 Nothing (repeat (Fetched 0 0 False False 0 0 4)) 0 0 0 Nothing (0, 0) False False Nothing Nothing Nothing Nothing
   (repeat (BtbEntry False 0 0))
+
+-- | Expanded FIFO head, stable while D stalls. Data words are only written
+-- by A, so popping this head changes pointers rather than a wide shift mux.
+pF :: Pipe -> Maybe Fetched
+pF pipe = if pFCount pipe == 0 then Nothing else Just (pFQueue pipe !! pFRead pipe)
 
 -- | Empty every stage and fetch from @pc@. Only valid bits, pointers and
 -- the pc change: the stages' contents are don't-cares once empty.
@@ -1621,7 +1689,20 @@ restartPipe :: Word32 -> Pipe -> Pipe
 restartPipe pc pipe =
   pipe
     { pFetchPc = pc, pInstructionPc = pc, pInflight = repeat Nothing, pQueueRead = 0, pQueueWrite = 0, pOutstanding = 0,
-      pD = Nothing, pDFresh = False, pE1 = Nothing, pE2 = Nothing, pM = Nothing, pRedirect = Nothing }
+      pA = Nothing, pFRead = 0, pFWrite = 0, pFCount = 0, pD = Nothing, pDFresh = False, pDBlocked = False, pE1 = Nothing, pE2 = Nothing, pM = Nothing, pRedirect = Nothing }
+
+-- | The decode-stage dependency contract. E2 results wait until registered
+-- in M, keeping its ALU result mux out of decode's operand forwarding path.
+decodeHazard :: Maybe Fetched -> Maybe ExecuteOne -> Maybe ExecuteTwo -> Maybe MemoryStage -> Bool
+decodeHazard fetched one two memory = case fetched of
+  Nothing -> False
+  Just f ->
+    let rs1 = instructionRs1 (fWord f)
+        rs2 = instructionRs2 (fWord f)
+        conflicts r writing = writing && ((fUsesRs1 f && rs1 == r) || (fUsesRs2 f && rs2 == r))
+     in maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) one
+       || maybe False (\x -> conflicts (e2Rd x) (e2Writes x)) two
+       || maybe False (\m -> not (mFinal m) && conflicts (mRd m) (mWrites m)) memory
 
 -- | A multiply's operands as 33-bit signed values (sign- or zero-extended
 -- as MUL, MULH, MULHSU or MULHU needs), split into a signed high 17 bits
@@ -1648,9 +1729,10 @@ productHalf funct3 products =
       bits = bitCoerce total :: BitVector 66
    in if funct3 == 0 then unpack (slice d31 d0 bits) else unpack (slice d63 d32 bits)
 
--- | One cycle of the pipeline: fetch (up to four words outstanding), decode
--- and register read with forwarding, two execute stages, and the commit
--- stage. The explicit C variant uses the same queue as a raw word FIFO:
+-- | One cycle of the pipeline: fetch (up to four words outstanding), raw
+-- instruction assembly, compressed expansion/source predecode, decode and
+-- register read with forwarding, two execute stages, and the commit stage.
+-- The explicit C variant uses the same queue as a raw word FIFO:
 -- two compressed instructions can share one word, and a full-width instruction
 -- can combine the upper half with the next word's lower half. It predicts
 -- sequential instruction PCs (the word-indexed BTB remains enabled for IM).
@@ -1696,9 +1778,14 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
         Nothing -> False
       committedValue m
         | mLoad m = loadValue (mFunct3 m) (mOffset m) memoryWord
-        | mMultiply m = productHalf (mFunct3 m) (mProducts m)
         | mShift m = shiftResult (mFunct3 m) (if mArith m then 0x20 else 0) (mValue m) (fromIntegral (mAmount m .&. 0x1c))
         | otherwise = mValue m
+      -- Multiplication's wide carry chains end at a dedicated register,
+      -- before the common load/shift/ordinary writeback mux. A multiply
+      -- spends one extra M cycle here; its result then forwards as mValue.
+      heldMemory m
+        | mMultiply m = m {mWait = mWait m - 1, mValue = productHalf (mFunct3 m) (mProducts m), mMultiply = False, mFinal = True}
+        | otherwise = m {mWait = mWait m - 1}
       registerWriteNow = case pM pipe of
         Just m | mCommits && mWrites m -> Just (mRd m, committedValue m)
         _ -> Nothing
@@ -1756,11 +1843,16 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
                   KindFenceI -> FenceI
                   _ | taken && target .&. instructionAlignmentMask machine /= 0 -> Raise 0 target
                     | memory && misaligned -> Raise (if storing then 6 else 4) address
-                    | memory && decodeTarget address /= RamTarget -> Bus
+                    | memory && not (isRamTarget (decodeTarget address)) -> Bus
                     | otherwise -> Plain
             slow = case action of Plain -> False; FenceI -> False; _ -> True
-            load = not slow && case kind of KindLoad -> True; _ -> False
-            store = not slow && storing
+            -- A memory operation has only these four reasons to leave for
+            -- the phases. Select its fast-path enables directly rather than
+            -- through the general exception/action priority encoder.
+            plainMemory = e2Pc x .&. instructionAlignmentMask machine == 0
+              && not (e2FetchFault x) && not misaligned && isRamTarget (decodeTarget address)
+            load = plainMemory && case kind of KindLoad -> True; _ -> False
+            store = plainMemory && storing
             storeWord = store && funct3 == 2
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
             -- (MULH shares SLL's funct3; execShift marks it too)
@@ -1776,7 +1868,7 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
                 mMask = storeMask funct3 (resize address),
                 mShift = shifting, mArith = execArithmeticShift control, mAmount = e2Op2 x,
                 mMultiply = multiplying, mProducts = partialProducts funct3 (e2A x) (e2B x),
-                mWait = if load || (store && not storeWord && not (cpuExternalMemory machine)) then 2 else 0,
+                mWait = if load || (store && not storeWord && not (cpuExternalMemory machine)) then 2 else if multiplying then 1 else 0,
                 mAction = action, mWord = e2Word x, mA = e2A x, mB = e2B x, mAddress = address }
             actual = if taken then target else cLink comp
             control' = case kind of KindBranch -> True; KindJump -> True; _ -> False
@@ -1788,15 +1880,6 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
          in (stage, if actual /= e2Predicted x then Just actual else Nothing, training)
       -- (in a redirect cycle the stage holds a wrong-path instruction)
       flushing = pRedirect pipe
-      -- the result a forwarding instruction selects in this stage
-      e2Value x =
-        let control = e2Control x
-            comp = e2Computed x
-         in case execKind control of
-              KindJump -> cLink comp
-              _ | execLui control -> e2Imm x
-                | execAuipc control -> cTarget comp
-                | otherwise -> fromMaybe 0 (selectedAlu control (e2Candidates x) (e2AluCompare x))
       e2Moved = case pE2 pipe of
         Just x | e2Advance && isNothing flushing -> Just (e2Out x)
         _ -> Nothing
@@ -1825,10 +1908,7 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
                 e2B = b, e2Op2 = op2, e2Imm = imm,
                 e2A = a, e2Word = e1Word x, e2Raw = e1Raw x,
                 e2Rd = e1Rd x, e2Writes = e1Writes x, e2FetchFault = e1FetchFault x, e2FaultValue = e1FaultValue x,
-                e2Forwards = e1Writes x && case execKind control of
-                  KindJump -> True
-                  KindAlu -> not (execShift control) && not (execMulDiv control)
-                  _ -> False }
+                e2Forwards = False }
       e1Advance = isNothing (pE2 pipe) || e2Advance
       -- Decode and register read ---------------------------------------------
       d = pD pipe
@@ -1849,15 +1929,8 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
             rs1 = instructionRs1 word
             rs2 = instructionRs2 word
             rd = instructionRd word
-            usesRs1 = fUsesRs1 f
-            usesRs2 = fUsesRs2 f
-            conflicts r producing = producing && ((usesRs1 && rs1 == r) || (usesRs2 && rs2 == r))
-            hazard = maybe False (\x -> conflicts (e1Rd x) (e1Writes x)) (pE1 pipe)
-              || maybe False (\x -> not (e2Forwards x) && conflicts (e2Rd x) (e2Writes x)) (pE2 pipe)
-              || maybe False (\m -> not (mFinal m) && conflicts (mRd m) (mWrites m)) (pM pipe)
-            operand r current = case pE2 pipe of
-              Just x | e2Forwards x && e2Rd x == r -> e2Value x
-              _ -> case pM pipe of
+            hazard = pDBlocked pipe
+            operand r current = case pM pipe of
                Just m | mWrites m && mRd m == r -> mValue m
                _ -> case cpuPendingWrite machine of
                 Just (w, v) | w /= 0 && w == r -> v
@@ -1876,6 +1949,17 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
         Just f -> e1Free && not (let (_, hazard, _) = decodeOut f in hazard)
         Nothing -> False
       dFree = isNothing d || dAdvance
+      -- These two elastic stages separate FIFO word/halfword selection,
+      -- RV32C expansion, and the registered register-file address. Source
+      -- addresses depend only on the registered F FIFO head, never on
+      -- raw fetch pointers, the decompressor or ready/stall decisions.
+      fFree = pFCount pipe < 2
+      aFree = isNothing (pA pipe) || fFree
+      fPush = fFree && isJust (pA pipe)
+      fPop = dFree && pFCount pipe /= 0
+      expand f =
+        let word = if fSize f == 2 then fromMaybe 0 (C.decompress32 (resize (fRaw f))) else fRaw f
+         in (fetchedWord (fPc f, fPredicted f) word) {fRaw = fRaw f, fSize = fSize f}
       -- Fetch ------------------------------------------------------------------
       inflight = pInflight pipe
       arrival = (`fetchedWord` memoryWord) <$> last inflight
@@ -1884,8 +1968,8 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
       waiting = writePointer /= readPointer
       slot i = fromIntegral (i .&. 3) :: Index 4
       -- The arriving word is written at the write pointer regardless; it
-      -- counts as queued unless it went straight to decode.
-      bypass = dFree && not waiting
+      -- counts as queued unless it went straight to raw assembly.
+      bypass = aFree && not waiting
       queue' = case arrival of
         Just a -> replace (slot writePointer) a (pQueue pipe)
         Nothing -> pQueue pipe
@@ -1900,32 +1984,36 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
         Just h ->
           let half = resize (fWord h `shiftR` (if testBit instructionPc 1 then 16 else 0)) :: Unsigned 16
               short = half .&. 3 /= 3
-              crossFault = not (fetchable (decodeTarget (instructionPc+2)))
               raw = if short then resize half else if not (testBit instructionPc 1) then fWord h
                     else ((maybe 0 fWord secondWord .&. 0xffff) `shiftL` 16) .|. resize half
-              word = if short then fromMaybe 0 (C.decompress32 half) else raw
               size = if short then 2 else 4
-              decoded = fetchedWord (instructionPc,instructionPc+resize size) word
-           in if not short && testBit instructionPc 1 && isNothing secondWord && not crossFault then Nothing
-              else Just decoded {fRaw=raw,fSize=size}
-      cConsume = dFree && isJust assembled && (testBit instructionPc 1 || maybe False ((==4) . fSize) assembled)
+              -- Fetch always supplies a word, including a harmless dummy
+              -- outside the memory map. Wait for it before assembly; D
+              -- raises the precise second-half access fault. This keeps a
+              -- full address-map decode out of FIFO consumption/accounting.
+           in if not short && testBit instructionPc 1 && isNothing secondWord then Nothing
+              else Just (Fetched instructionPc raw False False (instructionPc+resize size) raw size)
+      cConsume = aFree && isJust assembled && (testBit instructionPc 1 || maybe False ((==4) . fSize) assembled)
       writePointer'
         | cpuCompressed machine = if isJust arrival then writePointer+1 else writePointer
         | otherwise = if isJust arrival && not bypass then writePointer + 1 else writePointer
       readPointer'
         | cpuCompressed machine = if cConsume then readPointer+1 else readPointer
-        | otherwise = if dFree && waiting then readPointer + 1 else readPointer
-      nextD
-        | not dFree = d
+        | otherwise = if aFree && waiting then readPointer + 1 else readPointer
+      nextA
+        | not aFree = pA pipe
         | cpuCompressed machine = assembled
         | waiting = Just (pQueue pipe !! slot readPointer)
         | otherwise = arrival
-      -- The register file is read for the word that would enter decode
-      -- next (the queue head, else the arriving word), whether or not it
-      -- does: no stall decision reaches the read address.
-      entering = if cpuCompressed machine then maybe 0 fWord assembled else if waiting then fWord (pQueue pipe !! slot readPointer) else memoryWord
+      fQueue' = case pA pipe of
+        Just f | fFree -> replace (pFWrite pipe) (expand f) (pFQueue pipe)
+        _ -> pFQueue pipe
+      nextD = if dFree then pF pipe else d
+      -- Read for the registered word that would enter D next, whether or
+      -- not it does: no stall decision reaches the read address.
+      entering = maybe 0 fWord (pF pipe)
       enteringReads = (instructionRs1 entering, instructionRs2 entering)
-      leaving = if cpuCompressed machine then (if cConsume then 1 else 0) else (if dFree && waiting then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
+      leaving = if cpuCompressed machine then (if cConsume then 1 else 0) else (if aFree && waiting then 1 else 0) + (if bypass && isJust arrival then 1 else 0) :: Unsigned 3
       -- Words queued or in flight never exceed the queue (decided from
       -- registers); the port is free unless a store writes or a read waits.
       -- A redirect fetches its target from the next cycle.
@@ -1938,6 +2026,15 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
       hit = not (cpuCompressed machine) && isNothing flushing && bValid entry && bTag entry == btbTag (pFetchPc pipe)
       predicted = if hit then bTarget entry else (if cpuCompressed machine then fetchPc .&. complement 3 else fetchPc) + 4
       issued = if issue then Just (fetchPc, predicted) else Nothing
+      nextE1 = case pE1 pipe of
+        Just x | not e1Advance -> Just x
+        _ -> if dAdvance then (\f -> let (stage, _, _) = decodeOut f in stage) <$> d else Nothing
+      nextE2 = case pE2 pipe of
+        Just x | not e2Advance -> Just x
+        _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing
+      nextM = case pM pipe of
+        Just m | mHold -> Just (heldMemory m)
+        _ -> (\(stage, _, _) -> stage) <$> e2Moved
       pipe'
         | handover = restartPipe 0 pipe
         | fencing = restartPipe (maybe 0 mNext (pM pipe)) pipe
@@ -1946,29 +2043,29 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
               { pInstructionPc = fetchPc, pInflight = issued :> Nothing :> Nothing :> Nil,
                 pOutstanding = if issue then 1 else 0,
                 pM = case pM pipe of
-                  Just m | mHold -> Just m {mWait = mWait m - 1}
+                  Just m | mHold -> Just (heldMemory m)
                   _ -> Nothing }
         | otherwise =
               Pipe
               { pFetchPc = if issue then predicted else fetchPc,
-                pInstructionPc = if cpuCompressed machine && dFree && isJust assembled then instructionPc + resize (maybe 4 fSize assembled) else pInstructionPc pipe,
+                pInstructionPc = if cpuCompressed machine && aFree && isJust assembled then instructionPc + resize (maybe 4 fSize assembled) else pInstructionPc pipe,
                 pInflight = issued :> init inflight,
                 pQueue = queue', pQueueRead = readPointer', pQueueWrite = writePointer',
                 pOutstanding = pOutstanding pipe + (if issue then 1 else 0) - leaving,
+                pA = nextA,
+                pFQueue = fQueue',
+                pFRead = if fPop then (if pFRead pipe == 0 then 1 else 0) else pFRead pipe,
+                pFWrite = if fPush then (if pFWrite pipe == 0 then 1 else 0) else pFWrite pipe,
+                pFCount = pFCount pipe + (if fPush then 1 else 0) - (if fPop then 1 else 0),
                 pD = nextD,
                 pDOperands = case d of
                   Just f -> let (_, _, operands) = decodeOut f in operands
                   Nothing -> pDOperands pipe,
                 pDFresh = dFree,
-                pE1 = case pE1 pipe of
-                  Just x | not e1Advance -> Just x
-                  _ -> if dAdvance then (\f -> let (stage, _, _) = decodeOut f in stage) <$> d else Nothing,
-                pE2 = case pE2 pipe of
-                  Just x | not e2Advance -> Just x
-                  _ -> if e1Advance then e1Out <$> pE1 pipe else Nothing,
-                pM = case pM pipe of
-                  Just m | mHold -> Just m {mWait = mWait m - 1}
-                  _ -> (\(stage, _, _) -> stage) <$> e2Moved,
+                pDBlocked = decodeHazard nextD nextE1 nextE2 nextM,
+                pE1 = nextE1,
+                pE2 = nextE2,
+                pM = nextM,
                 pRedirect = redirect,
                 pBtb = btb'
               }
@@ -2785,7 +2882,7 @@ romAddress :: Word32 -> Bool
 romAddress address = address .&. 0xffff_f800 == 0
 
 fetchable :: MemoryTarget -> Bool
-fetchable target = target == RamTarget || target == RomTarget
+fetchable target = case target of RamTarget -> True; RomTarget -> True; _ -> False
 
 -- SiFive/QEMU-style finisher command register. DONE carries no status payload.
 exitDevice :: Word32
@@ -2934,7 +3031,7 @@ mulDivStep :: BitVector 3 -> Word32 -> Word32 -> MulDivUnit -> Either MulDivUnit
 mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
   MdPrepare
     -- Division by zero: quotient all ones, remainder the dividend.
-    | isDiv && b == 0 -> Left unit {mdStep = MdFinish, mdLo = maxBound, mdHi = a}
+    | isDiv && b == 0 -> Left unit {mdStep = MdFinish, mdLo = maxBound, mdHi = a, mdTakeLow = takeLow}
     | otherwise ->
         let magnitude negative x = if negative then negate x else x
          in Left
@@ -2946,7 +3043,8 @@ mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
                   mdTotal = 0,
                   mdNegLo = aNegative /= bNegative,
                   mdNegHi = if isDiv then aNegative else aNegative /= bNegative,
-                  mdCarry = False
+                  mdCarry = False,
+                  mdTakeLow = takeLow
                 }
   MdLoop i ->
     Left unit {mdStep = MdCommit i, mdTotal = if isDiv then divideDifference else multiplyTotal}
@@ -2958,8 +3056,9 @@ mulDivStep funct3 a b unit@MulDivUnit {..} = case mdStep of
   -- half is complement + the carry out of the low half.
   MdFixHi -> Left unit {mdStep = MdFinish, mdHi = if mdNegHi then complement mdHi + boolWord (isDiv || mdCarry) else mdHi}
   -- MUL, DIV and DIVU take the low word; MULH*, REM and REMU the high word.
-  MdFinish -> Right (if funct3 == 0b000 || funct3 == 0b100 || funct3 == 0b101 then mdLo else mdHi)
+  MdFinish -> Right (if mdTakeLow then mdLo else mdHi)
   where
+    takeLow = funct3 == 0b000 || funct3 == 0b100 || funct3 == 0b101
     isDiv = testBit funct3 2
     -- MULH, MULHSU, DIV and REM treat rs1 as signed; MULH, DIV and REM rs2.
     aSigned = funct3 == 0b001 || funct3 == 0b010 || funct3 == 0b100 || funct3 == 0b110

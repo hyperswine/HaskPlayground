@@ -7,7 +7,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 | Design | Source | Build script | Clock |
 |---|---|---|---|
 | SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 78 MHz (placement mode 2) |
-| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | Corrected IM at 54 MHz; IMC at 27/48 MHz; six FP-RISC stress programs each |
+| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | IMC CPU 72 MHz / SDRAM 54 MHz passes FP-RISC + SD; 108/54 MHz fails; earlier IM at 54 MHz and IMC at 27/48 MHz |
 | Earlier serial SDRAM core | `src/SdramSimpleRisc.hs` | `sdram/build.sh serial` (Gowin) | cached 66 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -373,6 +373,12 @@ at 27/48 MHz, including six FP-RISC stress programs. Its first board-loader
 failure exposed a one-clock-late SDRAM burst capture and pin model. Four-beat
 variants now use a 135-degree SDRAM clock. The report separates
 physical results, timing candidates and remaining limits.
+The [split-clock experiment](sdram/CLOCKS-2026-10-18.md) now passes vendor
+timing and all 12 physical FP-RISC/SD cases at 72 MHz CPU / 54 MHz SDRAM.
+The 108/54 MHz trial fails timing and compressed-instruction execution.
+The new 72 MHz classifier takes 36.1% longer than the prior 48 MHz image;
+the timing margin is only 3 ps. See the report for the remaining CPU paths,
+the larger classifier's guest-heap limit and the SD file evidence.
 The pipeline's [microSD SPI byte port](sdram/SD-SPI-2026-10-18.md) is mapped at
 `0x10001000`, with capability `0x53445031` at `+0x0c`. SPI DMA remains limited
 to the separate BRAM image.

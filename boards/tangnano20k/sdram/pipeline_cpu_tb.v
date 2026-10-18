@@ -5,6 +5,7 @@ module pipeline_cpu_tb #(
  parameter LOADER_TEST=0,
  parameter UART_BIT=868,
  parameter PIN_MODEL=0,
+ parameter CDC_BRIDGE=0,
  parameter LOADER_DUMP=0,
  parameter LOADER_EXTENDED=0,
  parameter PIN_FREQ_MHZ=48,
@@ -13,30 +14,54 @@ module pipeline_cpu_tb #(
 );
  localparam STATUS=21'h180000,BOOT_COUNT=21'h1ffc00;
  localparam COUNTER_LINE=21'h140000,LONG_LINE=21'h0c0000;
- localparam real CLOCK_NS=PIN_MODEL ? 1000.0/PIN_FREQ_MHZ:10.0;
+ localparam real CLOCK_NS=PIN_MODEL ? 1000.0/PIN_FREQ_MHZ/(CDC_BRIDGE ? 2.0:1.0):10.0;
+ localparam real MEMORY_CLOCK_NS=CLOCK_NS*(CDC_BRIDGE ? 2.0:1.0);
  reg clk=0;always #(CLOCK_NS/2.0) clk=~clk;
  reg reset=1,uart_rx=1;
+ // The optional mailbox leg uses a deliberately offset memory clock.
+ // Resets share assertion and release synchronously in each domain.
+ reg slower_clk=0;
+ initial begin #(CLOCK_NS*0.313);forever #CLOCK_NS slower_clk=~slower_clk;end
+ wire backend_clk=CDC_BRIDGE ? slower_clk:clk;
+ reg [1:0] cpu_reset_pipe=3,mem_reset_pipe=3;
+ always @(posedge clk or posedge reset)if(reset)cpu_reset_pipe<=3;else cpu_reset_pipe<={cpu_reset_pipe[0],1'b0};
+ always @(posedge backend_clk or posedge reset)if(reset)mem_reset_pipe<=3;else mem_reset_pipe<={mem_reset_pipe[0],1'b0};
+ wire backend_reset=CDC_BRIDGE ? mem_reset_pipe[1]:reset;
+ wire core_reset=CDC_BRIDGE ? cpu_reset_pipe[1]:reset;
  wire uart_tx,hold_cpu,cpu_write;
  wire sd_sck,sd_mosi,sd_cs;
  wire [21:0] cpu_address;wire [31:0] cpu_wdata,cpu_rdata;
  wire [3:0] cpu_mask;
- sdram_pipeline_risc cpu(.clk(clk),.reset(reset),.enable(1'b1),
+ sdram_pipeline_risc cpu(.clk(clk),.reset(core_reset),.enable(1'b1),
    .uart_rx(uart_rx),.uart_tx(uart_tx),.memory_data(cpu_rdata),.memory_hold(hold_cpu),
    .memory_address(cpu_address),.memory_write(cpu_write),.memory_wdata(cpu_wdata),.memory_mask(cpu_mask),
    .sd_miso(sd_mosi),.sd_sck(sd_sck),.sd_mosi(sd_mosi),.sd_cs(sd_cs));
  wire req,write,ready;wire [20:0] address;wire [31:0] wdata;wire [3:0] mask;
  wire done,valid;wire [31:0] rdata;wire [1:0] word_index;
+ wire c_req,c_write,c_ready,c_done,c_valid;
+ wire [20:0] c_address;wire [31:0] c_wdata,c_rdata;wire [3:0] c_mask;wire [1:0] c_word_index;
  reg fake_done=0,fake_valid=0;reg [31:0] fake_rdata=0;reg [1:0] fake_word_index=0;
- sdram_pipeline_cache #(.ROM_FILE(ROM_FILE)) cache(clk,reset,
+ sdram_pipeline_cache #(.ROM_FILE(ROM_FILE)) cache(clk,core_reset,
    cpu_address,cpu_write,cpu_wdata,cpu_mask,hold_cpu,cpu_rdata,
-   req,write,address,wdata,mask,ready,done,rdata,valid,word_index);
+   c_req,c_write,c_address,c_wdata,c_mask,c_ready,c_done,c_rdata,c_valid,c_word_index);
+ generate if(CDC_BRIDGE)begin: clock_crossing
+   sdram_clock_bridge bridge(.cpu_clk(clk),.cpu_reset(core_reset),
+     .cpu_req(c_req),.cpu_write(c_write),.cpu_address(c_address),.cpu_wdata(c_wdata),.cpu_mask(c_mask),
+     .cpu_ready(c_ready),.cpu_done(c_done),.cpu_rdata(c_rdata),.cpu_word_valid(c_valid),.cpu_word_index(c_word_index),
+     .mem_clk(backend_clk),.mem_reset(backend_reset),
+     .mem_req(req),.mem_write(write),.mem_address(address),.mem_wdata(wdata),.mem_mask(mask),
+     .mem_ready(ready),.mem_done(done),.mem_rdata(rdata),.mem_word_valid(valid),.mem_word_index(word_index));
+ end else begin: common_clock
+   assign req=c_req;assign write=c_write;assign address=c_address;assign wdata=c_wdata;assign mask=c_mask;
+   assign c_ready=ready;assign c_done=done;assign c_rdata=rdata;assign c_valid=valid;assign c_word_index=word_index;
+ end endgenerate
 
  reg [31:0] ram[0:2097151];
  reg [31:0] expected_image[0:16383];
  integer i,words,send_index;reg [4095:0] image_file;
  reg probe_finished=0,verify_finished=0;
  reg [31:0] expected_xor=0;
- integer tick=0,delay=0,phase=0,reads=0,writes=0,held_clocks=0;
+ integer tick=0,backend_tick=0,delay=0,phase=0,reads=0,writes=0,held_clocks=0;
  integer long_held=0,ready_stalls=0,markers=0,quiet=0;
  reg saved_write=0,long_seen=0,break_sent=0,corrupt=0;
  reg [20:0] saved_address=0;reg [31:0] saved_data=0;reg [3:0] saved_mask=0;
@@ -47,14 +72,15 @@ module pipeline_cpu_tb #(
    if(!reset && hold_cpu && long_seen && !break_sent)long_held<=long_held+1;
    if(req && !ready)ready_stalls<=ready_stalls+1;
  end
+ always @(posedge backend_clk)backend_tick<=backend_tick+1;
  generate if(!PIN_MODEL)begin: delayed_backend
- assign ready=!reset && delay==0 && phase==0 && tick%7!=0;
+ assign ready=!backend_reset && delay==0 && phase==0 && backend_tick%7!=0;
  assign done=fake_done;assign valid=fake_valid;assign rdata=fake_rdata;assign word_index=fake_word_index;
- always @(posedge clk)begin
+ always @(posedge backend_clk)begin
    fake_done<=0;fake_valid<=0;
    if(req && ready)begin
      saved_write<=write;saved_address<=address;saved_data<=wdata;saved_mask<=mask;
-     delay<=12+tick%13;
+     delay<=12+backend_tick%13;
      if(write)writes<=writes+1;
      else begin
        reads<=reads+1;
@@ -73,7 +99,7 @@ module pipeline_cpu_tb #(
          fake_done<=1;
        end else phase<=1;
      end
-   end else if(phase!=0 && tick%3!=0)begin
+   end else if(phase!=0 && backend_tick%3!=0)begin
      // Uneven gaps between each beat exercise valid/index/data independently.
      if(phase<=4)begin
        fake_rdata<=ram[saved_address+phase-1] ^ ((corrupt && saved_address==COUNTER_LINE && phase==1) ? 1:0);
@@ -87,8 +113,8 @@ module pipeline_cpu_tb #(
    reg phase_clk=0;
    // Transport the core clock edges, including phases exceeding 180 degrees.
    // A delayed continuous assignment would reject pulses at those delays.
-   always @(clk)phase_clk<=#(CLOCK_NS*PIN_PHASE_DEGREES/360.0)clk;
-   sdram_burst_memory #(.FREQ(PIN_FREQ_MHZ*1000000)) mem(clk,phase_clk,reset,req,write,address,wdata,mask,
+   always @(backend_clk)phase_clk<=#(MEMORY_CLOCK_NS*PIN_PHASE_DEGREES/360.0)backend_clk;
+   sdram_burst_memory #(.FREQ(PIN_FREQ_MHZ*1000000)) mem(backend_clk,phase_clk,backend_reset,req,write,address,wdata,mask,
      ready,done,rdata,valid,word_index,sclk,cke,cs_n,cas_n,ras_n,we_n,dqm,sa,ba,dq);
    reg [10:0] open_row[0:3];reg [3:0] bank_open=0;
    reg [10:0] mode=0;reg configured=0;
@@ -99,12 +125,12 @@ module pipeline_cpu_tb #(
    integer read_delay=0,read_beat=0,pin_lane,physical_word;
    reg active_read=0;reg [20:0] read_base;reg [1:0] read_bank;
    reg [20:0] capture_base;
-   always @(posedge clk)begin
+   always @(posedge backend_clk)begin
      if(req && ready)begin
        if(write)writes<=writes+1;
        else begin reads<=reads+1;capture_base<=address;end
      end
-     if(!reset && valid && rdata!==ram[capture_base+word_index])
+     if(!backend_reset && valid && rdata!==ram[capture_base+word_index])
        $fatal(1,"SDRAM capture word %h beat%0d=%h expected=%h",capture_base,word_index,rdata,ram[capture_base+word_index]);
    end
    // Micron 256MSDRAM_G p13, CAS Latency: after READ at edge N, DQ starts
@@ -113,7 +139,7 @@ module pipeline_cpu_tb #(
    // https://people.eecs.berkeley.edu/~kubitron/courses/cs152-S04/handouts/256MSDRAM_G.pdf
    // Consecutive beats and real completion replace the gapped backend.
    always @(posedge sclk)begin
-     if(reset)begin active_read=0;read_delay=0;read_beat=0;drive=0;bank_open=0;configured=0;mode=0;end
+     if(backend_reset)begin active_read=0;read_delay=0;read_beat=0;drive=0;bank_open=0;configured=0;mode=0;end
      else begin
        if(cke!==1 || cs_n!==0)$fatal(1,"SDRAM select/CKE");
        if(active_read)begin

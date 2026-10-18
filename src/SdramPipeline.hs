@@ -29,10 +29,45 @@ type Input = (R.Word32,Bool,Maybe R.Byte,Bool,Bool,R.Word32,R.Word32,Maybe R.Wor
 type Output = (Address,Bool,R.Word32,BitVector 4,Maybe R.Byte)
 
 physical :: R.Word32 -> Address
-physical address = case decodeTarget address of
-  R.RamTarget -> resize (address `shiftR` 2) .&. 0x1f_ffff
-  R.RomTarget -> 0x20_0000 .|. resize ((address `shiftR` 2) .&. 0x1ff)
-  _ -> 0x20_0000 -- idle/device accesses never reach external RAM
+physical address
+  | address .&. 0xff80_0000 == 0x8000_0000 = resize (address `shiftR` 2) .&. 0x1f_ffff
+  | R.romAddress address = 0x20_0000 .|. resize ((address `shiftR` 2) .&. 0x1ff)
+  | otherwise = 0x20_0000 -- idle/device accesses never reach external RAM
+
+-- The fast port's full address and byte lanes are already registers in
+-- Machine. They are captured on the same edge as the old cache a0 stage.
+-- Keep only the other request fields here, then look up those registers
+-- directly. In particular no reset/next-Machine mux drives the cache address.
+-- The cache now owns the two remaining logical stages, so the CPU still sees
+-- a three-logical-clock port. A hold freezes this slot with both cache stages.
+data RequestSlot = RequestSlot
+  { slotBusActive :: Bool, slotBusAddress :: R.Word32, slotFast :: Bool,
+    slotWrite :: Bool, slotData :: R.Word32 }
+  deriving (Generic,NFDataX,Show,Eq)
+
+initialRequestSlot :: RequestSlot
+initialRequestSlot = RequestSlot False 0 False False 0
+
+requestSlot :: R.Machine -> Output -> RequestSlot
+requestSlot machine (_,writing,value,_,_) = RequestSlot active busAddress (R.cpuFast machine) writing value
+ where
+ bus=R.systemBus machine
+ active=case R.busPhase bus of R.BusIdle -> isJust (R.cpuBusRequest machine); _ -> True
+ busAddress=R.busAddress (R.busRequest bus)
+
+requestAddress :: R.Machine -> RequestSlot -> Address
+requestAddress machine RequestSlot{..} = physical selected
+ where
+ selected
+   | slotBusActive = slotBusAddress
+   | slotWrite = R.cpuPortWriteAddressFull machine
+   | slotFast = R.cpuPortAddressFull machine
+   | otherwise = 0
+
+requestMask :: R.Machine -> RequestSlot -> BitVector 4
+requestMask machine slot
+  | slotBusActive slot || not (slotWrite slot) = 15
+  | otherwise = R.cpuPortByteEnable machine
 
 step :: R.Machine -> Input -> (R.Machine,Output)
 step machine (memoryWord,held,received,txReady,emergency,a,b,ioAnswer)
@@ -127,4 +162,9 @@ circuit serialRx memoryData memoryHeld sdMiso = (serialTx,address,write,wdata,ma
    (bundle (R.ioRequest <$> machine,R.clearRegisters <$> machine,memoryHeld,miso)))
  (sck,mosi,cs)=unbundle ioPins
  stepped=step <$> machine <*> bundle (memoryData,memoryHeld,received,txReady,emergency,rfA,rfB,ioAnswer)
- (address,write,wdata,mask,txNow)=unbundle (snd <$> stepped)
+ request=regEn initialRequestSlot (not <$> memoryHeld) (requestSlot <$> machine <*> (snd <$> stepped))
+ address=requestAddress <$> machine <*> request
+ write=slotWrite <$> request
+ wdata=slotData <$> request
+ mask=requestMask <$> machine <*> request
+ txNow=(\(_,_,_,_,tx) -> tx) <$> (snd <$> stepped)

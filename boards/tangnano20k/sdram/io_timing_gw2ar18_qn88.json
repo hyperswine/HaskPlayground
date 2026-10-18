@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "device": "GW2AR-LV18QN88C8/I7",
+  "reference_plane": "fpga_sdram_io_boundary",
+  "qualification": {
+    "status": "pending_vendor",
+    "source": null,
+    "operating_conditions": null,
+    "boundary_accounting": null,
+    "cas_latency": 2,
+    "burst_words": 4,
+    "min_mhz": null,
+    "max_mhz": null
+  },
+  "reported_features": {
+    "access_time_ns": 5.4,
+    "source": "Gowin DS226-2.7E section 2.2.1",
+    "url": "https://cdn.gowinsemi.com.cn/DS226E.pdf",
+    "note": "Feature listing only. Not substituted for a qualified tAC maximum or any other AC bound."
+  },
+  "parameters_ns": {
+    "t_ac_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_oh_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_cmd_setup": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_cmd_hold": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_data_setup": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_data_hold": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_dqm_setup": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "t_dqm_hold": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "clock_flight_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "clock_flight_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "read_flight_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "read_flight_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "command_flight_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "command_flight_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "write_flight_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "write_flight_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "dqm_flight_min": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "dqm_flight_max": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "setup_uncertainty": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    },
+    "hold_uncertainty": {
+      "ns": null,
+      "status": "missing",
+      "source": null
+    }
+  },
+  "unresolved_outside_static_sdc": [
+    "SDRAM tLZ/tHZ and output-enable bus turnaround",
+    "Clock pulse widths and duty-cycle bounds",
+    "Controller command spacing and refresh timing",
+    "Routed input/output path coverage and generated-clock propagation"
+  ]
+}

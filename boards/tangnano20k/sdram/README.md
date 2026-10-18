@@ -1,5 +1,20 @@
 # Tang Nano 20K SDRAM experiment
 
+The [I/O timing audit](SDRAM-IO-2026-10-18.md) records the missing embedded
+memory bounds, a sourced constraint generator and the strict model gate.
+Current builds explicitly distinguish internal STA from full SDRAM I/O
+signoff; the supplied QN88 model remains incomplete.
+`SDRAM_PHASE_DEGREES` selects an experimental memory-clock phase in
+22.5-degree steps. The [phase checks](SDRAM-IO-2026-10-18.md#local-phase-experiments-while-waiting-for-the-vendor)
+verify PLL/SDC alignment and functional read-window sensitivity; they do not
+qualify the electrical interface.
+
+The [physical 54 MHz sweep](SDRAM-PHASE-SWEEP-2026-10-18.md) tested every
+22.5-degree step: 90, 112.5, 135 and 157.5 degrees passed all 8 MiB twice;
+all other steps failed despite identical passing internal STA. The tested
+CPU72/SDRAM54 image at 135 degrees was restored and FP-RISC numeric checks
+passed. This is an ambient board result, with full I/O signoff still pending.
+
 The board's 64-Mbit, 32-bit SDR SDRAM is usable as 8 MiB of main memory.
 The current [pipelined experiment](PIPELINE-2026-10-16.md) uses a unified 2 KiB
 cache with 16-byte lines, four posted masked writes and four-word SDRAM bursts.

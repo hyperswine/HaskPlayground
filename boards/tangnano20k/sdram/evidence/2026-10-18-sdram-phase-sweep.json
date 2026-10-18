@@ -1,0 +1,1730 @@
+{
+  "date": "2026-10-18",
+  "status": "physical_phase_sweep_complete",
+  "frequency_mhz": 54,
+  "board": "Tang Nano 20K / GW2AR-LV18QN88C8/I7",
+  "vendor_tool": "Gowin V1.9.12.04",
+  "configuration": "standalone full-capacity tester, CAS2, burst4, 22.5-degree PLL steps",
+  "full_sdram_io_signoff": false,
+  "fpga_flash_written": false,
+  "sd_card_accessed": false,
+  "conditions": "Connected board at ambient conditions; temperature, supply and jitter not instrumented.",
+  "passes_degrees": [
+    90,
+    112.5,
+    135,
+    157.5
+  ],
+  "limitations": [
+    "Single physical board; no PVT qualification",
+    "Internal STA only; SDRAM min/max I/O bounds remain pending",
+    "FPGA SRAM reconfiguration retains memory contents; failure counts depend on preceding memory contents and test order",
+    "Tester halts on first failing pattern; failed phases do not complete the later patterns",
+    "CPU image has different placement; standalone pass window does not transfer as a quantified CPU I/O margin"
+  ],
+  "routed_phase_verification": [
+    {
+      "phase_degrees": 0.0,
+      "routed_pll_phase_bits": "0000",
+      "reported_clock_rise_ns": 0.0,
+      "routed_netlist_sha256": "4bd88333924d3291662196765b49458df0c2ca9a1df04f6b32769f1bbc64541c",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 22.5,
+      "routed_pll_phase_bits": "0001",
+      "reported_clock_rise_ns": 1.157,
+      "routed_netlist_sha256": "3374cf70fe1463f029db5139b908fde0a1576665c6166334b528e49c7cab1d4f",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 45.0,
+      "routed_pll_phase_bits": "0010",
+      "reported_clock_rise_ns": 2.315,
+      "routed_netlist_sha256": "ce3257a238ebc48bc7ffa5727858535e2c28c51074668bb13a4fa1cf79f1c2cc",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 67.5,
+      "routed_pll_phase_bits": "0011",
+      "reported_clock_rise_ns": 3.472,
+      "routed_netlist_sha256": "feffbe9f5154b2a7de0e8422d764c898a6c0dcd82d1e4fbde0a4fe7668377708",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 90.0,
+      "routed_pll_phase_bits": "0100",
+      "reported_clock_rise_ns": 4.63,
+      "routed_netlist_sha256": "a08a4730a2bc9604b294f11ddb22d2ba5441933edb29baa8dab12a8b5d445ddf",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 112.5,
+      "routed_pll_phase_bits": "0101",
+      "reported_clock_rise_ns": 5.787,
+      "routed_netlist_sha256": "fcc029e83c9b867ddfb701823178d76dc81889b4c7f2cd0b723824493b42eb1a",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 135.0,
+      "routed_pll_phase_bits": "0110",
+      "reported_clock_rise_ns": 6.944,
+      "routed_netlist_sha256": "715829537935224ab23bb03fa5cd7be05c18323907c2b9c83d4725226039f6a7",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 157.5,
+      "routed_pll_phase_bits": "0111",
+      "reported_clock_rise_ns": 8.102,
+      "routed_netlist_sha256": "6f0e45ec3780675c627b57f2785bb80d7159d4b82994de4dba448e692349249b",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 180.0,
+      "routed_pll_phase_bits": "1000",
+      "reported_clock_rise_ns": 9.259,
+      "routed_netlist_sha256": "42626107fa85e4770240bee6ff0a0541705224e66d6d01146d34b153e4f16b8b",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 202.5,
+      "routed_pll_phase_bits": "1001",
+      "reported_clock_rise_ns": 10.417,
+      "routed_netlist_sha256": "7806748f5ebfea7e2ba1b3a287b9bb6b31b0b410a01d3424e7891835ccb1135a",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 225.0,
+      "routed_pll_phase_bits": "1010",
+      "reported_clock_rise_ns": 11.574,
+      "routed_netlist_sha256": "420320cb5b0b28f82be71cb72952d2166416032cce925076098ddf26973c8042",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 247.5,
+      "routed_pll_phase_bits": "1011",
+      "reported_clock_rise_ns": 12.731,
+      "routed_netlist_sha256": "5e936fc1049d2d5771348f8ed35b6096ff27e0ede7f304bf18311e4dcbe3b4bf",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 270.0,
+      "routed_pll_phase_bits": "1100",
+      "reported_clock_rise_ns": 13.889,
+      "routed_netlist_sha256": "1d1e3a97f90f3e7c3e2a01f1d1f1f583fa59e62fff92a1ad8820e5d152133109",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 292.5,
+      "routed_pll_phase_bits": "1101",
+      "reported_clock_rise_ns": 15.046,
+      "routed_netlist_sha256": "ca6d0a2197654b02017b0caefd022d65f3753ad3c67f2dfe2d41d2a074ea67a9",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 315.0,
+      "routed_pll_phase_bits": "1110",
+      "reported_clock_rise_ns": 16.204,
+      "routed_netlist_sha256": "eefbd901e6cb76325fb214b19b21397c4027bf2a97bf6d08a865d901c18b5584",
+      "sdram_clock_has_no_frequency_paths": true
+    },
+    {
+      "phase_degrees": 337.5,
+      "routed_pll_phase_bits": "1111",
+      "reported_clock_rise_ns": 17.361,
+      "routed_netlist_sha256": "f4bcf97d672dd6d2b6f96a107f96452d333689c53781f42606f1cf84a7b7346f",
+      "sdram_clock_has_no_frequency_paths": true
+    }
+  ],
+  "runs": [
+    {
+      "name": "initial",
+      "started_utc": "2026-10-18T08:45:02.205848+00:00",
+      "complete": true,
+      "frequency_mhz": 54,
+      "electrical_signoff": false,
+      "programming": "SRAM only",
+      "restore_image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pipeline-c72-m54-sd-fpr-trial3/impl/pnr/sdram_test.fs",
+      "restore_sha256": "49bf20aa59d07b6b480fa7ba80885a1468b4a52a7118b8767c0c0b026301ecf8",
+      "cases": [
+        {
+          "phase_degrees": 135,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/pll.v": "0e6ac0b913a5cd3e3f79f5e8025d77fd3a8c905c1a2cf900499afb15393f02dc",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/clocks.sdc": "43536986891c02437cf77f2bb19304bccd92440e87f5b583fdadcc80ef15169a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/impl/pnr/sdram_test.fs": "29c24dda0b3e3dfb27c8d190bb918b80a2290e28aa94226a360b4689b11f079f",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/impl/pnr/sdram_test.tr": "d06289e7030859b36dbba1e5f923bac3ba39744e231bffa6224f2429e2e9e68b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/build.tcl": "cc008c46f26b3fea42f00fe13d7b434b0551205e5e708fe588f69991d0440707",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/sdram-io-model.json": "dd8c4f1c272d495486beb34d14371c436c1ddb606f5c1072a249f48cf3bdb565",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12459408305585384
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8326008749427274
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5405015000142157
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.2484411660116166
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.956245915964246
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.918021250050515
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.559948915964924
+              }
+            ],
+            "elapsed_seconds": 5.6708751659607515
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 90,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/pll.v": "f653181f06572b4ab50cb07dc5edd593c7e9e5e28870759e462ad241dd19ad01",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/clocks.sdc": "9dd8f4cc949d74acf3ba12480682d7a1520290b80fe50c13354126cb1ec2b152",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/impl/pnr/sdram_test.fs": "a570ce3f397be256fc1c86b6f4e5575d9297ccfa529b1a91eca48d25bb9d0a5a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/impl/pnr/sdram_test.tr": "6db5189c25b570f47d33d546a8960c3948c278b79428b541c9e6d90223c4315d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/build.tcl": "eea8d08ed3d7b43e2be91e2349a019ab64152a8e2ded1266536738bca5257d56",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/sdram-io-model.json": "8e05a7d616cc0464bfcacea43452c0573c67197214ced6f73e0f0b20b5fc1225",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12068879196885973
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8286425420083106
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.536570333992131
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.2449734170222655
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.9526595839997754
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.914200125029311
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.56202916696202
+              }
+            ],
+            "elapsed_seconds": 5.665464999969117
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 112.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/pll.v": "5d08e61a151aa6389835ce7bcb17c3d36f8be43f14e3085a4ed40115988f0476",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/clocks.sdc": "0aa26b630aed6e068e048d8b756dcf05d481f98b71431c8aae2ac78171b832bf",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/impl/pnr/sdram_test.fs": "54cb62d46ee9b9a3007638a9c4feac5efbc821b4f8da25c20a8883e5fde08712",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/impl/pnr/sdram_test.tr": "a2002ee28d85a090568ef84a91930b52a8b1b5dce6f96f25a1d41576ff687558",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/build.tcl": "3be899eba6dd9453e072303184aeb75899279456ec65ab44aeab3036d2f8babe",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/sdram-io-model.json": "a42e8cb570124bcf9efe0fa77738de680f3c539d56d7de17c4e836af1cc52cca",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12006695801392198
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8280462080147117
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5358982500620186
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.2438104159664363
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.9517924999818206
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.913604874978773
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.555604625027627
+              }
+            ],
+            "elapsed_seconds": 5.659287541056983
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 157.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/pll.v": "258272321d02a74efa8912b0899dd9865763fa6c4eac05fb6e53b615331c832d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/clocks.sdc": "576f01b8d04f461f6085a8813c433fb12f405b5d5a3e43633c54d8a728d31ddb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/impl/pnr/sdram_test.fs": "2055a9a0dcbb601b546a6283d88e870c9e18a6b28e023861efa19445cc210e05",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/impl/pnr/sdram_test.tr": "75084ab1c842fb81aaf36f44ccc8629b89dbb65a27695b08f598d219f77e9959",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/build.tcl": "fe3c28fc6442197c384a4a246eb1ab694276482d5646ce738ff5633be53d563c",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/sdram-io-model.json": "e85fe61d1d16dccbf4559abaa3573cde85fdf91c7d6f50f5a84b4a052ac9f921",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11485183401964605
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8229616249445826
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5306557499570772
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.239077999955043
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.946754499920644
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.908351041958667
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.556170959025621
+              }
+            ],
+            "elapsed_seconds": 5.666588791995309
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 180,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/pll.v": "e0f7602ab9f60c3d375ab016f8216df94e73c4b5149f5cad892686b6afd96acb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/clocks.sdc": "d3294820a5cefc880a24c58628a73e12fd1345b4c91eca17a622f6326bb9cd1f",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/impl/pnr/sdram_test.fs": "8258a1784b1461ed8bc928925ecd38d9834ca6850b02eb5ffdb9c7e68e6874ad",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/impl/pnr/sdram_test.tr": "f5304cf65cfb018272775d82214e2254459cf967d0abdeace338efebf387ac55",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/build.tcl": "b9b956f43778f814048dfa987eefcaa34c4da674de59d9f5b31e25ee233accc1",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/sdram-io-model.json": "98be79e43d89182f954d59244a363d4bb714682038054e68282f17b9fdd600d0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11445183295290917
+              },
+              {
+                "pattern": 0,
+                "errors": 19419,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 3221289984,
+                "elapsed_seconds": 0.8223889579530805
+              }
+            ],
+            "elapsed_seconds": 0.9295207080431283
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100db4b000000002000000000000000000000fc00c0",
+          "raw_uart_sha256": "ad6456d66b7c997bd15be2ecb91aacef8d923edfc8b0f5bd641b7a869dcfde5f",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 225,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/pll.v": "ee87e9d502d45b95a12e461ff5794eab89272b5f5a876b4fbe6b020b64b1c8aa",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/clocks.sdc": "93aca224b77df9b726ce49705fc5442fb12d94f2be8767bf3e3b932485c6dfc0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/impl/pnr/sdram_test.fs": "7fd30d89035abdbd1957539991ec3deab3b9b480c7a7414c5a9e3a8c231e01d2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/impl/pnr/sdram_test.tr": "c296572ac203cc189dee3da65fca471532def99194de498b594e2f786d8b3398",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/build.tcl": "d3a209744c3fa3dc63024c271f6a6004b238d3ed93f159ebc59d22bfdb744874",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/sdram-io-model.json": "e6e61a1c79a95b623e0a89acb1d21803c82abe92aa58b44c73b8a1cae5fb2812",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11656816699542105
+              },
+              {
+                "pattern": 0,
+                "errors": 19419,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8244272080482915
+              }
+            ],
+            "elapsed_seconds": 0.9342835419811308
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100db4b0000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "28496af21fd4b19b7342e6574a3e4dede31fcd63e4852f21b1bbe3ceb29fa445",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        }
+      ],
+      "measurements_complete": true,
+      "restored": true,
+      "hardware_log": "PROGRAM SRAM: 135 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 135: pass\nPROGRAM SRAM: 90 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 90: pass\nPROGRAM SRAM: 112.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 112.5: pass\nPROGRAM SRAM: 157.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 157.5: pass\nPROGRAM SRAM: 180 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 19,419 errors\nRESULT 180: memory_fail\nPROGRAM SRAM: 225 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 19,419 errors\nRESULT 225: memory_fail\nRESTORE tested processor image to SRAM\nPASS: restored processor UART diagnostic\n",
+      "restore_program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse output/tangnano20k/sdram-pipeline-c72-m54-sd-fpr-trial3/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [======================                            ] 43.33%\n\nLoad SRAM: [============================================      ] 86.67%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n",
+      "restore_probe_log": "PASS: board UART diagnostic\n"
+    },
+    {
+      "name": "full_range",
+      "started_utc": "2026-10-18T08:46:43.408256+00:00",
+      "complete": true,
+      "frequency_mhz": 54,
+      "electrical_signoff": false,
+      "programming": "SRAM only",
+      "restore_image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pipeline-c72-m54-sd-fpr-trial3/impl/pnr/sdram_test.fs",
+      "restore_sha256": "49bf20aa59d07b6b480fa7ba80885a1468b4a52a7118b8767c0c0b026301ecf8",
+      "cases": [
+        {
+          "phase_degrees": 0.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p0/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p0/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p0/pll.v": "82b1ccbb1ec96cbc0d5b5465b4401b544907756435b5efbd63db529a7a033595",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p0/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p0/clocks.sdc": "2effda2982c6fb2603e164117448e9a5eb86ed26421efa1f91edfb08a9f1268c",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/impl/pnr/sdram_test.fs": "9eb6b915866ef69e03268a5426581b8109fd100b49bdfad36507143c2b6380a5",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/impl/pnr/sdram_test.tr": "1497b99efce88748c4d465d125ed0c6d48028e0742738fb9cb0ac5fac1b6edda",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/build.tcl": "e56f583858aaa2dc6e970b190098556984a95bde1abaa0b8eae5015a3ebbe719",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/sdram-io-model.json": "e96a1da80aa715a1e3b3ca58894cdfb08bf2161f60eebdbb014893a4b46d3cd0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11761104199104011
+              },
+              {
+                "pattern": 0,
+                "errors": 2097152,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8255450000287965
+              }
+            ],
+            "elapsed_seconds": 0.9303910420276225
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000002000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "bbe9dd7f38c515cf183f38a62d8ab3a2935f081f1024899293a21b021cb4d100",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p0/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 22.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p22.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p22.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p22.5/pll.v": "0a7590a03cbe1d302dfcb5f522ea859a3a8e98d6eb16e5809822b2d3b4b8eeb8",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p22.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p22.5/clocks.sdc": "8b211b50621082a3a5986cf50500019430be1263ddd7e3d766585255765d5507",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/impl/pnr/sdram_test.fs": "ef6c8af20e5b8b41ccfbf42f683c8709d132cc92f48176e1b2bf9e8b9f8c3ace",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/impl/pnr/sdram_test.tr": "cd07931541b951e0f2784d769bc5ebf9b877cb8450d4477ba5efce3c0367ee0e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/build.tcl": "3a67556a3bbc2b73160194e73beef4e69a790e4cbf672d4c95f574f3a880cf8d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/sdram-io-model.json": "345b45086fe449f0fbf5cd60c1732a18627b03e6666f165214070457109996b9",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.1144946669228375
+              },
+              {
+                "pattern": 0,
+                "errors": 2064385,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8226750829489902
+              }
+            ],
+            "elapsed_seconds": 0.9335140419425443
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310001801f00000020000000000000000000ffffffff",
+          "raw_uart_sha256": "1aec1c27caf0f74350336b57c73d2cea179b035ca675d45c135ea6bba3a99559",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p22.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 45.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p45/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p45/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p45/pll.v": "cb627e64806d842abb79177c36ca6f265916f7355cfcf931106a865a881d8226",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p45/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p45/clocks.sdc": "abd12bff309f05ea45a2e960ce2427826bda393ff000f50f6440bcf5e8489126",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/impl/pnr/sdram_test.fs": "562252ad0c0e544a4233987093ebe58f4c70fbfb3c0c603c07303e7b898fd8f1",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/impl/pnr/sdram_test.tr": "4f4f00706842f0413fa668abb6db894496437094641837ca299690aef2cae598",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/build.tcl": "7c786a9b2dca52ccb746e26f83633071c5da21f0eb78e405d352ad054975028c",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/sdram-io-model.json": "9b7ede2bf3a290f0482db901840c495c9ed68f7ee97f1eeb97d1b283a7b9d099",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12216533301398158
+              },
+              {
+                "pattern": 0,
+                "errors": 2097152,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4279238539,
+                "elapsed_seconds": 0.8301394580630586
+              }
+            ],
+            "elapsed_seconds": 0.9346719169989228
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100000020000000200000000000000000008bff0fff",
+          "raw_uart_sha256": "dc280b7b7ae730c389ca46f65fbc8a0ab53d17fc07c5275bb389a1424cf18da9",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p45/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 67.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p67.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p67.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p67.5/pll.v": "0d84e0b0e1487712b75b20e09d3c5a36973ca84155a2c8f30ef705e9eb871dac",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p67.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p67.5/clocks.sdc": "1abbf466ca414f06caa16d3f9a2ba4e5bc73aa6e43845cdc8681354e7caa891d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/impl/pnr/sdram_test.fs": "2161367ded272f50c8f05c2251e2e7f686d861c82955d2c5910034e4843710dc",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/impl/pnr/sdram_test.tr": "981116791f7d50a03dc985f35b672c2f45a8bebe8d381aa6fb3d1c91e1d7dda1",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/build.tcl": "bbc0d46db3bf8d3c29fd96b196605931ac5273ffdc1ca831484435b9b6f70568",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/sdram-io-model.json": "3f5123254b0ef191ce6181196013ab6b0fe9123ed4c6ae32414f89ae1f38653a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.122413459001109
+              },
+              {
+                "pattern": 0,
+                "errors": 789,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 49152,
+                "elapsed_seconds": 0.830330166965723
+              }
+            ],
+            "elapsed_seconds": 0.9418413339881226
+          },
+          "raw_uart_hex": "53445231ff000000000000000000000000000000000000000053445231001503000000002000000000000000000000c00000",
+          "raw_uart_sha256": "99c15d216a83e321d19a050988e5c2cd449dc2b00a0344f0251031171d43600a",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p67.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 90.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/pll.v": "f653181f06572b4ab50cb07dc5edd593c7e9e5e28870759e462ad241dd19ad01",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p90/clocks.sdc": "9dd8f4cc949d74acf3ba12480682d7a1520290b80fe50c13354126cb1ec2b152",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/impl/pnr/sdram_test.fs": "a570ce3f397be256fc1c86b6f4e5575d9297ccfa529b1a91eca48d25bb9d0a5a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/impl/pnr/sdram_test.tr": "6db5189c25b570f47d33d546a8960c3948c278b79428b541c9e6d90223c4315d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/build.tcl": "eea8d08ed3d7b43e2be91e2349a019ab64152a8e2ded1266536738bca5257d56",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/sdram-io-model.json": "8e05a7d616cc0464bfcacea43452c0573c67197214ced6f73e0f0b20b5fc1225",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.1101414579898119
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8181700409622863
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5261518330080435
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.233912374940701
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.947717290953733
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.909447749960236
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.551394790993072
+              }
+            ],
+            "elapsed_seconds": 5.661396875046194
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p90/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 112.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/pll.v": "5d08e61a151aa6389835ce7bcb17c3d36f8be43f14e3085a4ed40115988f0476",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p112.5/clocks.sdc": "0aa26b630aed6e068e048d8b756dcf05d481f98b71431c8aae2ac78171b832bf",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/impl/pnr/sdram_test.fs": "54cb62d46ee9b9a3007638a9c4feac5efbc821b4f8da25c20a8883e5fde08712",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/impl/pnr/sdram_test.tr": "a2002ee28d85a090568ef84a91930b52a8b1b5dce6f96f25a1d41576ff687558",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/build.tcl": "3be899eba6dd9453e072303184aeb75899279456ec65ab44aeab3036d2f8babe",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/sdram-io-model.json": "a42e8cb570124bcf9efe0fa77738de680f3c539d56d7de17c4e836af1cc52cca",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11512624996248633
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8231296669691801
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5309426670428365
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.2389179590390995
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.946781959035434
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.908612416940741
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.556545375031419
+              }
+            ],
+            "elapsed_seconds": 5.667829999933019
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p112.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 135.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/pll.v": "0e6ac0b913a5cd3e3f79f5e8025d77fd3a8c905c1a2cf900499afb15393f02dc",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p135/clocks.sdc": "43536986891c02437cf77f2bb19304bccd92440e87f5b583fdadcc80ef15169a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/impl/pnr/sdram_test.fs": "29c24dda0b3e3dfb27c8d190bb918b80a2290e28aa94226a360b4689b11f079f",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/impl/pnr/sdram_test.tr": "d06289e7030859b36dbba1e5f923bac3ba39744e231bffa6224f2429e2e9e68b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/build.tcl": "cc008c46f26b3fea42f00fe13d7b434b0551205e5e708fe588f69991d0440707",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/sdram-io-model.json": "dd8c4f1c272d495486beb34d14371c436c1ddb606f5c1072a249f48cf3bdb565",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11639687500428408
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8242594159673899
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5321831660112366
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.2401012500049546
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.947991415974684
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.909678165917285
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.557586040929891
+              }
+            ],
+            "elapsed_seconds": 5.669085290981457
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p135/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 157.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/pll.v": "258272321d02a74efa8912b0899dd9865763fa6c4eac05fb6e53b615331c832d",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p157.5/clocks.sdc": "576f01b8d04f461f6085a8813c433fb12f405b5d5a3e43633c54d8a728d31ddb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/impl/pnr/sdram_test.fs": "2055a9a0dcbb601b546a6283d88e870c9e18a6b28e023861efa19445cc210e05",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/impl/pnr/sdram_test.tr": "75084ab1c842fb81aaf36f44ccc8629b89dbb65a27695b08f598d219f77e9959",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/build.tcl": "fe3c28fc6442197c384a4a246eb1ab694276482d5646ce738ff5633be53d563c",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/sdram-io-model.json": "e85fe61d1d16dccbf4559abaa3573cde85fdf91c7d6f50f5a84b4a052ac9f921",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "pass",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.1163196669658646
+              },
+              {
+                "pattern": 0,
+                "errors": 0,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.8242137919878587
+              },
+              {
+                "pattern": 1,
+                "errors": 0,
+                "comparisons": 4194304,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 1.5320830829441547
+              },
+              {
+                "pattern": 2,
+                "errors": 0,
+                "comparisons": 6291456,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.240083041950129
+              },
+              {
+                "pattern": 3,
+                "errors": 0,
+                "comparisons": 8388608,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 2.948092499980703
+              },
+              {
+                "pattern": 4,
+                "errors": 0,
+                "comparisons": 10485760,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 4.9098232499090955
+              },
+              {
+                "pattern": 5,
+                "errors": 0,
+                "comparisons": 12582912,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 5.557691166992299
+              }
+            ],
+            "elapsed_seconds": 5.667787124984898
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310000000000000020000000000000000000000000005344523101000000000000400000000000000000000000000053445231020000000000006000000000000000000000000000534452310300000000000080000000000000000000000000005344523104000000000000a0000000000000000000000000005344523105000000000000c000000000000000000000000000",
+          "raw_uart_sha256": "44d57f3ba78bdf75055a5b9e6019bc8c40e85f16c02ec09e8c28a3569cc3d677",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p157.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 180.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/pll.v": "e0f7602ab9f60c3d375ab016f8216df94e73c4b5149f5cad892686b6afd96acb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p180/clocks.sdc": "d3294820a5cefc880a24c58628a73e12fd1345b4c91eca17a622f6326bb9cd1f",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/impl/pnr/sdram_test.fs": "8258a1784b1461ed8bc928925ecd38d9834ca6850b02eb5ffdb9c7e68e6874ad",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/impl/pnr/sdram_test.tr": "f5304cf65cfb018272775d82214e2254459cf967d0abdeace338efebf387ac55",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/build.tcl": "b9b956f43778f814048dfa987eefcaa34c4da674de59d9f5b31e25ee233accc1",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/sdram-io-model.json": "98be79e43d89182f954d59244a363d4bb714682038054e68282f17b9fdd600d0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12230508401989937
+              },
+              {
+                "pattern": 0,
+                "errors": 1,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 3221289984,
+                "elapsed_seconds": 0.8301602919818833
+              }
+            ],
+            "elapsed_seconds": 0.9359537919517606
+          },
+          "raw_uart_hex": "53445231ff000000000000000000000000000000000000000053445231000100000000002000000000000000000000fc00c0",
+          "raw_uart_sha256": "5e9f94d9e3517c53dc5ea785edc9e8f10d9b3a7bb95d8afbbf2f20a2aba5ab98",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p180/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 202.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p202.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p202.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p202.5/pll.v": "c2bebaab4e5ff59417e2b7cd2d3b1b89b434ef64f8caa5358fdbd63a6afa9e3a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p202.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p202.5/clocks.sdc": "a7d6b4212e1bdacb5966bd14b09b5d5bb4c20e2d10b3918ab2ba9c0b86966d14",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/impl/pnr/sdram_test.fs": "cb116a49fd66f46c8d0e2f6452b42ae28b4590ff5c5ff7c9cdeeda83b7f61d74",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/impl/pnr/sdram_test.tr": "7de3c237df52e689db0e70ad282eea30eb884d49ff63412f4d717695c5488e54",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/build.tcl": "131293e5372d91ffb82b885315cf30ac9c2d5a6a0a6ce47125c74f80282a2f6e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/sdram-io-model.json": "590cd6d37f347faca13f880fc616a6cdb0b8b6dfb7eaa2f06c5e6fd979764fc7",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11489462503232062
+              },
+              {
+                "pattern": 0,
+                "errors": 300406,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.822956292075105
+              }
+            ],
+            "elapsed_seconds": 0.9307998750591651
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310076950400000020000000000000000000ffffffff",
+          "raw_uart_sha256": "c9fe51e521d3803b54aab8990e4e2246783a26d0339e3064c669aedab4b70718",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p202.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 225.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/pll.v": "ee87e9d502d45b95a12e461ff5794eab89272b5f5a876b4fbe6b020b64b1c8aa",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p225/clocks.sdc": "93aca224b77df9b726ce49705fc5442fb12d94f2be8767bf3e3b932485c6dfc0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/impl/pnr/sdram_test.fs": "7fd30d89035abdbd1957539991ec3deab3b9b480c7a7414c5a9e3a8c231e01d2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/impl/pnr/sdram_test.tr": "c296572ac203cc189dee3da65fca471532def99194de498b594e2f786d8b3398",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/build.tcl": "d3a209744c3fa3dc63024c271f6a6004b238d3ed93f159ebc59d22bfdb744874",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/sdram-io-model.json": "e6e61a1c79a95b623e0a89acb1d21803c82abe92aa58b44c73b8a1cae5fb2812",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11590762494597584
+              },
+              {
+                "pattern": 0,
+                "errors": 1,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8238488750066608
+              }
+            ],
+            "elapsed_seconds": 0.9308516669552773
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310001000000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "f082ae74ceb417f2692666e00f3c363caefe739cc527ade6417cfec0768a4835",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p225/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 247.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p247.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p247.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p247.5/pll.v": "6952e2dd6dd1bb4e6155cf400daf46a334654c7f5cd7c284355ee55cd8dee4bc",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p247.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p247.5/clocks.sdc": "73aabc31a859694d8e49fd9a6d9521c32481beaf413f03f97a5ab3b5405c9cb3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/impl/pnr/sdram_test.fs": "68a5710f81a1e815850cbf5c196724d75d90c56e550512ca64a6408c34af942e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/impl/pnr/sdram_test.tr": "d737b739d147acde8a5887f228d27b6b8203f615c50c5944e3d596f1bf8141cf",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/build.tcl": "b0d914654e5acdb23360b7f9ccbe6f8fc8d1b15a1b45d2b5ee7863d2304f8264",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/sdram-io-model.json": "de7b8f2bf8f8e9c9dee72540d23f9c14e675a2527156a6060b1e8f1dea93e428",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.1222310831071809
+              },
+              {
+                "pattern": 0,
+                "errors": 1,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8301578750833869
+              }
+            ],
+            "elapsed_seconds": 0.9388590831076726
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310001000000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "f082ae74ceb417f2692666e00f3c363caefe739cc527ade6417cfec0768a4835",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p247.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 270.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p270/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p270/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p270/pll.v": "c0756f2853464f824a3ceff54060c1f4bc665d319142a85796738061e0711e9e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p270/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p270/clocks.sdc": "8c67666496d9a9fe18671cdf0d86d864ee2371a969af55da655578841cf41a71",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/impl/pnr/sdram_test.fs": "cbf97c44edea7e2ac6c2cb887c3d4ef46c4e0a9589ba92aee39d71c22486a691",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/impl/pnr/sdram_test.tr": "9d4b7d4de67e53a69127dbe197a10e01046dabd75faa3f483e33e628d9c42520",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/build.tcl": "ff52407a33beeeb3c54687e33c924fc13a5eb8d767e33dea94870691ba94e28b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/sdram-io-model.json": "4c4e2a92cbadb94ccd58162b71d6d0fc731a52c1a5c442d3bdb42c17501198ba",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.12286083295475692
+              },
+              {
+                "pattern": 0,
+                "errors": 19419,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8306544579099864
+              }
+            ],
+            "elapsed_seconds": 0.9334571249783039
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100db4b0000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "28496af21fd4b19b7342e6574a3e4dede31fcd63e4852f21b1bbe3ceb29fa445",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p270/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 292.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p292.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p292.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p292.5/pll.v": "a90eed6d1d02226d6906fb0def22fb55d44f97cbf18b017e044f8f6c32fa7aca",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p292.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p292.5/clocks.sdc": "01184a3b1664a1db2ff6bf5c54fb8664d713ebe3186d97c4742851978e833489",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/impl/pnr/sdram_test.fs": "24fb7e5556991d3bc3b5cfd46e68d2f5f395c951d73242076e98a39c5a5cb44e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/impl/pnr/sdram_test.tr": "9ca8bbd7cbf706d7ba5ad7c862fd4ff8ecc1d33492b093dc7af4b345d8f661f3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/build.tcl": "64acbfb653da80d27764abb434db2404b7b4e10b6cb7cfbaefb0fd75bf10ba3b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/sdram-io-model.json": "87db6ec0906de8c304e4ab52241de67c4234f88ebf9446bd1807b2a477d3564c",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11485062504652888
+              },
+              {
+                "pattern": 0,
+                "errors": 1,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8227510830620304
+              }
+            ],
+            "elapsed_seconds": 0.9360515420557931
+          },
+          "raw_uart_hex": "53445231ff0000000000000000000000000000000000000000534452310001000000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "f082ae74ceb417f2692666e00f3c363caefe739cc527ade6417cfec0768a4835",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p292.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 315.0,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/pll.v": "f78d9f180eedf3106c94ece44adbe18c9a4e527f590cb53c99310b43e2124835",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/clocks.sdc": "9c420dba67f038996ae042e43708be26b01900296f6e87cffc2af50d32ae90c9",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/impl/pnr/sdram_test.fs": "6cf51c6fbd884da2543d3270a809fe85908ae12a8ed07e6772efa4d58db54a16",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/impl/pnr/sdram_test.tr": "17eaca14255763ec1d74f610b4ec2c35ab4f52267f6bcd6a187a1c9d6af92af0",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/build.tcl": "3000bc549b6b1b33bb3aba4559ac9b6b0bcfa1dd45607aff5afff5fa504c366e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/sdram-io-model.json": "6ad4e6f264691bae901c2e507afaf1558d12f4695720e745a1bfd3005691aecc",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11602670792490244
+              },
+              {
+                "pattern": 0,
+                "errors": 19419,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8239256669767201
+              }
+            ],
+            "elapsed_seconds": 0.9360373329836875
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100db4b0000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "28496af21fd4b19b7342e6574a3e4dede31fcd63e4852f21b1bbe3ceb29fa445",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p315/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        },
+        {
+          "phase_degrees": 337.5,
+          "image": "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/impl/pnr/sdram_test.fs",
+          "timing": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints",
+          "sha256": {
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p337.5/burst-test_top.v": "3d3d96436610157b754a7b86a49b1fcb44614ddbb7f87c4df5923bdd5fc790cb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p337.5/memory.v": "e6edfffd12ed1c89ca7b67e21c8d592602cf4a4214ce1bf363988982c2b513e3",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v": "76f25a1eafdb078668dce8a3649930dd12479e08460e70cc6ffd9ffd3f4c0b6b",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v": "6b275bef88838363e6afcc4703d7629a14171a5ad3af72b9631be940940314e2",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v": "32c40ca8855168fd7716b3ffc0dc26ad61cf361f23b693d5974d8a06072aa9fb",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p337.5/pll.v": "586cc9329f7b7035103017ff4052350e1147debaee6acdc0c63d91472827dd18",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p337.5/pins.cst": "e085f2727a37eaf9e2e9310dbbd926256518680cc034b382cab4a9641391af85",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p337.5/clocks.sdc": "8e79f2f429f79c2b7efbbe41cdc7004448b58d8ca8ca3375ca776a2aad20707e",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/impl/pnr/sdram_test.fs": "c0232844394e882eb07623e38066556bca82e18fee7941170a0c2cda6b2bb275",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/impl/pnr/sdram_test.tr": "da5c053324a89bcfdb1d5b1dadb11b990370ed18448d9f91179363657a5800bd",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/build.tcl": "730ba61b80f8533cc5ebe8943bf281422334fe87dc9e28fdf7ae45b420955866",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/sdram-io-model.json": "02b680e9cc16d5c8817704fcbea8c827372f26ee23f074428a53685b05774f3a",
+            "/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/run_phase_sweep.py": "14e7793888eb36c81b133e4d0a33736271229493966235c610decf4fdc415488"
+          },
+          "hardware": {
+            "status": "memory_fail",
+            "reports": [
+              {
+                "pattern": 255,
+                "errors": 0,
+                "comparisons": 0,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 0,
+                "elapsed_seconds": 0.11684283404611051
+              },
+              {
+                "pattern": 0,
+                "errors": 19419,
+                "comparisons": 2097152,
+                "first_address": 0,
+                "expected": 0,
+                "actual": 4294967295,
+                "elapsed_seconds": 0.8247390839969739
+              }
+            ],
+            "elapsed_seconds": 0.9368494589580223
+          },
+          "raw_uart_hex": "53445231ff00000000000000000000000000000000000000005344523100db4b0000000020000000000000000000ffffffff",
+          "raw_uart_sha256": "28496af21fd4b19b7342e6574a3e4dede31fcd63e4852f21b1bbe3ceb29fa445",
+          "program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/full-range/p337.5/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [===================================               ] 68.13%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n"
+        }
+      ],
+      "measurements_complete": true,
+      "restored": true,
+      "hardware_log": "PROGRAM SRAM: 0 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 2,097,152 errors\nRESULT 0: memory_fail\nPROGRAM SRAM: 22.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 2,064,385 errors\nRESULT 22.5: memory_fail\nPROGRAM SRAM: 45 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 2,097,152 errors\nRESULT 45: memory_fail\nPROGRAM SRAM: 67.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 789 errors\nRESULT 67.5: memory_fail\nPROGRAM SRAM: 90 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 90: pass\nPROGRAM SRAM: 112.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 112.5: pass\nPROGRAM SRAM: 135 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 135: pass\nPROGRAM SRAM: 157.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 0 errors\n  pattern 1: 4,194,304 comparisons, 0 errors\n  pattern 2: 6,291,456 comparisons, 0 errors\n  pattern 3: 8,388,608 comparisons, 0 errors\n  pattern 4: 10,485,760 comparisons, 0 errors\n  pattern 5: 12,582,912 comparisons, 0 errors\nRESULT 157.5: pass\nPROGRAM SRAM: 180 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 1 errors\nRESULT 180: memory_fail\nPROGRAM SRAM: 202.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 300,406 errors\nRESULT 202.5: memory_fail\nPROGRAM SRAM: 225 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 1 errors\nRESULT 225: memory_fail\nPROGRAM SRAM: 247.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 1 errors\nRESULT 247.5: memory_fail\nPROGRAM SRAM: 270 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 19,419 errors\nRESULT 270: memory_fail\nPROGRAM SRAM: 292.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 1 errors\nRESULT 292.5: memory_fail\nPROGRAM SRAM: 315 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 19,419 errors\nRESULT 315: memory_fail\nPROGRAM SRAM: 337.5 degrees\n  tester started\n  pattern 0: 2,097,152 comparisons, 19,419 errors\nRESULT 337.5: memory_fail\nRESTORE tested processor image to SRAM\nPASS: restored processor UART diagnostic\n",
+      "restore_program_log": "empty\nJtag frequency : requested 6.00MHz    -> real 6.00MHz   \nParse file Parse output/tangnano20k/sdram-pipeline-c72-m54-sd-fpr-trial3/impl/pnr/sdram_test.fs: \nDone\nDONE\nErase SRAM Load SRAM \nLoad SRAM: [======================                            ] 43.33%\n\nLoad SRAM: [============================================      ] 86.67%\n\nLoad SRAM: [==================================================] 100.00%\n\nDone\nDONE\n",
+      "restore_probe_log": "PASS: board UART diagnostic\n"
+    }
+  ],
+  "builds": [
+    {
+      "phase_degrees": 0.0,
+      "build_log_sha256": "833a97e7c124bd64689629e482d1cd5f7d91d6921b864e021c762a5fae3a4f6c",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 22.5,
+      "build_log_sha256": "1ac2a8013175aa8661793fda68f989dc60a6314dd401062c62c74d8990a33f79",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 45.0,
+      "build_log_sha256": "0abc45b8a803cc14cd70061ba53608217ca158bc2320a50ea0354468874dba13",
+      "interrupted_first_build_log": "SDRAM I/O model incomplete: t_ac_max, t_oh_min, t_cmd_setup, t_cmd_hold, t_data_setup, t_data_hold, t_dqm_setup, t_dqm_hold, clock_flight_min, clock_flight_max, read_flight_min, read_flight_max, command_flight_min, command_flight_max, write_flight_min, write_flight_max, dqm_flight_min, dqm_flight_max, setup_uncertainty, hold_uncertainty, qualification.source, qualification.operating_conditions, qualification.boundary_accounting, qualification.status, qualification.frequency_range\nSDRAM I/O remains unqualified: this build checks internal FPGA timing only.\nLicense verification failed  Server not responding.\n",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 67.5,
+      "build_log_sha256": "a96382439d22d1e6e5084fb8e4a56c825248a9bd01a877ba41c96179bbe6efa1",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 90.0,
+      "build_log_sha256": "a0f55e259655f375a6a9b9695f5feea57e89cbb86340c35bf89b367f2ce5b23a",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 112.5,
+      "build_log_sha256": "14675313211a27074984fe5174d58d175e5cdbbcd55a8f8943e13453afed0e96",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 135.0,
+      "build_log_sha256": "689f9fd41d0a5961c9a03488eb72c67a3738bc6d231df94398201087cbc5ac97",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 157.5,
+      "build_log_sha256": "603e428cde136034822157a95bc2eaee4f28cc7cea468156fa15e8e6ffd7095f",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 180.0,
+      "build_log_sha256": "c014e68b889cb9ea7f8344c4a46bd1af9ef8e6bfe10086b372c83fa503674201",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 202.5,
+      "build_log_sha256": "7b71da0f881d024ace8529a0047f88254c1f5e986fb0cd416ad4cecafc6a10cb",
+      "interrupted_first_build_log": "SDRAM I/O model incomplete: t_ac_max, t_oh_min, t_cmd_setup, t_cmd_hold, t_data_setup, t_data_hold, t_dqm_setup, t_dqm_hold, clock_flight_min, clock_flight_max, read_flight_min, read_flight_max, command_flight_min, command_flight_max, write_flight_min, write_flight_max, dqm_flight_min, dqm_flight_max, setup_uncertainty, hold_uncertainty, qualification.source, qualification.operating_conditions, qualification.boundary_accounting, qualification.status, qualification.frequency_range\nSDRAM I/O remains unqualified: this build checks internal FPGA timing only.\nLicense verification failed  Server not responding.\n",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 225.0,
+      "build_log_sha256": "ed169ef8a9d515c0341e18b8ee8cd9af39697c14cd8b002149d975836fcec90f",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 247.5,
+      "build_log_sha256": "d0666f80e2808187fcb549b0e57bbaa58f06461fa02e33063bfaafa935cf97ab",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 270.0,
+      "build_log_sha256": "d684c59ac2d93df5ebe84b1ea7ceebb5a5c3319be4461cccd897377acb8bdd21",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 292.5,
+      "build_log_sha256": "3fec90f0811f9108b345ef6c139efa0d47ee2c88cbb803e02d1f9756c5babce5",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 315.0,
+      "build_log_sha256": "6827ea849bfbe13b8037fbfb0906756503c0c6baa4fb575a2261ccb568886b58",
+      "interrupted_first_build_log": "SDRAM I/O model incomplete: t_ac_max, t_oh_min, t_cmd_setup, t_cmd_hold, t_data_setup, t_data_hold, t_dqm_setup, t_dqm_hold, clock_flight_min, clock_flight_max, read_flight_min, read_flight_max, command_flight_min, command_flight_max, write_flight_min, write_flight_max, dqm_flight_min, dqm_flight_max, setup_uncertainty, hold_uncertainty, qualification.source, qualification.operating_conditions, qualification.boundary_accounting, qualification.status, qualification.frequency_range\nSDRAM I/O remains unqualified: this build checks internal FPGA timing only.\nThe license expires in 6 days.\n*** GOWIN Tcl Command Line Console  *** \nThe available OpenGL surface format was either not version 3.2 or higher or not a Core Profile.\nChromium on macOS will fall back to software rendering in this case.\nHardware acceleration and features such as WebGL will not be available.\ncurrent device: GW2AR-18C  GW2AR-LV18QN88C8/I7\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/burst-test_top.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/pins.cst\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-sweep-2026-10-18/p315/clocks.sdc\"\nLicense verification failed  Server not responding.\n\n    while executing\n\"run all\"\n    (file \"build.tcl\" line 22)\n",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    },
+    {
+      "phase_degrees": 337.5,
+      "build_log_sha256": "34c033cf9ec2ee78a174e7c57fa1f220778088b259c8d1a27223d5f5e54399f5",
+      "timing_result": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 54 MHz constraint, 107.153 MHz Fmax, 9.186 ns worst setup slack; 0 setup / 0 hold violating endpoints"
+    }
+  ],
+  "final_recovery": {
+    "uart_passed": true,
+    "fp_risc_numeric_passed": true,
+    "numeric_log": "NUMERIC I64 HOLDS\nNUMERIC FLOAT HOLDS\nRV32 BASE NUMERIC HOLDS\nFPR EXIT 0\nDONE\n",
+    "guest_image_sha256": "f8c96d45f2f10346d2026d27ae0ed4dda2a94517eca917a1cd4ba3613fc2cad8",
+    "runner_sha256": "c543c9afcabff4fe75bda79650bb82f0811c0f4c6c37637808f57df9ded53824",
+    "cpu_mhz": 72,
+    "sdram_mhz": 54,
+    "phase_degrees": 135
+  }
+}

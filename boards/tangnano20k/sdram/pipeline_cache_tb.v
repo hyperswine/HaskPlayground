@@ -6,7 +6,14 @@ module pipeline_cache_tb;
  wire hold_cpu;wire [31:0] rdata;
  wire req,mwrite,ready;wire [20:0] ma;wire [31:0] md;wire [3:0] mm;
  reg done=0,valid=0;reg [31:0] mrdata;reg [1:0] beat;
- sdram_pipeline_cache cache(clk,reset,address,wr,data,mask,hold_cpu,rdata,
+ // Match SdramPipeline: its registered request is the first logical stage.
+ reg [21:0] port_address=22'h200000;reg port_write=0;
+ reg [31:0] port_data=0;reg [3:0] port_mask=15;
+ always @(posedge clk)begin
+   if(reset)begin port_address<=22'h200000;port_write<=0;port_data<=0;port_mask<=15;end
+   else if(!hold_cpu)begin port_address<=address;port_write<=wr;port_data<=data;port_mask<=mask;end
+ end
+ sdram_pipeline_cache cache(clk,reset,port_address,port_write,port_data,port_mask,hold_cpu,rdata,
    req,mwrite,ma,md,mm,ready,done,mrdata,valid,beat);
  reg [31:0] ram[0:2097151],reference[0:2097151],rom[0:511];
  integer delay=0,tick=0,phase=0,reads=0,writes=0,stalls=0;

@@ -1,0 +1,742 @@
+{
+  "date": "2026-10-18",
+  "status": "foundation_complete_vendor_bounds_and_validation_pending",
+  "full_sdram_io_signoff": false,
+  "board_programmed": false,
+  "sd_card_accessed": false,
+  "sources": {
+    "official_reference": {
+      "url": "https://www.gowinsemi.com/upload/database_doc/2058/document/64f5457822ba5.rar",
+      "sha256": "b6883052be9fd6029b52d656c1a17c701aeeea64f29971d4e79c82e606b21823",
+      "bytes": 678501,
+      "target": "GW2AR-18LV7LQ144C",
+      "target_matches_qn88": false,
+      "inspected_members": {
+        "SDRC_2AR18K/project/src/SDRAM_Controller_top.sdc": {
+          "bytes": 342,
+          "sha256": "ad6b14921c94e1e2ade51dcd9af740adc6df79a4b736e79a47aa269f9842bdb4",
+          "commands": [
+            "create_clock",
+            "create_generated_clock",
+            "create_generated_clock"
+          ],
+          "input_delay_commands": 0,
+          "output_delay_commands": 0,
+          "clock_uncertainty_commands": 0
+        },
+        "SDRC_2AR18K/docs/Readme.txt": {
+          "bytes": 4888,
+          "sha256": "eecad54aaae0526f62ad5ec7138bd8aa9e90dd86d69f6cddf02180f7debec339"
+        },
+        "SDRC_2AR18K/project/src/SDRAM_controller_top_SIP/SDRAM_controller_top_SIP.ipc": {
+          "bytes": 179,
+          "sha256": "b3b82ef59f2dcbcffef802f861a51040c18750b6c42c97e0fa97d120d4749871"
+        },
+        "SDRC_2AR18K/tb/tb.v": {
+          "bytes": 2026,
+          "sha256": "bfcb4695ecfba677485749fbd48c3ede4f2c76b96510f665599ba71d67352054"
+        },
+        "SDRC_2AR18K/simulation/prim_sim.v": {
+          "bytes": 350137,
+          "sha256": "59b7ca7893041ce70e9f1bd585a03d506bb7069973b524d5a31c95aac88a428c"
+        }
+      }
+    },
+    "official_controller_guide": {
+      "url": "https://www.gowinsemi.com/upload/database_doc/2057/document/6820d99fcc4d1.pdf",
+      "version": "IPUG279-1.4E",
+      "sha256": "9a8b1b4f39bcbbaaab327fd966b130901392c942c0c541e02beb40a6e5f859cb",
+      "pages_inspected": [
+        18,
+        19
+      ],
+      "findings": [
+        "Phase adjustment is required to meet read/write windows",
+        "Embedded named-port note concerns CST pin assignment, not complete SDC timing bounds"
+      ]
+    },
+    "installed_model_readme": {
+      "path": "/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE/ipcore/SDRC_EMB/GW2AR/simdoc/Readme.txt",
+      "sha256": "5f08a9aee287f504b15bd9dee8289a2adcb82de6e19a12fed7524dc37790a05b",
+      "memory_model_supplied": false,
+      "suggested_model": "Micron MT48LC8M16A2; generic simulation reference, not QN88 characterization"
+    }
+  },
+  "model_audit": {
+    "schema_version": 1,
+    "device": "GW2AR-LV18QN88C8/I7",
+    "model_complete": false,
+    "missing": [
+      "t_ac_max",
+      "t_oh_min",
+      "t_cmd_setup",
+      "t_cmd_hold",
+      "t_data_setup",
+      "t_data_hold",
+      "t_dqm_setup",
+      "t_dqm_hold",
+      "clock_flight_min",
+      "clock_flight_max",
+      "read_flight_min",
+      "read_flight_max",
+      "command_flight_min",
+      "command_flight_max",
+      "write_flight_min",
+      "write_flight_max",
+      "dqm_flight_min",
+      "dqm_flight_max",
+      "setup_uncertainty",
+      "hold_uncertainty",
+      "qualification.source",
+      "qualification.operating_conditions",
+      "qualification.boundary_accounting",
+      "qualification.status",
+      "qualification.frequency_range"
+    ],
+    "memory_mhz": 54,
+    "phase_degrees": 135,
+    "cas_latency": 2,
+    "burst_words": 4,
+    "period_ns": 18.51851851851852,
+    "nominal_launch_to_memory_edge_ns": 6.944444444444445,
+    "nominal_memory_edge_to_next_capture_ns": 11.574074074074074,
+    "signoff": false,
+    "scope": "Static I/O bounds only; routed path coverage, clock propagation, pulse widths, bus turnaround and SDRAM protocol remain to be checked.",
+    "static_ports": {
+      "O_sdram_cs_n": 0,
+      "O_sdram_cke": 1
+    },
+    "profile": {
+      "schema_version": 1,
+      "device": "GW2AR-LV18QN88C8/I7",
+      "reference_plane": "fpga_sdram_io_boundary",
+      "qualification": {
+        "status": "pending_vendor",
+        "source": null,
+        "operating_conditions": null,
+        "boundary_accounting": null,
+        "cas_latency": 2,
+        "burst_words": 4,
+        "min_mhz": null,
+        "max_mhz": null
+      },
+      "reported_features": {
+        "access_time_ns": 5.4,
+        "source": "Gowin DS226-2.7E section 2.2.1",
+        "url": "https://cdn.gowinsemi.com.cn/DS226E.pdf",
+        "note": "Feature listing only. Not substituted for a qualified tAC maximum or any other AC bound."
+      },
+      "parameters_ns": {
+        "t_ac_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_oh_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_cmd_setup": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_cmd_hold": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_data_setup": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_data_hold": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_dqm_setup": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "t_dqm_hold": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "clock_flight_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "clock_flight_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "read_flight_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "read_flight_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "command_flight_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "command_flight_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "write_flight_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "write_flight_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "dqm_flight_min": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "dqm_flight_max": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "setup_uncertainty": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        },
+        "hold_uncertainty": {
+          "ns": null,
+          "status": "missing",
+          "source": null
+        }
+      },
+      "unresolved_outside_static_sdc": [
+        "SDRAM tLZ/tHZ and output-enable bus turnaround",
+        "Clock pulse widths and duty-cycle bounds",
+        "Controller command spacing and refresh timing",
+        "Routed input/output path coverage and generated-clock propagation"
+      ]
+    }
+  },
+  "validation": {
+    "focused_checks": {
+      "complete": true,
+      "passed": true,
+      "cases": [
+        {
+          "name": "independent-arithmetic-and-sdc",
+          "passed": true
+        },
+        {
+          "name": "missing-t_ac_max",
+          "passed": true
+        },
+        {
+          "name": "missing-t_oh_min",
+          "passed": true
+        },
+        {
+          "name": "missing-t_cmd_setup",
+          "passed": true
+        },
+        {
+          "name": "missing-t_cmd_hold",
+          "passed": true
+        },
+        {
+          "name": "missing-t_data_setup",
+          "passed": true
+        },
+        {
+          "name": "missing-t_data_hold",
+          "passed": true
+        },
+        {
+          "name": "missing-t_dqm_setup",
+          "passed": true
+        },
+        {
+          "name": "missing-t_dqm_hold",
+          "passed": true
+        },
+        {
+          "name": "missing-clock_flight_min",
+          "passed": true
+        },
+        {
+          "name": "missing-clock_flight_max",
+          "passed": true
+        },
+        {
+          "name": "missing-read_flight_min",
+          "passed": true
+        },
+        {
+          "name": "missing-read_flight_max",
+          "passed": true
+        },
+        {
+          "name": "missing-command_flight_min",
+          "passed": true
+        },
+        {
+          "name": "missing-command_flight_max",
+          "passed": true
+        },
+        {
+          "name": "missing-write_flight_min",
+          "passed": true
+        },
+        {
+          "name": "missing-write_flight_max",
+          "passed": true
+        },
+        {
+          "name": "missing-dqm_flight_min",
+          "passed": true
+        },
+        {
+          "name": "missing-dqm_flight_max",
+          "passed": true
+        },
+        {
+          "name": "missing-setup_uncertainty",
+          "passed": true
+        },
+        {
+          "name": "missing-hold_uncertainty",
+          "passed": true
+        },
+        {
+          "name": "invalid-number--1",
+          "passed": true
+        },
+        {
+          "name": "invalid-number-True",
+          "passed": true
+        },
+        {
+          "name": "invalid-number-nan",
+          "passed": true
+        },
+        {
+          "name": "invalid-number-inf",
+          "passed": true
+        },
+        {
+          "name": "invalid-number-5.4",
+          "passed": true
+        },
+        {
+          "name": "invalid-profile-shapes",
+          "passed": true
+        },
+        {
+          "name": "scope-provenance-ranges",
+          "passed": true
+        },
+        {
+          "name": "static-port-coverage-contract",
+          "passed": true
+        },
+        {
+          "name": "timing-guard-nonfinite-frequency",
+          "passed": true
+        },
+        {
+          "name": "cli-refusals-no-stale-sdc",
+          "passed": true
+        },
+        {
+          "name": "build-preflight-before-clash-and-profile-integration",
+          "passed": true
+        },
+        {
+          "name": "single-and-split-pll-sdc-phase-alignment-and-refusals",
+          "passed": true
+        }
+      ],
+      "source_sha256": {
+        "io_timing.py": "41bcb0dc154373536651533cc0481923d0d33f6ccc34ea109fdf5e0086a4abc5",
+        "build.sh": "ab6fd1f58efe0f620dcd0c34c74cf5801c65738ee6fdc7d5374bcb5e171c6648",
+        "check_io_timing.py": "844bf5ae34696157a7503afdb80109432a110d755e4adcbd1ed57af7cc869756"
+      },
+      "note": "Artificial test bounds are not SDRAM specifications or I/O signoff."
+    },
+    "existing_timing_guard_results": {
+      "72": {
+        "report_sha256": "64c0ab00ebe1d9b7fb4e8a44439a45be487c5b7591b4d257c759ae2eebfdaabb",
+        "exit_code": 0,
+        "output": "PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 72 MHz constraint, 72.018 MHz Fmax, 0.003 ns worst setup slack; 0 setup / 0 hold violating endpoints\n"
+      },
+      "108": {
+        "report_sha256": "8817a7c8f4de317e2d0a131c23a46e80b5c9cf1a4c1b709e0b74a416ddf30d16",
+        "exit_code": 2,
+        "output": "FAIL: STA under supplied constraints (SDRAM I/O signoff unverified); 108 MHz constraint, 82.359 MHz Fmax, -2.883 ns worst setup slack; 2367 setup / 0 hold violating endpoints\n"
+      }
+    },
+    "initial_vendor_probe": {
+      "passed": false,
+      "sha256": "b8773e63ae834b0dad0f359648bd56a553210c1f95e8c38220f0cb8154a3540a",
+      "generated_sdc_sha256": "2ccd21ec4769dee3badab55ef2e74e4e22a63f9c44bff31f3d0a3b7db62c6129",
+      "diagnosis": "Clock alias ignored without -add; downstream clock lookups rejected",
+      "stage_reached": "SDC analysis"
+    },
+    "corrected_vendor_probe": {
+      "passed": false,
+      "blocked_by": "license server not responding",
+      "attempts": {
+        "vendor.log": {
+          "sha256": "c04ea91f70a9c7509988a7e16489e328cdea755313cb6e208435e7c389d7a8a6",
+          "output": "The license expires in 6 days.\n*** GOWIN Tcl Command Line Console  *** \nThe available OpenGL surface format was either not version 3.2 or higher or not a Core Profile.\nChromium on macOS will fall back to software rendering in this case.\nHardware acceleration and features such as WebGL will not be available.\ncurrent device: GW2AR-18C  GW2AR-LV18QN88C8/I7\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/burst-test_top.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/pins.cst\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/clocks.sdc\"\nLicense verification failed  Server not responding.\n\n    while executing\n\"run all\"\n    (file \"build.tcl\" line 22)\n"
+        },
+        "vendor-retry.log": {
+          "sha256": "e752a59d43a01dc334b457f850caed96531775085a1f3584ca8de0aa502e5468",
+          "output": "License verification failed  Server not responding.\n"
+        },
+        "vendor-retry2.log": {
+          "sha256": "e752a59d43a01dc334b457f850caed96531775085a1f3584ca8de0aa502e5468",
+          "output": "License verification failed  Server not responding.\n"
+        },
+        "vendor-after-send.log": {
+          "sha256": "c04ea91f70a9c7509988a7e16489e328cdea755313cb6e208435e7c389d7a8a6",
+          "output": "The license expires in 6 days.\n*** GOWIN Tcl Command Line Console  *** \nThe available OpenGL surface format was either not version 3.2 or higher or not a Core Profile.\nChromium on macOS will fall back to software rendering in this case.\nHardware acceleration and features such as WebGL will not be available.\ncurrent device: GW2AR-18C  GW2AR-LV18QN88C8/I7\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/burst-test_top.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cache.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/burst_memory.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/sdram.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/dual_pll.v\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/pins.cst\"\nadd new file: \"/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-io-model-tests/vendor-syntax-probe2/clocks.sdc\"\nLicense verification failed  Server not responding.\n\n    while executing\n\"run all\"\n    (file \"build.tcl\" line 22)\n"
+        }
+      },
+      "generated_sdc_sha256": "9e037b58bf2bdd25fa52920b64aa3d9d8477eba6de14e635da817edbe9a2735e",
+      "note": "Artificial unit-test bounds, not hardware specifications. Correction unvalidated in Gowin."
+    },
+    "pll_phase_model": {
+      "complete": true,
+      "passed": true,
+      "electrical_signoff": false,
+      "vendor_model_sha256": "ea60e176f48306d596dc11d2495641a49cd778447f539427f53da95430bf9081",
+      "source_sha256": {
+        "pll.v": "ee87e9d502d45b95a12e461ff5794eab89272b5f5a876b4fbe6b020b64b1c8aa",
+        "dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+        "check_pll_phases.py": "cc4cacc3389a9c0699fee6b1c4361ea0f2a6fd85cf34b046cbe2ad8413b322f5"
+      },
+      "cases": [
+        {
+          "name": "single54-p0",
+          "phase_degrees": 0,
+          "phase_bits": "0000",
+          "passed": true,
+          "output": "PASS: single54-p0, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 0.000000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p0-tb.v:26: $finish called at 50445764 (1ps)\n",
+          "fixture_sha256": "616d9ac2056a54235271a06351440434f82ba025396bfd427505d6c4f8e2031c"
+        },
+        {
+          "name": "split72-p0",
+          "phase_degrees": 0,
+          "phase_bits": "0000",
+          "passed": true,
+          "output": "PASS: split72-p0, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 0.000000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p0-tb.v:26: $finish called at 50445764 (1ps)\n",
+          "fixture_sha256": "cc98f6d40d4cffbc21fe9d788762cfe9b4636db0a0ab5bd53a1b7298d6cbf33c"
+        },
+        {
+          "name": "single54-p112.5",
+          "phase_degrees": 112.5,
+          "phase_bits": "0101",
+          "passed": true,
+          "output": "PASS: single54-p112.5, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 5.787000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p112.5-tb.v:26: $finish called at 50451551 (1ps)\n",
+          "fixture_sha256": "313fd46f126fa3011b8f6ef40d6974ea514312f4712588fca4470c78e0d0d76c"
+        },
+        {
+          "name": "split72-p112.5",
+          "phase_degrees": 112.5,
+          "phase_bits": "0101",
+          "passed": true,
+          "output": "PASS: split72-p112.5, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 5.787000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p112.5-tb.v:26: $finish called at 50451551 (1ps)\n",
+          "fixture_sha256": "fbb8b87609a095f3c61d2a91ec3e80d1db78010b2a266ea830ce38e0c6cfd0e5"
+        },
+        {
+          "name": "single54-p135",
+          "phase_degrees": 135,
+          "phase_bits": "0110",
+          "passed": true,
+          "output": "PASS: single54-p135, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 6.945000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p135-tb.v:26: $finish called at 50452709 (1ps)\n",
+          "fixture_sha256": "62dd747f9f2fc44e857f0452002675af18c4e57a887758d5c959c3ccf9aecce9"
+        },
+        {
+          "name": "split72-p135",
+          "phase_degrees": 135,
+          "phase_bits": "0110",
+          "passed": true,
+          "output": "PASS: split72-p135, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 6.945000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p135-tb.v:26: $finish called at 50452709 (1ps)\n",
+          "fixture_sha256": "51337414073e81121917d73e41c3717a95c7e8f16e43001372c1ebd6e9886a33"
+        },
+        {
+          "name": "single54-p157.5",
+          "phase_degrees": 157.5,
+          "phase_bits": "0111",
+          "passed": true,
+          "output": "PASS: single54-p157.5, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 8.102000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p157.5-tb.v:26: $finish called at 50453866 (1ps)\n",
+          "fixture_sha256": "75f4672e81ca84d7b4705c98c5ab7e856be087ac0ccb0d94737578b1a42b3120"
+        },
+        {
+          "name": "split72-p157.5",
+          "phase_degrees": 157.5,
+          "phase_bits": "0111",
+          "passed": true,
+          "output": "PASS: split72-p157.5, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 8.102000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p157.5-tb.v:26: $finish called at 50453866 (1ps)\n",
+          "fixture_sha256": "113694a08979db005e7d753ed69d62d50e0a7f901e8b2aaef762e9ad74a5ddf8"
+        },
+        {
+          "name": "single54-p225",
+          "phase_degrees": 225,
+          "phase_bits": "1010",
+          "passed": true,
+          "output": "PASS: single54-p225, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 11.574000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p225-tb.v:26: $finish called at 50457338 (1ps)\n",
+          "fixture_sha256": "7e8cc9f8261147056408d8b51c9134837333f90de90bc052efaa39c38e82f124"
+        },
+        {
+          "name": "split72-p225",
+          "phase_degrees": 225,
+          "phase_bits": "1010",
+          "passed": true,
+          "output": "PASS: split72-p225, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 11.574000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p225-tb.v:26: $finish called at 50457338 (1ps)\n",
+          "fixture_sha256": "d7b0f3d45f8e80eb5e921d1d834743163fda1c44c8e32d6bf28a7a734263955d"
+        },
+        {
+          "name": "single54-p337.5",
+          "phase_degrees": 337.5,
+          "phase_bits": "1111",
+          "passed": true,
+          "output": "PASS: single54-p337.5, eight locked samples, CPU 54 MHz, memory 54 MHz, separation 17.362000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/single54-p337.5-tb.v:26: $finish called at 50463126 (1ps)\n",
+          "fixture_sha256": "291a83e0f52e3429872f2f10bd4aa9e786a6e1b5597ebbb6d530173df31e46a1"
+        },
+        {
+          "name": "split72-p337.5",
+          "phase_degrees": 337.5,
+          "phase_bits": "1111",
+          "passed": true,
+          "output": "PASS: split72-p337.5, eight locked samples, CPU 72 MHz, memory 54 MHz, separation 17.362000 ns\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-pll-phases/split72-p337.5-tb.v:26: $finish called at 50463126 (1ps)\n",
+          "fixture_sha256": "2097e6437a4c4e58c97019e90a28db78866189fb3632ea0f9d80dca58b773151"
+        }
+      ]
+    },
+    "functional_phase_window": {
+      "complete": true,
+      "passed": true,
+      "electrical_signoff": false,
+      "frequency_mhz": 54,
+      "period_ns": 18.51851851851852,
+      "scope": "Functional phase/access-delay sensitivity only. Artificial delays are not memory limits.",
+      "unmodeled": [
+        "FPGA I/O routing and package skew",
+        "tOH minimum",
+        "command/write setup and hold",
+        "PLL relative jitter",
+        "PVT"
+      ],
+      "source_sha256": {
+        "boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+        "boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+        "boards/tangnano20k/sdram/burst_memory_tb.v": "ca7e7fddf1856c0d0a6a6afa100a0bbea7968dc1a93a8ed09e8a3f414645eaf1",
+        "boards/tangnano20k/sdram/check_phase_window.py": "19dd66e82fd350d0d9c9a04d40f4a6e7241ec04c0243ebaa659aa032f0df9023"
+      },
+      "cases": [
+        {
+          "phase_degrees": 90,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 13.88888888888889,
+          "ideal_read_margin_ns": 7.888888888888889,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 90,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 13.88888888888889,
+          "ideal_read_margin_ns": 1.8888888888888893,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 112.5,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 12.731481481481481,
+          "ideal_read_margin_ns": 6.731481481481481,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 112.5,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 12.731481481481481,
+          "ideal_read_margin_ns": 0.731481481481481,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 135,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 11.574074074074074,
+          "ideal_read_margin_ns": 5.574074074074074,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 135,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 11.574074074074074,
+          "ideal_read_margin_ns": -0.4259259259259256,
+          "expected_functional_pass": false,
+          "observed_functional_pass": false,
+          "matched_expectation": true,
+          "exit_code": 1,
+          "log_sha256": "2f28257b44bfc72a788ce558c72d94c1f8d4d9433e82453a19eb2672bb3481a6",
+          "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:129: word 000000 beat 0 got zzzzzzzz expected 1f3d5b79\n       Time: 200504645  Scope: burst_memory_tb.access\n"
+        },
+        {
+          "phase_degrees": 157.5,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 10.416666666666668,
+          "ideal_read_margin_ns": 4.416666666666668,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 157.5,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 10.416666666666668,
+          "ideal_read_margin_ns": -1.5833333333333321,
+          "expected_functional_pass": false,
+          "observed_functional_pass": false,
+          "matched_expectation": true,
+          "exit_code": 1,
+          "log_sha256": "2f28257b44bfc72a788ce558c72d94c1f8d4d9433e82453a19eb2672bb3481a6",
+          "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:129: word 000000 beat 0 got zzzzzzzz expected 1f3d5b79\n       Time: 200504645  Scope: burst_memory_tb.access\n"
+        },
+        {
+          "phase_degrees": 180,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 9.25925925925926,
+          "ideal_read_margin_ns": 3.2592592592592595,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 180,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 9.25925925925926,
+          "ideal_read_margin_ns": -2.7407407407407405,
+          "expected_functional_pass": false,
+          "observed_functional_pass": false,
+          "matched_expectation": true,
+          "exit_code": 1,
+          "log_sha256": "2f28257b44bfc72a788ce558c72d94c1f8d4d9433e82453a19eb2672bb3481a6",
+          "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:129: word 000000 beat 0 got zzzzzzzz expected 1f3d5b79\n       Time: 200504645  Scope: burst_memory_tb.access\n"
+        },
+        {
+          "phase_degrees": 225,
+          "artificial_tac_ns": 6,
+          "ideal_read_budget_ns": 6.944444444444445,
+          "ideal_read_margin_ns": 0.9444444444444446,
+          "expected_functional_pass": true,
+          "observed_functional_pass": true,
+          "matched_expectation": true,
+          "exit_code": 0,
+          "log_sha256": "35bd8432d351d15c4d4e7c1740d8aeca2f83c44fd6c7e6700150e3d4aa715a06",
+          "output": "PASS: 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 9 autonomous refreshes\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:186: $finish called at 281427305 (1ps)\n"
+        },
+        {
+          "phase_degrees": 225,
+          "artificial_tac_ns": 12,
+          "ideal_read_budget_ns": 6.944444444444445,
+          "ideal_read_margin_ns": -5.055555555555555,
+          "expected_functional_pass": false,
+          "observed_functional_pass": false,
+          "matched_expectation": true,
+          "exit_code": 1,
+          "log_sha256": "2f28257b44bfc72a788ce558c72d94c1f8d4d9433e82453a19eb2672bb3481a6",
+          "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-phase-window/phase_window_tb.v:129: word 000000 beat 0 got zzzzzzzz expected 1f3d5b79\n       Time: 200504645  Scope: burst_memory_tb.access\n"
+        }
+      ]
+    }
+  },
+  "source_sha256": {
+    "boards/tangnano20k/sdram/io_timing.py": "41bcb0dc154373536651533cc0481923d0d33f6ccc34ea109fdf5e0086a4abc5",
+    "boards/tangnano20k/sdram/io_timing_gw2ar18_qn88.json": "0d55614b70979419f46782ef77b65339a7daaae840b7ce0fb1b36c453f465a93",
+    "boards/tangnano20k/sdram/check_io_timing.py": "844bf5ae34696157a7503afdb80109432a110d755e4adcbd1ed57af7cc869756",
+    "boards/tangnano20k/sdram/build.sh": "ab6fd1f58efe0f620dcd0c34c74cf5801c65738ee6fdc7d5374bcb5e171c6648",
+    "boards/tangnano20k/check_gowin_timing.py": "2e315ae3b32216c3ddc54b040ff823c39eb39cc98a166b1b14a11eb9da03755a",
+    "boards/tangnano20k/sdram/SDRAM-IO-VENDOR-REQUEST.md": "ff5bf6ca6ab8cc61c480b24738c6df8b4157c0a7971fbd3357390a5b7d1b1810",
+    "boards/tangnano20k/sdram/dual_pll.v": "25326cc477577177c7bb79e1d8b79f4b59353328412146eef3156bb3356d1837",
+    "boards/tangnano20k/sdram/pll.v": "ee87e9d502d45b95a12e461ff5794eab89272b5f5a876b4fbe6b020b64b1c8aa",
+    "boards/tangnano20k/sdram/check_phase_window.py": "19dd66e82fd350d0d9c9a04d40f4a6e7241ec04c0243ebaa659aa032f0df9023",
+    "boards/tangnano20k/sdram/check_pll_phases.py": "cc4cacc3389a9c0699fee6b1c4361ea0f2a6fd85cf34b046cbe2ad8413b322f5",
+    "boards/tangnano20k/sdram/SDRAM-IO-2026-10-18.md": "da3a472f929d558125725729ed0b5e78889bb36f69994a7176c953fa3a95b2cc"
+  },
+  "support_request": {
+    "path": "SDRAM-IO-VENDOR-REQUEST.md",
+    "status": "sent",
+    "recipient": "support@gowinsemi.com",
+    "subject": "GW2AR-LV18QN88C8/I7 embedded SDR SDRAM AC timing and STA reference plane",
+    "gmail_message_id": "1a14da287d5db635",
+    "gmail_thread_id": "1a14da287d5db635",
+    "sent_utc": "2026-10-18T06:10:59Z",
+    "verified_sent_label": true,
+    "gmail_url": "https://mail.google.com/mail/u/0/#sent/1a14da287d5db635",
+    "last_thread_read_message_count": 1,
+    "reply_observed": false,
+    "reviewed_plaintext_body_sha256": "147f8a6dae77fdbca7af44198d8808f818513104aeab56de73022a4f21f134de"
+  },
+  "phase_follow_up": {
+    "status": "local_checks_passed_physical_sweep_not_run",
+    "build_parameter": "SDRAM_PHASE_DEGREES",
+    "supported_step_degrees": 22.5,
+    "defaults_unchanged": true,
+    "physical_or_electrical_signoff": false,
+    "next_experiment": "Standalone 54 MHz full-memory phase sweep after Gowin license access is restored",
+    "functional_positive_points": 8,
+    "expected_read_failures": 4,
+    "note": "Artificial access delays test sensitivity; no memory bounds inferred from simulation."
+  }
+}
