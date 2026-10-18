@@ -7,7 +7,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 | Design | Source | Build script | Clock |
 |---|---|---|---|
 | SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 78 MHz (placement mode 2) |
-| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | IMC CPU 72 MHz / SDRAM 54 MHz passes FP-RISC + SD; 108/54 MHz fails; earlier IM at 54 MHz and IMC at 27/48 MHz |
+| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | IMC CPU 72 MHz / SDRAM 54 MHz; 64 KiB cache and FIFO bridge 2.33x faster (2026-10-19, SD cases not rerun); 108/54 MHz fails; earlier IM at 54 MHz and IMC at 27/48 MHz |
 | Earlier serial SDRAM core | `src/SdramSimpleRisc.hs` | `sdram/build.sh serial` (Gowin) | cached 66 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 

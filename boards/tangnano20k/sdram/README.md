@@ -1,5 +1,13 @@
 # Tang Nano 20K SDRAM experiment
 
+The [cache and clock-bridge report](CACHE-2026-10-19.md) makes the 72/54 MHz
+pipeline 2.33 times faster on the board's FP-RISC classifier (2.84 s against
+6.61 s): a 64 KiB cache (`SDRAM_CACHE_LINE_BITS`, default 12), refills that
+drain only stores to their own line, and an asynchronous-FIFO clock bridge
+with posted writes. `run_perf.py` simulates where the cycles go and matched
+the board within 1.4%. Keeping lines valid on store hits (`WRITE_UPDATE`)
+passes simulation but fails on the board and is off by default.
+
 The [I/O timing audit](SDRAM-IO-2026-10-18.md) records the missing embedded
 memory bounds, a sourced constraint generator and the strict model gate.
 Current builds explicitly distinguish internal STA from full SDRAM I/O
@@ -16,8 +24,9 @@ CPU72/SDRAM54 image at 135 degrees was restored and FP-RISC numeric checks
 passed. This is an ambient board result, with full I/O signoff still pending.
 
 The board's 64-Mbit, 32-bit SDR SDRAM is usable as 8 MiB of main memory.
-The current [pipelined experiment](PIPELINE-2026-10-16.md) uses a unified 2 KiB
-cache with 16-byte lines, four posted masked writes and four-word SDRAM bursts.
+The current [pipelined experiment](PIPELINE-2026-10-16.md) uses a unified cache
+(64 KiB since 2026-10-19, originally 2 KiB) with 16-byte lines, four posted
+masked writes and four-word SDRAM bursts.
 `build.sh core` or `pipeline` selects it; `serial` retains the earlier 1 KiB
 word-cache image described in the historical results below. The BRAM image
 remains separate. RV32IM is the default. The optional C frontend passes board

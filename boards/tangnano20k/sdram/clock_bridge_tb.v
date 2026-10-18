@@ -56,14 +56,17 @@ module clock_bridge_tb #(
   end
  end
  task access(input wr,input [20:0] addr,input [31:0] data,input [3:0] lanes);
-  integer beats,cycles;begin
+  integer beats,cycles;reg posted;begin
    @(negedge cpu_clk);req=1;write=wr;address=addr;wdata=data;mask=lanes;
    @(posedge cpu_clk);while(!ready)@(posedge cpu_clk);
    #0.1;expected_operations=expected_operations+1;
    if(wr)expected[addr]=merged(expected[addr],data,lanes);
+   posted=done;
    @(negedge cpu_clk);req=0;write=!wr;address=21'h123456;wdata=32'hfaced00d;mask=0;
    beats=0;cycles=0;
    begin: response
+    // A posted write may complete in the clock right after its acceptance.
+    if(posted)begin if(!wr)$fatal(1,"read completed on acceptance");disable response;end
     while(1)begin
      @(posedge cpu_clk);#0.1;cycles=cycles+1;
      if(word_valid)begin
@@ -71,7 +74,8 @@ module clock_bridge_tb #(
       if(rdata!==expected[addr+beats])$fatal(1,"wrong CPU data %h at %h/%0d expected %h",rdata,addr,beats,expected[addr+beats]);
       beats=beats+1;comparisons=comparisons+1;
      end
-     if(done)begin if(word_valid)$fatal(1,"done must follow final replay beat");disable response;end
+     // Completion may arrive with the final replayed beat, never before it.
+     if(done)begin if(!wr && beats!=4)$fatal(1,"done before the final replay beat");disable response;end
      if(cycles>300)$fatal(1,"transaction timeout");
     end
    end
@@ -98,6 +102,7 @@ module clock_bridge_tb #(
   end
  endtask
  integer n,k;reg [31:0] seed=32'h193a6e02;
+ reg saw_full=0;always @(posedge cpu_clk)if(!reset && dut.full)saw_full<=1;
  initial begin
   for(n=0;n<256;n=n+1)begin memory[n]=32'h10203040^(n*32'h19030607);expected[n]=memory[n];end
   repeat(6)@(negedge cpu_clk);reset=0;
@@ -107,13 +112,23 @@ module clock_bridge_tb #(
    seed=seed^(seed<<13);seed=seed^(seed>>17);seed=seed^(seed<<5);
    access(1,seed[7:0],seed,seed[27:24]);access(0,{seed[7:2],2'b0},0,15);
   end
+  // Posted writes back to back fill the FIFO; the following read must see
+  // every one of them, in order, including repeated writes to one word.
+  for(n=0;n<40;n=n+1)begin
+   for(k=0;k<6;k=k+1)begin
+    seed=seed^(seed<<13);seed=seed^(seed>>17);seed=seed^(seed<<5);
+    access(1,{3'b110,n[1:0],k[2]&seed[0],k[1:0]},seed,seed[27:24]|(k==0 ? 4'h1:4'h0));
+   end
+   access(0,{3'b110,n[1:0],3'b000},0,15);access(0,{3'b110,n[1:0],3'b100},0,15);
+  end
+  if(!saw_full)$fatal(1,"the request FIFO never filled");
   repeat(30)@(posedge cpu_clk);
   if(accepted!=expected_operations || completed!=expected_operations)$fatal(1,"lost/duplicate transaction %0d/%0d expected %0d",accepted,completed,expected_operations);
   if(refreshes<5)$fatal(1,"backpressure/refresh was not exercised");
   for(k=0;k<4;k=k+1)reset_read(k);
   repeat(30)@(posedge cpu_clk);
   if(accepted!=expected_operations || completed!=expected_operations)$fatal(1,"wrong post-reset transaction count");
-  $display("PASS: CDC CPUhalf=%0.4f memhalf=%0.4f phase=%0.3f: all masks, 1233 operations, %0d comparisons, %0d stalls/refreshes, four interrupted-read resets",CPU_HALF,MEM_HALF,MEM_PHASE,comparisons,refreshes);
+  $display("PASS: CDC CPUhalf=%0.4f memhalf=%0.4f phase=%0.3f: all masks, 1553 operations including 240 back-to-back posted writes, %0d comparisons, %0d stalls/refreshes, four interrupted-read resets",CPU_HALF,MEM_HALF,MEM_PHASE,comparisons,refreshes);
   $finish;
  end
  initial begin #20000000;$fatal(1,"overall timeout");end

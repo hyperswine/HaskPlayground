@@ -36,6 +36,8 @@ module pipeline_cache_tb;
    end else if(phase!=0)begin
      if(phase<=4)begin
        mrdata<=ram[saved_address+phase-1];beat<=phase-1;valid<=1;phase<=phase+1;
+       // Like the clock bridge, completion sometimes arrives with the last beat.
+       if(phase==4 && tick%2==0)begin done<=1;phase<=0;end
      end else begin done<=1;phase<=0;end
    end
  end
@@ -79,6 +81,12 @@ module pipeline_cache_tb;
    for(i=0;i<80;i=i+1)begin add(64+(i%8),1,i*32'h01010101,1<<(i%4));add(64+(i%8),0,0,15);end
    for(i=0;i<32;i=i+1)add(128+i,1,i,15);
    for(i=0;i<32;i=i+1)add(128+i,0,0,15);
+   // A store that hits writes its data BSRAM word on the same edge as the
+   // lookup two requests later: store X, another word, then load X.
+   for(i=0;i<8;i=i+1)add(200+i,0,0,15);
+   for(i=0;i<16;i=i+1)begin
+     add(200+(i%8),1,32'h5a000000^(i*32'h00030507),1<<(i%4));add(200+((i+3)%8),0,0,15);add(200+(i%8),0,0,15);
+   end
    add(22'h1fffff,1,32'h87654321,15);add(22'h1fffff,0,0,15);
    repeat(4)@(negedge clk);reset=0;
  end

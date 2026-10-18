@@ -7,10 +7,14 @@ freq="${SDRAM_FREQ_MHZ:-54}"
 cpu_freq="${SDRAM_CPU_FREQ_MHZ:-$freq}"
 cache="${SDRAM_CACHE:-1}"
 rvc="${SDRAM_RVC:-0}"
+# Pipeline cache size: 2^(bits+4) bytes of 16-byte lines (12 = 64 KiB, the
+# board-verified default; 7 = the original 2 KiB).
+cache_line_bits="${SDRAM_CACHE_LINE_BITS:-12}"
 placement="${SDRAM_PLACE_OPTION:-2}"
 case "$placement" in 0|1|2|3|4) ;; *) echo "SDRAM_PLACE_OPTION must be 0 through 4" >&2;exit 1;; esac
 case "$rvc" in 0|1) ;; *) echo "SDRAM_RVC must be 0 or 1" >&2;exit 1;; esac
 case "$cache" in 0|1) ;; *) echo "SDRAM_CACHE must be 0 or 1" >&2;exit 1;; esac
+case "$cache_line_bits" in 7|8|9|10|11|12) ;; *) echo "SDRAM_CACHE_LINE_BITS must be 7 through 12" >&2;exit 1;; esac
 case "$freq" in 27|48|54|60|66) ;; *) echo "supported SDRAM clocks: 27, 48, 54, 60, 66 MHz" >&2;exit 1;; esac
 if [[ "$cpu_freq" != "$freq" ]];then
   if [[ ( "$cpu_freq" != 108 && "$cpu_freq" != 72 ) || "$freq" != 54 || ( "$mode" != core && "$mode" != pipeline ) ]];then
@@ -69,8 +73,12 @@ case "$mode" in
  *) echo "usage: build.sh [test|burst-test|core|pipeline|serial]" >&2; exit 1;;
 esac
 ide="/Applications/GowinIDE.app/Contents/Resources/Gowin_EDA/IDE"
+# Diagnostic overrides: build with another cache or clock-bridge source.
+cache_rtl="${SDRAM_CACHE_RTL:-$here/pipeline_cache.v}"
+bridge_rtl="${SDRAM_BRIDGE_RTL:-$here/clock_bridge.v}"
+for f in "$cache_rtl" "$bridge_rtl";do [[ -f "$f" ]] || { echo "missing RTL override: $f" >&2;exit 1; };done
 mkdir -p "$out"
-python3 - "$here" "$out" "$freq" "$mode" "$cache" "$phase" "$cpu_freq" <<'PYTHON'
+python3 - "$here" "$out" "$freq" "$mode" "$cache" "$phase" "$cpu_freq" "$cache_line_bits" <<'PYTHON'
 from pathlib import Path
 import sys
 src,out=map(Path,sys.argv[1:3]);freq=int(sys.argv[3])
@@ -82,7 +90,7 @@ sd_slot=sys.argv[4] in ('core','pipeline')
 if sys.argv[4] in ('core','pipeline','serial'):
     pipelined=sys.argv[4]!='serial'
     top=(src/('pipeline_top.v' if pipelined else 'core_top.v')).read_text()
-    top=top.replace('BOOT_ROM_FILE',str(src.parent/'bootrom/bootrom-sdram.hex')).replace('CORE_FREQUENCY',str(freq*1000000)).replace('CPU_FREQUENCY',str(cpu_freq*1000000))
+    top=top.replace('BOOT_ROM_FILE',str(src.parent/'bootrom/bootrom-sdram.hex')).replace('CORE_FREQUENCY',str(freq*1000000)).replace('CPU_FREQUENCY',str(cpu_freq*1000000)).replace('CACHE_LINE_BITS',sys.argv[8])
     if cpu_freq!=freq:
         top=top.replace('sdram_pll pll(.clk_27m(clk_27m),.clk_core(clk),.clk_sdram(clk_sdram),.pll_lock(lock));',
                         f'sdram_dual_pll #(.CPU_MHZ({cpu_freq})) pll(.clk_27m(clk_27m),.clk_core(clk),.clk_memory(clk_memory),.clk_sdram(clk_sdram),.pll_lock(lock));')
@@ -118,9 +126,9 @@ set_option -gen_verilog_sim_netlist 1
 add_file "$top"
 add_file "$out/memory.v"
 add_file "$here/cache.v"
-add_file "$here/pipeline_cache.v"
+add_file "$cache_rtl"
 add_file "$here/burst_memory.v"
-add_file "$here/clock_bridge.v"
+add_file "$bridge_rtl"
 add_file "$here/sdram.v"
 add_file "$out/pll.v"
 add_file "$here/dual_pll.v"
@@ -149,10 +157,12 @@ create_clock -name clk_27m -period 37.037037 [get_ports {clk_27m}]
 create_generated_clock -name clk_core -source [get_ports {clk_27m}] -multiply_by $((cpu_freq/3)) -divide_by 9 [get_pins {pll/cpu/pll/CLKOUT}]
 create_generated_clock -name clk_memory -source [get_ports {clk_27m}] -multiply_by 2 [get_pins {pll/memory/pll/CLKOUT}]
 create_generated_clock -name clk_sdram -source [get_ports {clk_27m}] -multiply_by 2 -phase $phase [get_pins {pll/memory/pll/CLKOUTP}]
-# Only the first metastability stages are asynchronous endpoints. Bundled
-# payload buses retain normal setup/hold analysis; no clock groups or blanket
+# Only the first metastability stages (the FIFO's Gray pointers and the read
+# response toggle) are asynchronous endpoints. Payload slots retain normal
+# setup/hold analysis; no clock groups or blanket
 # cross-domain false paths conceal their physical routing delays.
-set_false_path -to [get_regs {dual_clock.bridge/request_meta_s0}]
+set_false_path -to [get_regs {dual_clock.bridge/put_meta_0_s0 dual_clock.bridge/put_meta_1_s0 dual_clock.bridge/put_meta_2_s0}]
+set_false_path -to [get_regs {dual_clock.bridge/take_meta_0_s0 dual_clock.bridge/take_meta_1_s0 dual_clock.bridge/take_meta_2_s0}]
 set_false_path -to [get_regs {dual_clock.bridge/response_meta_s0}]
 SDC
 fi

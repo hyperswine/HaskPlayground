@@ -19,7 +19,7 @@ module top(input clk_27m,btn_s1,uart_rx,output uart_tx,
    .memory_data(rdata),.memory_hold(hold_cpu),.memory_address(address),.memory_write(write),.memory_wdata(wdata),.memory_mask(mask),
    .sd_miso(sd_dat0),.sd_sck(sd_clk),.sd_mosi(sd_cmd),.sd_cs(sd_dat3));
  wire req,mw,ready,done,word_valid;wire [20:0] ma;wire [31:0] md,mdata;wire [3:0] mm;wire [1:0] word_index;
- sdram_pipeline_cache #(.ROM_FILE("BOOT_ROM_FILE")) cache(clk,reset,address,write,wdata,mask,hold_cpu,rdata,
+ sdram_pipeline_cache #(.LINE_BITS(CACHE_LINE_BITS),.ROM_FILE("BOOT_ROM_FILE")) cache(clk,reset,address,write,wdata,mask,hold_cpu,rdata,
    req,mw,ma,md,mm,ready,done,mdata,word_valid,word_index);
  wire memory_req,memory_write,memory_ready,memory_done,memory_word_valid;
  wire [20:0] memory_address;wire [31:0] memory_wdata,memory_rdata;

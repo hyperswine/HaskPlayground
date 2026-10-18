@@ -69,6 +69,30 @@ replace_once('''  .clk(clk),.clk_sdram(phase_clk),.reset(reset),.req(req),.write
   .address(mem_address),.wdata(mem_wdata),.mask(mem_mask),.ready(mem_ready),.done(mem_done),.rdata(mem_rdata),
   .word_valid(mem_valid),.word_index(mem_index),''')
 replace_once('if(wait_cycles>40)', 'if(wait_cycles>160)')
+# Posted writes may complete on consecutive clocks; each completion must still
+# match exactly one accepted request.
+replace_once('''  if(!reset && done && previous_done)$fatal(1,"duplicate completion pulse");''',
+             '''  if(!reset && done)begin
+   if(completions>=acceptances)$fatal(1,"duplicate completion pulse");
+   completions=completions+1;
+  end''')
+# A posted write completes in the clock after its acceptance, before the
+# response loop's first sample.
+replace_once('''   else operations_read=operations_read+1;
+   @(negedge clk);req=0;''', '''   else operations_read=operations_read+1;
+   posted=done;
+   @(negedge clk);req=0;''')
+replace_once('''   begin: response
+    while(1)begin
+     @(posedge clk);#1;wait_cycles=wait_cycles+1;''', '''   begin: response
+    if(posted)begin if(!wr)$fatal(1,"read completed on acceptance");disable response;end
+    while(1)begin
+     @(posedge clk);#1;wait_cycles=wait_cycles+1;''')
+replace_once('''  integer beats,wait_cycles;
+  begin''', '''  integer beats,wait_cycles;reg posted;
+  begin''')
+replace_once(' reg previous_done=0;', ''' reg previous_done=0;integer acceptances=0,completions=0;
+ always @(posedge clk)if(!reset && req && ready)acceptances=acceptances+1;''')
 replace_once('wait(ready);', 'wait(mem_ready);')
 replace_once('repeat(REFRESH_INTERVAL*3+30)', 'repeat(REFRESH_INTERVAL*7+60)')
 replace_once('wait(!ready);read_line', 'wait(!mem_ready);read_line')

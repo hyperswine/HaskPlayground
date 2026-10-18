@@ -79,6 +79,17 @@ board and six FP-RISC checks, with only +0.002 ns internal setup slack. C-mode
 remains opt-in. This does not complete the
 96 MHz roadmap gate. See [the report and reproduction commands](boards/tangnano20k/sdram/PIPELINE-2026-10-16.md).
 
+## SDRAM cache and clock bridge (2026-10-19)
+
+The 72/54 MHz SDRAM pipeline was held 71% of the time on cache misses: 125 KiB
+of code thrashed the 2 KiB cache, and each refill took 25.7 CPU clocks through
+the mailbox bridge. A 64 KiB cache, refills that drain only same-line stores,
+and an asynchronous-FIFO bridge with posted writes cut the FP-RISC classifier
+from 6.61 to 2.84 seconds on the board (2.33 times). Keeping lines valid on
+store hits would reach 2.05 seconds in simulation but fails on the board and
+is off pending investigation. See
+[the report](boards/tangnano20k/sdram/CACHE-2026-10-19.md).
+
 ## Implementation status (2026-10-12): step 5 started
 
 Toward a pipeline, on the BRAM image:

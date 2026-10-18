@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Exercise the three-stage cache port and undefined tag RAM collisions.
+"""Exercise the three-stage cache port and undefined BSRAM collisions.
 
 The fixture compares reads and every ordered masked write with an independent
-RAM model. A simulation-only source copy returns X for same-address tag RAM
-read/write collisions, as physical BSRAM is allowed to do. The production
-collision guard must keep all replies correct; removing it must fail.
+RAM model. Simulation-only source copies return X for same-address tag RAM
+and data RAM read/write collisions, as physical BSRAM is allowed to do. The
+production guards (the tag collision flag, and forwarding the whole word an
+updating store wrote) must keep all replies correct; removing either must fail.
 """
 import argparse
 import hashlib
@@ -29,7 +30,7 @@ def main():
     fixture = (HERE/'pipeline_cache_tb.v').read_text()
     results = []
 
-    def run(name, rtl, tb, expected=0):
+    def run(name, rtl, tb, expected=0, failure='undefined tag collision used as a hit'):
         rtl_path = out/(name+'.v');rtl_path.write_text(rtl)
         tb_path = out/(name+'-tb.v');tb_path.write_text(tb)
         executable = out/(name+'-sim')
@@ -43,15 +44,20 @@ def main():
         if executed.returncode != expected:
             raise AssertionError(f'{name}: exit {executed.returncode}\n{text}')
         if expected == 0:
-            assert 'PASS: 201 reads, 121 ordered masked writes' in text, text
+            assert 'PASS: 241 reads, 137 ordered masked writes' in text, text
         else:
-            assert 'undefined tag collision used as a hit' in text, text
+            assert failure in text, text
         results.append({'name': name, 'passed': True, 'expected_exit': expected,
                         'rtl_sha256': digest(rtl), 'testbench_sha256': digest(tb), 'output': text})
         (out/'results.json').write_text(json.dumps({'complete': False, 'cases': results}, indent=2)+'\n')
         print(f'{name}: PASS', flush=True)
 
     run('normal', source, fixture)
+    # The experimental write-update policy (off by default) keeps its checks.
+    default_policy = 'parameter WRITE_UPDATE=0,'
+    assert source.count(default_policy) == 1
+    updating = source.replace(default_policy, 'parameter WRITE_UPDATE=1,')
+    run('normal-write-update', updating, fixture)
     read = 'if(advance)entry_tag<=tags[cpu_address[LINE_BITS+1:2]];'
     poisoned_read = "if(advance)entry_tag<=(tag_write && tag_write_index==cpu_address[LINE_BITS+1:2]) ? {(20-LINE_BITS){1'bx}}:tags[cpu_address[LINE_BITS+1:2]];"
     assert source.count(read) == 1, 'update the collision injection for the current tag read port'
@@ -73,6 +79,31 @@ def main():
     guard = '!tag_conflict && '
     assert poisoned.count(guard) == 1
     run('missing-collision-guard', poisoned.replace(guard, ''), checked, expected=1)
+    # A store that hits writes its word on the same edge as the next lookup.
+    word_read = "entry_word<=cpu_address[21] ? rom[cpu_address[8:0]]:words[cpu_address[LINE_BITS+1:0]];"
+    poisoned_word_read = ("entry_word<=cpu_address[21] ? rom[cpu_address[8:0]]:"
+                          "(words_write && words_index==cpu_address[LINE_BITS+1:0]) ? 32'bx:words[cpu_address[LINE_BITS+1:0]];")
+    assert updating.count(word_read) == 1, 'update the collision injection for the current data read port'
+    word_poisoned = updating.replace(word_read, poisoned_word_read)
+    word_coverage = '''integer word_collisions=0;
+ always @(posedge clk)if(!reset && cache.advance && cache.words_write && cache.update &&
+   cache.words_index==cache.cpu_address[LINE_BITS_TB+1:0] && !cache.cpu_address[21])word_collisions=word_collisions+1;
+ integer delay=0,'''.replace('LINE_BITS_TB', '7')
+    word_finish = '''if(word_collisions==0)$fatal(1,"data collision poisoning was not exercised");
+       $display("PASS: %0d data read/write collisions forwarded",word_collisions);
+       $display("PASS: %0d reads,'''
+    word_checked = fixture.replace(declaration, word_coverage).replace(finish, word_finish)
+    run('data-collision-poison', word_poisoned, word_checked)
+    word_guard = 'last_update ? last_word:merged(forwarded,last_data,last_mask)'
+    assert word_poisoned.count(word_guard) == 1
+    run('missing-data-forward', word_poisoned.replace(word_guard, 'merged(forwarded,last_data,last_mask)'),
+        word_checked, expected=1, failure='reply')
+    # The fixture's backend sometimes completes with the final beat, as the
+    # clock bridge does: the reply must then take that beat directly.
+    capture = 'cpu_rdata<=(memory_word_valid && memory_word_index==a2[1:0]) ? memory_rdata:fill_target;'
+    assert source.count(capture) == 1
+    run('missing-final-beat-capture', source.replace(capture, 'cpu_rdata<=fill_target;'), fixture,
+        expected=1, failure='reply')
     (out/'results.json').write_text(json.dumps({'complete': True,
         'source_sha256': digest(source), 'fixture_sha256': digest(fixture), 'cases': results}, indent=2)+'\n')
 
