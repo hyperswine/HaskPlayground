@@ -115,6 +115,11 @@ gone.
   64 KiB image limit; `R` runs there. Data/BSS/heap/stack can use the rest of
   SDRAM.
 - `M` clears the first 64 KiB, not all SDRAM; startup code initializes BSS.
+- `Q` uses a 32-bit little-endian word count and accepts up to 2 MiB, with
+  the loader stack at the top of RAM, `0x80800000`. `V` sends the uploaded words'
+  XOR readback as eight lowercase hex digits and newline. `H` runs from
+  `0x80000000`; `T` probes the UART with `DONE`. This is the same framing as
+  the FP-RISC Base uploader. The separate BRAM ROM bounds `Q` at 65,280 bytes.
   Ctrl-C cancels a running program's work and drains an outstanding memory
   operation; inside the ROM it is an ordinary byte.
 - Cycle counters count physical memory wait clocks, including cache lookup.

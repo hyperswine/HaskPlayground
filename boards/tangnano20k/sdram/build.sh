@@ -42,7 +42,7 @@ src,out=map(Path,sys.argv[1:3]);freq=int(sys.argv[3])
 if sys.argv[4] in ('core','pipeline','serial'):
     pipelined=sys.argv[4]!='serial'
     top=(src/('pipeline_top.v' if pipelined else 'core_top.v')).read_text()
-    top=top.replace('BOOT_ROM_FILE',str(src.parent/'bootrom/bootrom.hex')).replace('CORE_FREQUENCY',str(freq*1000000))
+    top=top.replace('BOOT_ROM_FILE',str(src.parent/'bootrom/bootrom-sdram.hex')).replace('CORE_FREQUENCY',str(freq*1000000))
     if pipelined and sys.argv[5]=='0':raise SystemExit('the pipeline requires its fixed-latency cache; use serial with SDRAM_CACHE=0')
     if not pipelined and sys.argv[5]=='0':
         start=top.index(' sdram_cache cache(');end=top.index(' sdram_memory mem(')

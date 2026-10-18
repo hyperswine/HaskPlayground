@@ -62,8 +62,8 @@ Every other address raises an access fault, and fetching outside the ROM and
 RAM raises an instruction access fault.
 
 The CPU starts in the boot ROM (`bootrom/`, C plus a short `crt0.S`), which
-implements the host protocol in software. The protocol is unchanged from the
-old hardware loader:
+implements the host protocol in software. The legacy commands retain their
+framing; Base images use the extended load and readback commands:
 
 | Byte | Meaning |
 |---|---|
@@ -71,6 +71,27 @@ old hardware loader:
 | `R` | run from `0x8000_0000` with every register and the trap state cleared (`mret`) |
 | `M` | clear the first 64 KiB of RAM |
 | `X` | nothing: every run already starts from zeroed registers |
+| `Q`, count (32-bit little endian), words | load up to 524,288 words (2 MiB) on SDRAM; the BRAM ROM bounds this at 16,320 words (64 KiB minus 256 bytes for its stack) |
+| `V` | reread the last accepted upload from RAM, XOR its 32-bit words, send eight lowercase hex digits plus newline |
+| `H` | alias for `R`, used by the Base uploader |
+| `T` | send `DONE` as a UART probe |
+
+`Q` rejects an oversized frame without RAM writes, consumes its declared
+payload, sends `ERR\n` and empties the readback range. A truncated load needs
+a board reset. A zero count produces an empty range. Accepted nonempty
+uploads append a zero sentinel when space remains within the command's
+bound. `M` also empties the readback range. `P` retains its historical 64 KiB
+limit and does not reserve loader stack space at that maximum.
+
+The SDRAM build uses `bootrom-sdram.hex` and puts the ROM stack at
+`0x8080_0000`; the BRAM build uses `bootrom.hex` and a stack at
+`0x8001_0000`. Keeping the images separate prevents the BRAM core from
+accepting SDRAM-sized writes. `bootrom/build.sh` rebuilds both committed
+images. `bootrom/check_loader.py` runs both actual C parsers with native
+UART/memory hooks, including the exact caps, oversized frames, corrupted
+RAM readback, reset causes and legacy commands.
+The [Base loader report](bootrom/BASE-LOADER-2026-10-18.md) records the
+implementation, verification and 48 MHz SDRAM build.
 
 A program ends by writing the finisher, which resets the CPU into the ROM
 with cause EXIT, or by taking a trap while `mtvec` is 0, which jumps to the
@@ -342,7 +363,7 @@ All 8 MiB passed 12,582,912 word comparisons. The earlier serial processor runs 
 or 66 MHz with its cache, with the same boot ROM and memory map as the BRAM
 image except that RAM is all 8 MiB at `0x80000000`. C uses a 1 MiB working
 set and FP-RISC uses a 2 MiB allocation on this image. Use `--freq-mhz 54`
-(or 66) with the board tools. The boot ROM loads images of at most 64 KiB, and
+(or 66) with the board tools. The boot ROM's `Q` command loads Base images of up to 2 MiB, and
 `M` clears only the first 64 KiB. SRAM programming leaves flash unchanged.
 
 The [new SDRAM pipeline](sdram/PIPELINE-2026-10-16.md) overlaps instructions

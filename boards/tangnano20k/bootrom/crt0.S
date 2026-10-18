@@ -2,13 +2,17 @@
  *
  * Every reset (power-on, button, Ctrl-C, a finisher exit) starts here, and so
  * does any trap taken while mtvec is 0: a program without a trap handler
- * falls back into the ROM.  The ROM runs from its own 2 KiB and uses the top
- * of the first 64 KiB of RAM as its stack; it has no .data or .bss.
+ * falls back into the ROM. The ROM runs from its own 2 KiB and uses the top
+ * of 64 KiB BRAM or 8 MiB SDRAM as its stack; it has no .data or .bss.
  */
     .section .text.entry,"ax",@progbits
     .globl _start
 _start:
+#ifdef ROM_SDRAM
+    li    sp, 0x80800000
+#else
     li    sp, 0x80010000
+#endif
     call  rom_main
 1:  j     1b
 

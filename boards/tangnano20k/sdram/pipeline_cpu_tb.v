@@ -6,6 +6,7 @@ module pipeline_cpu_tb #(
  parameter UART_BIT=868,
  parameter PIN_MODEL=0,
  parameter LOADER_DUMP=0,
+ parameter LOADER_EXTENDED=0,
  parameter PIN_FREQ_MHZ=48,
  parameter PIN_PHASE_DEGREES=180,
  parameter real PIN_TAC_NS=0.0
@@ -31,6 +32,8 @@ module pipeline_cpu_tb #(
  reg [31:0] ram[0:2097151];
  reg [31:0] expected_image[0:16383];
  integer i,words,send_index;reg [4095:0] image_file;
+ reg probe_finished=0,verify_finished=0;
+ reg [31:0] expected_xor=0;
  integer tick=0,delay=0,phase=0,reads=0,writes=0,held_clocks=0;
  integer long_held=0,ready_stalls=0,markers=0,quiet=0;
  reg saved_write=0,long_seen=0,break_sent=0,corrupt=0;
@@ -166,10 +169,17 @@ module pipeline_cpu_tb #(
  initial begin
    if(LOADER_TEST)begin
      wait(!reset);repeat(2000)@(negedge clk);
-     send_byte(8'h50);send_byte(words[7:0]);send_byte(words[15:8]);
+     if(LOADER_EXTENDED)begin
+       send_byte(8'h54);wait(probe_finished);repeat(UART_BIT)@(negedge clk);
+     end
+     send_byte(LOADER_EXTENDED ? 8'h51:8'h50);send_byte(words[7:0]);send_byte(words[15:8]);
+     if(LOADER_EXTENDED)begin send_byte(words[23:16]);send_byte(words[31:24]);end
      for(send_index=0;send_index<words*4;send_index=send_index+1)
        send_byte(expected_image[send_index/4] >> ((send_index%4)*8));
-     send_byte(LOADER_DUMP ? 8'h44:8'h52);
+     if(LOADER_EXTENDED)begin
+       send_byte(8'h56);wait(verify_finished);repeat(UART_BIT)@(negedge clk);
+     end
+     send_byte(LOADER_DUMP ? 8'h44:LOADER_EXTENDED ? 8'h48:8'h52);
    end else begin
      wait(long_seen);repeat(3)@(negedge clk);
      send_byte(8'h03);break_sent=1;
@@ -187,7 +197,20 @@ module pipeline_cpu_tb #(
    if(uart_tx!==1)$fatal(1,"UART framing");
    if(LOADER_TEST)begin
      $write("%c",transmitted);$fflush;
-     if(LOADER_DUMP)begin
+     if(LOADER_EXTENDED && !probe_finished)begin
+       last_four={last_four[23:0],transmitted};
+       if(last_four=="DONE")begin probe_finished=1;last_four=0;end
+     end else if(LOADER_EXTENDED && !verify_finished)begin
+       if(transmitted==10)begin
+         if(dump_digits!=8 || dump_value!==expected_xor)$fatal(1,"ROM XOR=%h expected=%h digits=%0d",dump_value,expected_xor,dump_digits);
+         verify_finished=1;
+       end else begin
+         if(transmitted>=48 && transmitted<=57)nibble=transmitted-48;
+         else if(transmitted>=97 && transmitted<=102)nibble=transmitted-87;
+         else $fatal(1,"ROM XOR nonhex output %h",transmitted);
+         dump_value={dump_value[27:0],nibble[3:0]};dump_digits=dump_digits+1;
+       end
+     end else if(LOADER_DUMP)begin
        if(transmitted==10)begin
          if(dump_digits!=8 || dump_value!==ram[dump_lines])$fatal(1,"debug ROM dump word%0d=%h backing=%h digits=%0d",dump_lines,dump_value,ram[dump_lines],dump_digits);
          dump_value=0;dump_digits=0;dump_lines=dump_lines+1;
@@ -210,7 +233,9 @@ module pipeline_cpu_tb #(
          ram[0],ram[1],ram[2],ram[3],expected_image[0],expected_image[1],expected_image[2],expected_image[3]);
        for(j=0;j<words;j=j+1)if(ram[j]!==expected_image[j])$fatal(1,"ROM uploaded word %0d mismatch",j);
        if(ram[words]!==0)$fatal(1,"ROM did not append zero sentinel");
-       $display("\nPASS: actual ROM UART loader, program execution and trap DONE");$finish;
+       if(LOADER_EXTENDED)$display("\nPASS: extended ROM T/Q/V/H UART loader, XOR readback, program execution and trap DONE");
+       else $display("\nPASS: actual ROM UART loader, program execution and trap DONE");
+       $finish;
      end
      end
    end else begin
@@ -246,7 +271,10 @@ module pipeline_cpu_tb #(
    corrupt=$test$plusargs("CORRUPT");
    if(!$value$plusargs("IMAGE=%s",image_file) || !$value$plusargs("WORDS=%d",words))$fatal(1,"missing image/word count");
    for(i=0;i<2097152;i=i+1)ram[i]=LOADER_TEST ? 32'h1f3d5b79^(i*32'h10204081)^(i<<11):0;
-   if(LOADER_TEST)$readmemh(image_file,expected_image,0,words-1);
+   if(LOADER_TEST)begin
+     $readmemh(image_file,expected_image,0,words-1);
+     for(i=0;i<words;i=i+1)expected_xor=expected_xor^expected_image[i];
+   end
    else $readmemh(image_file,ram,0,words-1);
    ram[COUNTER_LINE]=32'h13579bdf;
    repeat(5)@(negedge clk);reset=0;

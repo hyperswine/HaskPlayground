@@ -17,3 +17,4 @@ top
 
 __pycache__/
 !boards/tangnano20k/bootrom/bootrom.hex
+!boards/tangnano20k/bootrom/bootrom-sdram.hex

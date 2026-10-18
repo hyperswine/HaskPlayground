@@ -300,7 +300,7 @@ def main():
     parser.add_argument('--burst-rtl',type=Path,default=HERE/'burst_memory.v',help='burst adapter RTL override for controlled diagnostics')
     parser.add_argument('--sdram-rtl',type=Path,default=HERE/'sdram.v',help='SDRAM controller RTL override for controlled diagnostics')
     parser.add_argument('--rom-file',type=Path,help='simulation ROM override')
-    parser.add_argument('--loader-command',choices=['R','D'],default='R',help='D checks an eight-word debug-ROM dump')
+    parser.add_argument('--loader-command',choices=['R','D','H'],default='R',help='H checks the Base T/Q/V/H protocol; D checks an eight-word debug-ROM dump')
     args = parser.parse_args()
     if args.uart_bit_cycles<32 or args.uart_bit_cycles>1024 or args.uart_bit_cycles%2:
         parser.error('--uart-bit-cycles must be even and between 32 and 1024')
@@ -314,8 +314,8 @@ def main():
         parser.error('--pin-tac-ns must be finite, nonnegative and less than one clock')
     if not args.pin_model and (args.pin_freq_mhz!=48 or args.pin_phase_degrees!=180 or args.pin_tac_ns!=0):
         parser.error('pin timing overrides require --pin-model')
-    if args.loader_command=='D' and not args.boot_loader:
-        parser.error('--loader-command D requires --boot-loader')
+    if args.loader_command!='R' and not args.boot_loader:
+        parser.error('--loader-command requires --boot-loader')
     generated = args.generated.resolve()
     sources = [generated] if generated.is_file() else sorted(generated.glob('*.v'))
     if not sources:
@@ -323,6 +323,7 @@ def main():
     out = ROOT/('output/tangnano20k/pipeline-rtl'+('-c' if args.compressed else '')+('-loader' if args.boot_loader else '')+
                ('-pins' if args.pin_model else '')+(f'-uart{args.uart_bit_cycles}' if args.uart_bit_cycles!=868 else ''))
     if args.loader_command=='D':out=out.with_name(out.name+'-dump')
+    if args.loader_command=='H':out=out.with_name(out.name+'-extended')
     if args.pin_model and (args.pin_freq_mhz!=48 or args.pin_phase_degrees!=180 or args.pin_tac_ns!=0):
         out=out.with_name(out.name+f'-f{args.pin_freq_mhz}-p{args.pin_phase_degrees}-t{args.pin_tac_ns:g}')
     if args.burst_rtl.resolve()!=(HERE/'burst_memory.v').resolve():
@@ -347,7 +348,7 @@ def main():
     (out/'program.S').write_text(program)
     (out/'link.ld').write_text(LINK)
     (out/'rom.hex').write_text(args.rom_file.read_text() if args.rom_file else
-                             (HERE.parent/'bootrom/bootrom.hex').read_text() if args.boot_loader else
+                             (HERE.parent/'bootrom/bootrom-sdram.hex').read_text() if args.boot_loader else
                              '\n'.join(['800002b7','00028067']+['00000013']*510)+'\n')
     run(['riscv64-unknown-elf-gcc', '-march='+('rv32imc_zicsr_zifencei' if args.compressed else 'rv32im_zicsr_zifencei'),
          '-mabi=ilp32', '-mcmodel=medany', '-nostdlib', '-nostartfiles',
@@ -368,10 +369,12 @@ def main():
          '-P',f'pipeline_cpu_tb.PIN_PHASE_DEGREES={args.pin_phase_degrees}',
          '-P',f'pipeline_cpu_tb.PIN_TAC_NS={args.pin_tac_ns}',
          '-P',f'pipeline_cpu_tb.LOADER_DUMP={int(args.loader_command=="D")}',
+         '-P',f'pipeline_cpu_tb.LOADER_EXTENDED={int(args.loader_command=="H")}',
          '-o',out/'sim',*sources,HERE/'pipeline_cache.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v'])
     common=['vvp',out/'sim',f'+IMAGE={out}/image.hex',f'+WORDS={len(image)//4}']
     output=run(common,timeout=900 if args.boot_loader else 240)
     expected=('PASS: debug ROM memory dump' if args.loader_command=='D' else
+              'PASS: extended ROM T/Q/V/H UART loader' if args.loader_command=='H' else
               'PASS: actual ROM UART loader' if args.boot_loader else 'PASS: pipeline/cache guest')
     assert expected in output,output
     (out/'pass.log').write_text(output)

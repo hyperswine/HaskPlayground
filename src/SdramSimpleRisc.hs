@@ -1,9 +1,22 @@
-{-# LANGUAGE DataKinds, DeriveGeneric, DeriveAnyClass, TypeOperators, FlexibleContexts, RecordWildCards, NoImplicitPrelude, NumericUnderscores #-}
+{-# LANGUAGE DataKinds, DeriveGeneric, DeriveAnyClass, TypeOperators, FlexibleContexts, RecordWildCards, NoImplicitPrelude, NumericUnderscores, TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 module SdramSimpleRisc where
 import Clash.Prelude
 import Data.Maybe (isJust, isNothing)
 import qualified SimpleRisc as R
+import Language.Haskell.TH.Syntax (addDependentFile, runIO)
+import qualified Prelude as P
+
+-- SDRAM has a larger upload bound and puts the ROM stack above the image.
+-- Keeping this distinct prevents the BRAM build from accepting large writes.
+bootRomContents :: Vec 512 R.Word32
+bootRomContents = $(do
+  let path = "boards/tangnano20k/bootrom/bootrom-sdram.hex"
+  addDependentFile path
+  text <- runIO (P.readFile path)
+  let romWords = P.map (\line -> P.read ("0x" P.++ line) :: P.Integer) (P.lines text)
+  if P.length romWords P./= 512 then P.fail (path P.++ ": expected 512 words")
+  else listToVecTH (P.map P.fromInteger romWords :: [Unsigned 32]))
 
 -- The whole 8 MiB of SDRAM is RAM at 0x80000000. The boot ROM, finisher,
 -- BOOTCAUSE and UART follow the BRAM image's map; the ROM owns address 0.
@@ -83,6 +96,6 @@ circuit serialRx memoryData memoryReady memoryDone = (serialTx,req,wr,address,wd
  txRequest=register Nothing txNow
  txReady=(\r pending -> r && isNothing pending) <$> uartReady <*> txRequest
  -- The boot ROM in block RAM: its address comes from the registered state.
- romWord=rom R.bootRomContents romAddressOut
+ romWord=rom bootRomContents romAddressOut
  (req,wr,address,wdata,txNow,romAddressOut)=unbundle (mealy step initialState
    (bundle (memoryData,memoryReady,memoryDone,received,txReady,emergency,romWord)))

@@ -27,6 +27,7 @@ import qualified "haskplayground" SdramSimpleRisc as S
 import qualified Rv32Model as Model
 import qualified RiscVCompressed as C
 import Control.Monad (when)
+import Numeric (showHex)
 
 -- | The 64 KiB RAM as a sparse map: copying a 16384-entry vector on every
 -- write would make the simulations far too slow.  Unwritten words read as
@@ -301,6 +302,21 @@ prop_boot_rom_loads_programs = withTests 20 . property $ do
   ramRead (simRam programmed) (fromIntegral count + 1) === 0xdead_beef
   simTransmitted programmed === []
   assert (romAddress (cpuPc (simMachine programmed)))
+
+-- Base's protocol crosses the actual instruction decoder, UART registers,
+-- RAM loads and run transition; large bounds are covered by check_loader.py.
+prop_boot_rom_base_commands :: Property
+prop_boot_rom_base_commands = withTests 1 . property $ do
+  let program = [lui 2 0x10000, addi 1 0 0x4c, sw 1 2 0]
+      frame = [0x54, 0x51, 3, 0, 0, 0] P.++ P.concatMap wordBytes program P.++ [0x56, 0x48]
+      value = P.foldl xor 0 program
+      hex = showHex (toInteger value) ""
+      readback = P.map (fromIntegral . P.fromEnum) (P.replicate (8-P.length hex) '0' P.++ hex P.++ "\n")
+      finished = runInputs (startSim initialMachine (blankRam 0xdead_beef))
+        (P.replicate 500 Nothing P.++ hostBytes 800 frame P.++ P.replicate 10000 Nothing)
+  simTransmitted finished === doneBytes P.++ readback P.++ [0x4c] P.++ doneBytes
+  P.map (ramRead (simRam finished) . fromIntegral) [0..2 :: Int] === program
+  ramRead (simRam finished) 3 === 0
 
 -- Control flow and fetch timing -------------------------------------------------
 
@@ -1925,6 +1941,7 @@ simpleRiscGroup =
       ("Every register bank and x0 survives decode/writeback", prop_register_banks_and_writeback),
       ("RV32I arithmetic result reaches BRAM", prop_arithmetic_instruction_stores_expected_result),
       ("Boot ROM loads programs with a guard word", prop_boot_rom_loads_programs),
+      ("Boot ROM implements Base T/Q/V/H commands", prop_boot_rom_base_commands),
       ("Boot ROM clears RAM", prop_boot_rom_clears_memory),
       ("RV32M matches the reference semantics", prop_muldiv_matches_reference),
       ("Test encoders match known instructions", prop_encoders_match_known_instructions),
