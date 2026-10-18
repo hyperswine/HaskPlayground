@@ -8,6 +8,8 @@ word-cache image described in the historical results below. The BRAM image
 remains separate. RV32IM is the default. The optional C frontend passes board
 checks and six FP-RISC stress programs at 27 and 48 MHz. Four-beat variants
 use a 135-degree SDRAM clock; the legacy single-word variants keep 225 degrees.
+The pipeline also exposes the [microSD SPI byte port](SD-SPI-2026-10-18.md)
+at `0x10001000`, with a capability register at `+0x0c`; DMA remains unmapped.
 
 ## Cached 66 MHz experiment (2026-10-06)
 

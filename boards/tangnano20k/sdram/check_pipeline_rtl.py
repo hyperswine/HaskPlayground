@@ -38,6 +38,29 @@ _start:
     li t1,1
     bne t0,t1,failed
 
+    # SD SPI: actual CPU MMIO handshake, synchronized external loopback,
+    # mode-0 byte exchange, and capability register. DMA stays unmapped.
+    li t3,0x10001000
+    lw t0,12(t3)
+    li t1,0x53445031
+    bne t0,t1,failed
+    li t0,0x301
+    sw t0,8(t3)
+    lw t1,8(t3)
+    bne t0,t1,failed
+    li t0,0x96
+    sw t0,0(t3)
+spi_wait:
+    lw t0,4(t3)
+    bnez t0,spi_wait
+    lw t0,0(t3)
+    li t1,0x96
+    bne t0,t1,failed
+    li t0,0x300
+    sw t0,8(t3)
+    lw t1,8(t3)
+    bne t0,t1,failed
+
     # A known forced miss must count physical held clocks, not retire them.
     li s7,2
     li s0,0x80500000

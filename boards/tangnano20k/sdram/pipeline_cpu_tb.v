@@ -17,11 +17,13 @@ module pipeline_cpu_tb #(
  reg clk=0;always #(CLOCK_NS/2.0) clk=~clk;
  reg reset=1,uart_rx=1;
  wire uart_tx,hold_cpu,cpu_write;
+ wire sd_sck,sd_mosi,sd_cs;
  wire [21:0] cpu_address;wire [31:0] cpu_wdata,cpu_rdata;
  wire [3:0] cpu_mask;
  sdram_pipeline_risc cpu(.clk(clk),.reset(reset),.enable(1'b1),
    .uart_rx(uart_rx),.uart_tx(uart_tx),.memory_data(cpu_rdata),.memory_hold(hold_cpu),
-   .memory_address(cpu_address),.memory_write(cpu_write),.memory_wdata(cpu_wdata),.memory_mask(cpu_mask));
+   .memory_address(cpu_address),.memory_write(cpu_write),.memory_wdata(cpu_wdata),.memory_mask(cpu_mask),
+   .sd_miso(sd_mosi),.sd_sck(sd_sck),.sd_mosi(sd_mosi),.sd_cs(sd_cs));
  wire req,write,ready;wire [20:0] address;wire [31:0] wdata;wire [3:0] mask;
  wire done,valid;wire [31:0] rdata;wire [1:0] word_index;
  reg fake_done=0,fake_valid=0;reg [31:0] fake_rdata=0;reg [1:0] fake_word_index=0;

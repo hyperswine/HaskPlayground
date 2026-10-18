@@ -37,8 +37,10 @@ python3 - "$here" "$out" "$freq" "$mode" "$cache" "$phase" <<'PYTHON'
 from pathlib import Path
 import sys
 src,out=map(Path,sys.argv[1:3]);freq=int(sys.argv[3])
-# This top has no SD-card slot; do not constrain ports absent from it.
-(out/'pins.cst').write_text(''.join(line for line in (src.parent/'tangnano20k.cst').read_text().splitlines(True) if '"sd_' not in line))
+# Only the pipeline top exposes the SD-card slot; the other images retain
+# their original port list.
+sd_slot=sys.argv[4] in ('core','pipeline')
+(out/'pins.cst').write_text(''.join(line for line in (src.parent/'tangnano20k.cst').read_text().splitlines(True) if sd_slot or '"sd_' not in line))
 if sys.argv[4] in ('core','pipeline','serial'):
     pipelined=sys.argv[4]!='serial'
     top=(src/('pipeline_top.v' if pipelined else 'core_top.v')).read_text()

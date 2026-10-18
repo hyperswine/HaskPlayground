@@ -373,6 +373,9 @@ at 27/48 MHz, including six FP-RISC stress programs. Its first board-loader
 failure exposed a one-clock-late SDRAM burst capture and pin model. Four-beat
 variants now use a 135-degree SDRAM clock. The report separates
 physical results, timing candidates and remaining limits.
+The pipeline's [microSD SPI byte port](sdram/SD-SPI-2026-10-18.md) is mapped at
+`0x10001000`, with capability `0x53445031` at `+0x0c`. SPI DMA remains limited
+to the separate BRAM image.
 
 ## Separate RV64IM / Base host experiment
 

@@ -24,6 +24,7 @@ import qualified Hedgehog.Range as Range
 import "haskplayground" SimpleRisc
 import qualified Prelude as P
 import qualified "haskplayground" SdramSimpleRisc as S
+import qualified "haskplayground" SdramPipeline as SP
 import qualified Rv32Model as Model
 import qualified RiscVCompressed as C
 import Control.Monad (when)
@@ -1064,6 +1065,35 @@ prop_boot_rom_quietens_devices_before_run = withTests 1 . property $ do
 -- | The SPI master exchanges one byte in mode 0: MOSI is stable at every
 -- rising edge (MSB first), MISO is sampled there, SCK idles low and MOSI
 -- high, and the bus reads DATA/STATUS/CTRL back.
+-- The SDRAM wrapper's physical shifter must run during cache misses without
+-- dropping a pending MMIO answer or accepting the same write twice.
+prop_sdram_spi_survives_cache_holds :: Property
+prop_sdram_spi_survives_cache_holds = withTests 1 . property $ do
+  let request at wr value = Just (BusRequest (ioBase+at) 2 wr value)
+      clock io req held reset = fst (SP.spiIoStep io (req,reset,held,high))
+      configured = clock SP.initialSpiIo (request ioSpiControl True 0x301) False False
+      ready = clock configured Nothing False False
+      started = clock ready (request ioSpiData True 0x96) False False
+      busyHeld = P.iterate (\io -> clock io (request ioSpiData True 0x96) True False) started P.!! 100
+      resumed = clock busyHeld (request ioSpiData True 0x96) False False
+      reset = clock busyHeld Nothing True True
+      cap = clock SP.initialSpiIo (request 12 False 0) False False
+  SP.decodeTarget (ioBase+12) === IoTarget
+  SP.decodeTarget (ioBase+16) === UnmappedTarget
+  SP.decodeTarget (ioBase+ioDmaAddress) === UnmappedTarget
+  spiSelect (SP.slotSpi configured) === True
+  SP.slotAnswer started === Just 0
+  assert (spiBusy (SP.slotSpi started))
+  SP.slotAnswer busyHeld === Just 0
+  assert (not (spiBusy (SP.slotSpi busyHeld)))
+  spiIn (SP.slotSpi busyHeld) === 0xff
+  -- The held request belongs to the existing response, so resume consumes
+  -- the response instead of starting a second byte.
+  SP.slotAnswer resumed === Nothing
+  assert (not (spiBusy (SP.slotSpi resumed)))
+  reset === SP.initialSpiIo
+  SP.slotAnswer cap === Just 0x53445031
+
 prop_spi_exchanges_bytes_in_mode_0 :: Property
 prop_spi_exchanges_bytes_in_mode_0 = property $ do
   divider <- forAll (Gen.integral (Range.linear 0 6))
@@ -1925,6 +1955,7 @@ simpleRiscGroup =
       ("UART interrupt claims through the PLIC", prop_uart_interrupt_claims_through_plic),
       ("Reset quietens interrupt sources", prop_reset_quietens_devices),
       ("SPI exchanges bytes in mode 0", prop_spi_exchanges_bytes_in_mode_0),
+      ("SDRAM SPI survives cache holds", prop_sdram_spi_survives_cache_holds),
       ("FIFO is a bounded queue", prop_fifo_is_a_bounded_queue),
       ("A program reaches the I/O complex", prop_program_reaches_io_complex),
       ("SPI DMA moves blocks", prop_spi_dma_moves_blocks),

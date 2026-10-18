@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, TypeApplications, TypeOperators, FlexibleContexts, RecordWildCards, NoImplicitPrelude, NumericUnderscores, CPP #-}
+{-# LANGUAGE DataKinds, TypeApplications, TypeOperators, FlexibleContexts, RecordWildCards, NoImplicitPrelude, NumericUnderscores, CPP, DeriveGeneric, DeriveAnyClass #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 module SdramPipeline where
 import Clash.Prelude
@@ -8,6 +8,7 @@ import qualified SimpleRisc as R
 decodeTarget :: R.Word32 -> R.MemoryTarget
 decodeTarget address
   | address .&. 0xff80_0000 == 0x8000_0000 = R.RamTarget
+  | address >= R.ioBase && address <= R.ioBase + 12 = R.IoTarget
   | address .&. 0xffff_f000 == R.ioBase = R.UnmappedTarget
   | otherwise = R.decodeMemoryTarget address
 
@@ -24,7 +25,7 @@ initialMachine = R.boardMachine {R.cpuExternalMemory=True,
   }
 
 type Address = Unsigned 22
-type Input = (R.Word32,Bool,Maybe R.Byte,Bool,Bool,R.Word32,R.Word32)
+type Input = (R.Word32,Bool,Maybe R.Byte,Bool,Bool,R.Word32,R.Word32,Maybe R.Word32)
 type Output = (Address,Bool,R.Word32,BitVector 4,Maybe R.Byte)
 
 physical :: R.Word32 -> Address
@@ -34,7 +35,7 @@ physical address = case decodeTarget address of
   _ -> 0x20_0000 -- idle/device accesses never reach external RAM
 
 step :: R.Machine -> Input -> (R.Machine,Output)
-step machine (memoryWord,held,received,txReady,emergency,a,b)
+step machine (memoryWord,held,received,txReady,emergency,a,b,ioAnswer)
   | held =
       let ticking=R.tickHeld machine
           breaking=R.breakRequested machine emergency
@@ -43,7 +44,7 @@ step machine (memoryWord,held,received,txReady,emergency,a,b)
             _ -> ticking
        in (if breaking then R.resetCpu buffered else buffered,(0x20_0000,False,0,15,Nothing))
   | otherwise =
-      let injected=machine {R.cpuRfA=a,R.cpuRfB=b}
+      let injected=machine {R.cpuRfA=a,R.cpuRfB=b,R.cpuDevices=(R.cpuDevices machine) {R.devIo=ioAnswer}}
           (next,(index,write,tx))=R.machineStepCoreBy R.pipelinedCpuStep decodeTarget injected (memoryWord,received,txReady,emergency)
           bus=R.systemBus machine
           busActive=case R.busPhase bus of R.BusIdle -> isJust (R.cpuBusRequest machine); _ -> True
@@ -59,17 +60,50 @@ step machine (memoryWord,held,received,txReady,emergency,a,b)
             Nothing -> (physical readAddress,False,0,15,tx)
        in (next {R.cpuRegs=repeat 0},output)
 
-{-# ANN topEntity (Synthesize {t_name="sdram_pipeline_risc",
- t_inputs=[PortName "clk",PortName "reset",PortName "enable",PortName "uart_rx",PortName "memory_data",PortName "memory_hold"],
- t_output=PortProduct "" [PortName "uart_tx",PortName "memory_address",PortName "memory_write",PortName "memory_wdata",PortName "memory_mask"]}) #-}
-topEntity :: Clock XilinxSystem -> Reset XilinxSystem -> Enable XilinxSystem ->
- Signal XilinxSystem Bit -> Signal XilinxSystem R.Word32 -> Signal XilinxSystem Bool ->
- (Signal XilinxSystem Bit,Signal XilinxSystem Address,Signal XilinxSystem Bool,Signal XilinxSystem R.Word32,Signal XilinxSystem (BitVector 4))
-topEntity clk rst en rx dat held = withClockResetEnable clk rst en (circuit rx dat held)
+-- Only the SPI byte port is exposed. The BRAM image's DMA engine has a
+-- 64 KiB second RAM port and cannot address SDRAM, so its registers stay
+-- unmapped here. An answer survives a cache hold until the CPU can take it;
+-- the physical SPI shifter keeps running while the CPU is frozen.
+data SpiIo = SpiIo {slotSpi :: R.Spi, slotAnswer :: Maybe R.Word32}
+  deriving (Generic,NFDataX,Show,Eq)
 
-circuit :: HiddenClockResetEnable dom => Signal dom Bit -> Signal dom R.Word32 -> Signal dom Bool ->
- (Signal dom Bit,Signal dom Address,Signal dom Bool,Signal dom R.Word32,Signal dom (BitVector 4))
-circuit serialRx memoryData memoryHeld = (serialTx,address,write,wdata,mask)
+initialSpiIo :: SpiIo
+initialSpiIo = SpiIo R.initialSpi Nothing
+
+spiIoStep :: SpiIo -> (Maybe R.BusRequest,Bool,Bool,Bit) ->
+ (SpiIo,(Maybe R.Word32,(Bit,Bit,Bit)))
+spiIoStep io (request,reset,held,miso) = (next,(slotAnswer io,R.spiPins (slotSpi io)))
+ where
+ spi=(slotSpi io) {R.spiMiso=miso}
+ taken=if held || isJust (slotAnswer io) then Nothing else request
+ offset=maybe 0 (\q -> R.busAddress q .&. 0xfff) taken
+ writing at=case taken of
+   Just q | R.busWrite q && offset==at -> Just (R.busData q)
+   _ -> Nothing
+ value
+   | offset==R.ioSpiData = resize (R.spiIn spi)
+   | offset==R.ioSpiStatus = R.boolWord (R.spiBusy spi)
+   | offset==R.ioSpiControl = R.boolWord (R.spiSelect spi) .|. (resize (R.spiDivider spi) `shiftL` 8)
+   | offset==12 = 0x5344_5031 -- SDP1: SPI-only SDRAM peripheral version 1
+   | otherwise = 0
+ answer
+   | held = slotAnswer io
+   | otherwise = (\q -> if R.busWrite q then 0 else value) <$> taken
+ next
+   | reset = initialSpiIo
+   | otherwise = SpiIo (R.stepSpi (resize <$> writing R.ioSpiData) (writing R.ioSpiControl) spi) answer
+
+{-# ANN topEntity (Synthesize {t_name="sdram_pipeline_risc",
+ t_inputs=[PortName "clk",PortName "reset",PortName "enable",PortName "uart_rx",PortName "memory_data",PortName "memory_hold",PortName "sd_miso"],
+ t_output=PortProduct "" [PortName "uart_tx",PortName "memory_address",PortName "memory_write",PortName "memory_wdata",PortName "memory_mask",PortName "sd_sck",PortName "sd_mosi",PortName "sd_cs"]}) #-}
+topEntity :: Clock XilinxSystem -> Reset XilinxSystem -> Enable XilinxSystem ->
+ Signal XilinxSystem Bit -> Signal XilinxSystem R.Word32 -> Signal XilinxSystem Bool -> Signal XilinxSystem Bit ->
+ (Signal XilinxSystem Bit,Signal XilinxSystem Address,Signal XilinxSystem Bool,Signal XilinxSystem R.Word32,Signal XilinxSystem (BitVector 4),Signal XilinxSystem Bit,Signal XilinxSystem Bit,Signal XilinxSystem Bit)
+topEntity clk rst en rx dat held miso = withClockResetEnable clk rst en (circuit rx dat held miso)
+
+circuit :: HiddenClockResetEnable dom => Signal dom Bit -> Signal dom R.Word32 -> Signal dom Bool -> Signal dom Bit ->
+ (Signal dom Bit,Signal dom Address,Signal dom Bool,Signal dom R.Word32,Signal dom (BitVector 4),Signal dom Bit,Signal dom Bit,Signal dom Bit)
+circuit serialRx memoryData memoryHeld sdMiso = (serialTx,address,write,wdata,mask,sck,mosi,cs)
  where
  receivedNow=R.uartRx (register high (register high serialRx))
  emergency=register False ((==Just 3) <$> receivedNow)
@@ -88,5 +122,9 @@ circuit serialRx memoryData memoryHeld = (serialTx,address,write,wdata,mask)
  rfWrite=(\m stop pause -> if stop || pause then Nothing else R.cpuPendingWrite m) <$> machine <*> breaking <*> memoryHeld
  rfA=asyncRam (SNat @32) (fst . R.cpuReadIndices <$> machine) rfWrite
  rfB=asyncRam (SNat @32) (snd . R.cpuReadIndices <$> machine) rfWrite
- stepped=step <$> machine <*> bundle (memoryData,memoryHeld,received,txReady,emergency,rfA,rfB)
+ miso=register high (register high sdMiso)
+ (ioAnswer,ioPins)=unbundle (mealy spiIoStep initialSpiIo
+   (bundle (R.ioRequest <$> machine,R.clearRegisters <$> machine,memoryHeld,miso)))
+ (sck,mosi,cs)=unbundle ioPins
+ stepped=step <$> machine <*> bundle (memoryData,memoryHeld,received,txReady,emergency,rfA,rfB,ioAnswer)
  (address,write,wdata,mask,txNow)=unbundle (snd <$> stepped)
