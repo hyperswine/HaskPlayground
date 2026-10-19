@@ -5,12 +5,10 @@
 // Address bit21 selects boot ROM; bits20:0 are full SDRAM word addresses.
 module sdram_pipeline_cache #(
  parameter LINE_BITS=7, // 128 x 16-byte lines; 2 KiB by default
- // 1: a store that hits updates its cached word and keeps the line valid.
+ // 1: a store that hits updates its cached word and keeps the line valid
+ // (board-verified with the banked data array, 2026-10-19).
  // 0: every store invalidates its line (the original policy).
- // Experimental: 1 passes every simulation, including Gowin netlists of
- // the cache alone, but the board image fails FP-RISC (2026-10-19). Keep 0
- // until that hardware-only failure is understood.
- parameter WRITE_UPDATE=0,
+ parameter WRITE_UPDATE=1,
  parameter ROM_FILE="boards/tangnano20k/bootrom/bootrom.hex"
 )(input clk,reset,input [21:0] cpu_address,input cpu_write,
  input [31:0] cpu_wdata,input [3:0] cpu_mask,
@@ -22,7 +20,12 @@ module sdram_pipeline_cache #(
  localparam IDLE=0,WRITE_SEND=1,WRITE_WAIT=2,READ_SEND=3,READ_WAIT=4;
  reg [2:0] state;
  reg clearing;reg [LINE_BITS-1:0] clear_index;
- reg [31:0] words[0:(1<<(LINE_BITS+2))-1];
+ // The data array is banks of 512 x 32 words, one wide BSRAM each (so
+ // LINE_BITS>=7). Left to itself Gowin maps a deep array to narrow slices
+ // (16Kx1, 8Kx2), and on the board a single-word write to those sometimes
+ // changed a bit of another word in the slice, which write-update's isolated
+ // stores hit; the 512x32 mode did not (WRITE-UPDATE-2026-10-19.md).
+ localparam BANKS=(1<<(LINE_BITS+2))/512,BANK_BITS=BANKS>1 ? $clog2(BANKS):1;
  // One synchronous read and one write port map the small tag array to
  // BSRAM. Distributed tags create a broad asynchronous address mux which
  // otherwise dominates timing even though the CPU request is registered.
@@ -31,7 +34,7 @@ module sdram_pipeline_cache #(
  initial $readmemh(ROM_FILE,rom);
  reg v1,v2,w1,w2,hit2,keep2;
  reg [21:0] a1,a2;
- reg [31:0] d1,d2,entry_word;
+ reg [31:0] d1,d2;
  reg [3:0] m1,m2;
  reg [19-LINE_BITS:0] entry_tag;
  reg tag_conflict;
@@ -91,7 +94,27 @@ module sdram_pipeline_cache #(
  wire [31:0] store_word=merged(cpu_rdata,d2,m2);
  wire words_write=(state==READ_WAIT && memory_word_valid) || update;
  wire [LINE_BITS+1:0] words_index=update ? a2[LINE_BITS+1:0]:{a2[LINE_BITS+1:2],memory_word_index};
- always @(posedge clk)if(!reset && words_write)words[words_index]<=update ? store_word:memory_rdata;
+ wire [31:0] words_data=update ? store_word:memory_rdata;
+ // Every bank reads cpu_address on every edge; entry_word is the word read on
+ // the last advancing edge (the held copy otherwise), as the read enable
+ // advance would give, with a single copy rather than one per bank.
+ wire [32*BANKS-1:0] bank_word;
+ genvar b;
+ generate for(b=0;b<BANKS;b=b+1)begin: banks
+   reg [31:0] mem[0:511] /* synthesis syn_ramstyle = "block_ram" */;
+   reg [31:0] read_word;
+   always @(posedge clk)begin
+     if(!reset && words_write && (words_index>>9)==b)mem[words_index[8:0]]<=words_data;
+     read_word<=mem[cpu_address[8:0]];
+   end
+   assign bank_word[32*b+:32]=read_word;
+ end endgenerate
+ reg advanced,read_rom;reg [BANK_BITS-1:0] read_bank;reg [31:0] rom_word,held_word;
+ wire [31:0] entry_word=!advanced ? held_word:read_rom ? rom_word:bank_word[32*read_bank+:32];
+ always @(posedge clk)begin
+   advanced<=advance;held_word<=entry_word;
+   read_rom<=cpu_address[21];read_bank<=cpu_address[LINE_BITS+1:0]>>9;rom_word<=rom[cpu_address[8:0]];
+ end
  reg [31:0] forwarded;
  always @* begin
    forwarded=filled ? fill_data[a1[1:0]]:entry_word;
@@ -113,7 +136,6 @@ module sdram_pipeline_cache #(
      end
      if(advance)begin
        a1<=cpu_address;w1<=cpu_write;d1<=cpu_wdata;m1<=cpu_mask;v1<=1;
-       entry_word<=cpu_address[21] ? rom[cpu_address[8:0]]:words[cpu_address[LINE_BITS+1:0]];
        tag_conflict<=tag_write && tag_write_index==cpu_address[LINE_BITS+1:2];
        a2<=a1;w2<=w1;d2<=d1;m2<=m1;v2<=v1;hit2<=hit1;keep2<=hit1 && !evicted;
        cpu_rdata<=forwarded;

@@ -52,16 +52,19 @@ def main():
         (out/'results.json').write_text(json.dumps({'complete': False, 'cases': results}, indent=2)+'\n')
         print(f'{name}: PASS', flush=True)
 
-    run('normal', source, fixture)
-    # The experimental write-update policy (off by default) keeps its checks.
-    default_policy = 'parameter WRITE_UPDATE=0,'
+    # Write-update is the default; the original invalidating policy keeps
+    # its own run.
+    default_policy = 'parameter WRITE_UPDATE=1,'
     assert source.count(default_policy) == 1
-    updating = source.replace(default_policy, 'parameter WRITE_UPDATE=1,')
+    updating = source
     run('normal-write-update', updating, fixture)
+    invalidating = source.replace(default_policy, 'parameter WRITE_UPDATE=0,')
+    run('normal-invalidate', invalidating, fixture)
     read = 'if(advance)entry_tag<=tags[cpu_address[LINE_BITS+1:2]];'
     poisoned_read = "if(advance)entry_tag<=(tag_write && tag_write_index==cpu_address[LINE_BITS+1:2]) ? {(20-LINE_BITS){1'bx}}:tags[cpu_address[LINE_BITS+1:2]];"
     assert source.count(read) == 1, 'update the collision injection for the current tag read port'
-    poisoned = source.replace(read, poisoned_read)
+    # Every invalidating store writes a tag: the most tag collisions.
+    poisoned = invalidating.replace(read, poisoned_read)
     declaration = 'integer delay=0,'
     coverage = '''integer collisions=0;
  always @(posedge clk)if(!reset && cache.tag_conflict && !cache.a1[21])begin
@@ -80,9 +83,9 @@ def main():
     assert poisoned.count(guard) == 1
     run('missing-collision-guard', poisoned.replace(guard, ''), checked, expected=1)
     # A store that hits writes its word on the same edge as the next lookup.
-    word_read = "entry_word<=cpu_address[21] ? rom[cpu_address[8:0]]:words[cpu_address[LINE_BITS+1:0]];"
-    poisoned_word_read = ("entry_word<=cpu_address[21] ? rom[cpu_address[8:0]]:"
-                          "(words_write && words_index==cpu_address[LINE_BITS+1:0]) ? 32'bx:words[cpu_address[LINE_BITS+1:0]];")
+    word_read = "read_word<=mem[cpu_address[8:0]];"
+    poisoned_word_read = ("read_word<=(words_write && words_index==cpu_address[LINE_BITS+1:0]) ? 32'bx:"
+                          "mem[cpu_address[8:0]];")
     assert updating.count(word_read) == 1, 'update the collision injection for the current data read port'
     word_poisoned = updating.replace(word_read, poisoned_word_read)
     word_coverage = '''integer word_collisions=0;

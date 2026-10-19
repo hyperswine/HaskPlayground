@@ -29,7 +29,7 @@ def main():
     p.add_argument('--mem-mhz', type=float, default=54)
     p.add_argument('--single-clock', action='store_true', help='no bridge; memory runs on the CPU clock')
     p.add_argument('--line-bits', type=int, default=12)
-    p.add_argument('--write-update', type=int, choices=[0, 1], default=0)
+    p.add_argument('--write-update', type=int, choices=[0, 1], default=1)
     p.add_argument('--start', default='DTREE BEGIN train=128 test=64 bins=8 depth=5 minLeaf=2')
     p.add_argument('--end', default='FPR EXIT 0')
     p.add_argument('--limit', type=int, default=800_000_000)

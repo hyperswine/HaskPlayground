@@ -1,0 +1,3 @@
+DTREE BEGIN train=128 test=64 bins=8 depth=5 minLeaf=2
+DONE
+ValueError: CPU halted without successful runtime exit

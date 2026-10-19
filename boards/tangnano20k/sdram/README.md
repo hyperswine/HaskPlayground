@@ -5,8 +5,14 @@ pipeline 2.33 times faster on the board's FP-RISC classifier (2.84 s against
 6.61 s): a 64 KiB cache (`SDRAM_CACHE_LINE_BITS`, default 12), refills that
 drain only stores to their own line, and an asynchronous-FIFO clock bridge
 with posted writes. `run_perf.py` simulates where the cycles go and matched
-the board within 1.4%. Keeping lines valid on store hits (`WRITE_UPDATE`)
-passes simulation but fails on the board and is off by default.
+the board within 1.4%.
+
+The [write-update follow-up](WRITE-UPDATE-2026-10-19.md) keeps lines valid on
+store hits (`WRITE_UPDATE`, now default 1): 2.06 s, 1.38 times faster again.
+It failed on the board until the data array was built from 512x32 BSRAM
+banks; Gowin's narrow BSRAM slices corrupted other words under isolated
+writes. `run_gls.py` simulates a whole Gowin netlist under Verilator
+(`gowin_models.v`), and `bsram-rdw/` probes block-RAM behaviour on the board.
 
 The [I/O timing audit](SDRAM-IO-2026-10-18.md) records the missing embedded
 memory bounds, a sourced constraint generator and the strict model gate.

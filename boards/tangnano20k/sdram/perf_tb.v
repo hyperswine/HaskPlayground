@@ -15,7 +15,7 @@ module perf_tb #(
  parameter PHASE_DEGREES=135,
  parameter UART_BIT=32,
  parameter LINE_BITS=12,
- parameter WRITE_UPDATE=0
+ parameter WRITE_UPDATE=1
 );
  localparam real CPU_NS=1000.0/CPU_MHZ;
  localparam real MEM_NS=1000.0/MEM_MHZ;

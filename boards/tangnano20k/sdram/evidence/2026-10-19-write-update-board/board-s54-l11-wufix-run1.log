@@ -1,0 +1,6 @@
+DTREE BEGIN train=128 test=64 bins=8 depth=5 minLeaf=2
+DTREE DATA READY
+Base panic: F64: invalid boxed value
+FPR EXIT 1
+DONE
+ValueError: CPU halted without successful runtime exit
