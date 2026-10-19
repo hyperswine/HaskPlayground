@@ -182,3 +182,38 @@ and `manifest.json`. The archived generated RTL and the final current-source
 RTL differ only in source-location comments, which is verified by a
 comment-stripped byte comparison in the manifest. The bitstream hash ties
 the physical run to the measured vendor timing report.
+
+## Follow-up: larger FP-RISC regression, 2026-10-20
+
+The 72/54 MHz acceptance above applies to the recorded smaller workload.
+A new 512-row classifier repeated ten times with FP-RISC's opt-in collector
+exposes intermittent wrong trees/prediction digests on this same bitstream,
+despite a successful guest exit. Do not extend its acceptance to this larger
+workload. The exact failing ELF passes all ten iterations in QEMU after only
+its UART output instructions are adapted, preserving every other byte/address.
+
+A fresh build of the same E2-retimed RTL at CPU/SDRAM 48/48 MHz, 135-degree
+SDRAM phase, RVC, 64 KiB banked write-update cache and placement option 2
+passes all ten physical iterations. Reported internal Fmax is 55.269 MHz,
+worst setup slack +2.740 ns, zero setup/hold violating endpoints. External
+SDRAM I/O/PVT qualification is still incomplete. This narrows the failure to
+an execution-profile difference; timing, CDC ratio, placement and memory
+behavior have not been isolated as causes.
+
+The accepted larger-workload image is
+`output/tangnano20k/gc-validation-c48-20261020/impl/pnr/sdram_test.fs`, SHA256
+`032849eeb6fe291eb8b73038ed0ef88f9ffacfe24e1e834342672683ac539f40`.
+The board is left on this 48/48 MHz volatile SRAM image. No flash/SD writes
+were performed. See the sibling FP-RISC
+[reclamation report](../../../fprisc/docs/2026-10-20-TANGNANO20K-GC.md)
+and its tracked evidence for both the passing run and rejected 72 MHz run.
+
+Rebuild from HaskPlayground:
+
+```sh
+SDRAM_CPU_FREQ_MHZ=48 SDRAM_FREQ_MHZ=48 SDRAM_RVC=1 \
+  SDRAM_CACHE_LINE_BITS=12 SDRAM_PLACE_OPTION=2 SDRAM_PHASE_DEGREES=135 \
+  SDRAM_RTL_FILE="$PWD/output/tangnano20k/sdram-generated/SdramPipeline-1/SdramPipeline.topEntity/sdram_pipeline_risc.v" \
+  SDRAM_OUT="$PWD/output/tangnano20k/gc-validation-c48-20261020" \
+  boards/tangnano20k/sdram/build.sh pipeline
+```
