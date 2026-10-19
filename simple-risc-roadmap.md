@@ -13,7 +13,8 @@ five ways, and this plan addresses them in turn:
 3. Done (2026-10-11): the program loader, `DONE` reply and end-of-image halt
    moved out of the CPU into a boot ROM at address 0, and RAM moved to
    `0x8000_0000`. Ctrl-C and the finisher are resets into the ROM.
-4. Never checked against the official architecture tests.
+4. Done (2026-10-19, simulation): riscv-arch-test passes on every image it
+   fits, with Spike as the reference.
 5. Slow: one instruction at a time, 9 cycles each, about 75 for
    multiply/divide.
 
@@ -349,6 +350,29 @@ fixed or documented as a deliberate deviation (for example "misaligned
 accesses trap rather than being emulated").
 
 **Size:** medium. Mostly harness work; then whatever the tests find.
+
+**Status (2026-10-19): done in simulation.** `boards/tangnano20k/arch-tests/
+run_arch_tests.py` runs riscv-arch-test 3.9.1 under RISCOF with Spike
+(`--priv=m`) as the reference. Each test runs on a Verilator model of the
+generated Verilog, with a stub ROM in place of the UART loader and the
+signature read from RAM after the finisher halt. Results:
+
+| image | tests | pass | fail | too big |
+|---|---:|---:|---:|---:|
+| SDRAM pipeline with RVC (the board image), RV32IMCZicsr_Zifencei | 92 | 92 | 0 | 0 |
+| SDRAM pipeline, RV32IMZicsr_Zifencei | 63 | 63 | 0 | 0 |
+| BRAM pipeline with RVC | 92 | 85 | 0 | 7 |
+| BRAM pipeline | 63 | 56 | 0 | 7 |
+
+The suites are I, M, C (without the Zcb tests), Zifencei and the privilege
+tests: ECALL, EBREAK, and misaligned accesses and targets, which trap. No
+test failed, so the core did not change. The seven tests not run on BRAM
+are the branch and JAL tests, 226 KiB to 1.7 MiB images against 64 KiB of
+RAM; they pass on SDRAM. 3.9.1 has no Zicsr suite: CSR instructions are
+exercised only through the trap handler. No applicable test raises an
+illegal-instruction trap or uses interrupts. The board path (signature over
+the UART) is not built. See
+[the report](boards/tangnano20k/ARCH-TESTS-2026-10-19.md).
 
 ## Step 5: a real pipeline
 

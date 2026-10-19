@@ -17,6 +17,16 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 
 
+def sv_safe(text):
+    """Rename Verilog identifiers that SystemVerilog reserves.
+
+    Clash emits legal Verilog identifiers that Verilator, parsing as
+    SystemVerilog, rejects.
+    """
+    return re.sub(r'\b(new|byte|bit|logic|int|do|final|type|ref|this|string|unique|priority|break|continue|return|void|shortint|longint|chandle|class|package|import|export|context|bind|alias|const|static|automatic|local|virtual|extends|super|null|inside|dist|solve|before|wait_order|randomize|with|matches|tagged|interface|modport|program|property|sequence|cover|assert|assume|expect|clocking|constraint|covergroup|coverpoint|cross|bins|binsof|illegal_bins|ignore_bins|first_match|throughout|within|intersect|join_any|join_none|forkjoin|struct|union|enum|typedef|packed|var|rand|randc|pure|protected|foreach|endclass|endpackage)\b(?!\s*\()',
+                  lambda m: m[1]+'_sv', text)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('image', type=Path, help='raw binary loaded at 0x8000_0000')
@@ -49,9 +59,7 @@ def main():
         text, full = re.subn(r"10'd867\b", "10'd31", text)
         text, half = re.subn(r"10'd433\b", "10'd15", text)
         assert full >= 6 and half >= 1, (full, half)
-        # Clash emits legal Verilog identifiers that SystemVerilog reserves.
-        text = re.sub(r'\b(new|byte|bit|logic|int|do|final|type|ref|this|string|unique|priority|break|continue|return|void|shortint|longint|chandle|class|package|import|export|context|bind|alias|const|static|automatic|local|virtual|extends|super|null|inside|dist|solve|before|wait_order|randomize|with|matches|tagged|interface|modport|program|property|sequence|cover|assert|assume|expect|clocking|constraint|covergroup|coverpoint|cross|bins|binsof|illegal_bins|ignore_bins|first_match|throughout|within|intersect|join_any|join_none|forkjoin|struct|union|enum|typedef|packed|var|rand|randc|pure|protected|foreach|endclass|endpackage)\b(?!\s*\()',
-                      lambda m: m[1]+'_sv', text)
+        text = sv_safe(text)
         target = out/source.name
         target.write_text(text)
         copied.append(target)
