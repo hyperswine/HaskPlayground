@@ -178,6 +178,27 @@ roughly 3,000 clocks per second, so even the 30-byte `tb_simple_risc.v`
 program takes about a minute and a 750-byte image about 40 minutes. `build.sh` writes the Verilog; to generate only the Verilog, run
 `cabal run clash -- src/SimpleRisc.hs --verilog -outputdir output/tangnano20k/clash`.
 
+## Architecture tests
+
+`arch-tests/run_arch_tests.py` runs riscv-arch-test 3.9.1 under RISCOF with
+Spike as the reference. It runs on Verilator models of four images (SDRAM
+and BRAM pipelines, each with and without RVC) and writes
+`output/arch-tests/results.md`. It needs RISCOF in `~/.cache/riscof-venv`
+(or `RISCOF=...`), `spike`, `riscv64-unknown-elf-gcc` and Verilator, and
+takes about 11 minutes including Clash. Results on 2026-10-19:
+
+| image | tests | pass | fail | too big for 64 KiB |
+|---|---:|---:|---:|---:|
+| SDRAM pipeline with RVC | 92 | 92 | 0 | 0 |
+| SDRAM pipeline | 63 | 63 | 0 | 0 |
+| BRAM pipeline with RVC | 92 | 85 | 0 | 7 |
+| BRAM pipeline | 63 | 56 | 0 | 7 |
+
+Deliberate choices the tests accept: misaligned loads, stores and targets
+trap rather than being emulated, and the core runs in machine mode only.
+See [the report](ARCH-TESTS-2026-10-19.md) for the per-test table and what
+it does not cover.
+
 ## Clock speed: nextpnr is optimistic
 
 nextpnr's timing model for Gowin parts is only an estimate, and it has been
