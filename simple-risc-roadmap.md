@@ -1,9 +1,11 @@
 # SimpleRisc roadmap: from tested RV32IM to a real RISC-V core
 
-SimpleRisc (`src/SimpleRisc.hs`) runs RV32IM user-level code correctly on
-the Tang Nano 20K at 96 MHz: unmodified `gcc -march=rv32im` output and
-FP-RISC's builtin runtime both work. It is still far from a real core in
-five ways, and this plan addresses them in turn:
+SimpleRisc (`src/SimpleRisc.hs`) now has a pipelined RV32IM datapath and an
+optional compressed frontend. Unmodified GCC output and FP-RISC's builtin
+runtime run on the Tang Nano 20K. The current SDRAM IMC integration is
+verified at CPU72/SDRAM54 MHz; the earlier 96 MHz serial-core results below
+are historical, not a clock claim for the current pipeline. Progress against
+the original five steps:
 
 1. The planned machine-mode slice is implemented: CSRs, synchronous traps,
    `mret`, and cycle/retirement counters work. With `mtvec` zero a trap now
@@ -15,8 +17,9 @@ five ways, and this plan addresses them in turn:
    `0x8000_0000`. Ctrl-C and the finisher are resets into the ROM.
 4. Done (2026-10-19, simulation): riscv-arch-test passes on every image it
    fits, with Spike as the reference.
-5. Slow: one instruction at a time, 9 cycles each, about 75 for
-   multiply/divide.
+5. In progress: overlapping pipeline, forwarding, branch prediction and
+   banked write-update SDRAM cache are implemented. Clock margin and
+   external-memory qualification still limit the performance target.
 
 Steps 1 to 4 make it a small but genuine RV32IM microcontroller core; step 5
 makes it competitive.
@@ -25,8 +28,10 @@ makes it competitive.
 
 - **The board decides.** nextpnr's Gowin timing has been 15-30% optimistic
   (`boards/tangnano20k/README.md`). Each step ends with `check_processor.py`
-  and `check_rv32m.py` passing at 96 MHz on the board, plus the step's own
-  hardware test. A step that cannot hold 96 MHz is not done.
+  and `check_rv32m.py` passing at the claimed clock on the board, plus the
+  step's own hardware test and vendor setup/hold checks. The original
+  96 MHz performance target remains open; lower-clock experiments must state
+  their actual clock and remaining qualification limits.
 - **New logic gets its own stage.** On this FPGA, wide muxes, long carry
   chains and anything driving the block RAM directly fail before nextpnr says
   they will. A new CSR file, comparator or device is read into a register
@@ -87,9 +92,28 @@ of code thrashed the 2 KiB cache, and each refill took 25.7 CPU clocks through
 the mailbox bridge. A 64 KiB cache, refills that drain only same-line stores,
 and an asynchronous-FIFO bridge with posted writes cut the FP-RISC classifier
 from 6.61 to 2.84 seconds on the board (2.33 times). Keeping lines valid on
-store hits would reach 2.05 seconds in simulation but fails on the board and
-is off pending investigation. See
+store hits initially failed on the board; the subsequent 512x32 BSRAM bank
+layout fixed that failure and made write-update the default, reaching
+2.06 seconds physically. See
 [the report](boards/tangnano20k/sdram/CACHE-2026-10-19.md).
+
+## Branch integration and regression coverage (2026-10-19)
+
+`write-update-debug` and `arch-tests` are integrated on main. Decode-hazard
+comparisons now precede the next-instruction mux, avoiding late backpressure
+through the register-index comparators. E2 action and fast-path decisions
+are registered at the preceding edge. Together these changes close internal
+timing at 72 MHz (placement 2, +0.008 ns, 15,827 logic cells). A smaller
+variant without the E2 retiming passed STA but failed the physical FP-RISC
+I32 fixture and was rejected. No higher clock or full SDRAM I/O signoff is
+claimed.
+
+Regression coverage now includes all 32 cache banks under both write
+policies, negative controls, timer interrupts becoming due during cache
+misses, compressed straddled instructions and branch-flush stores. The
+architecture runner rejects incomplete runs and stale generated RTL.
+See [the integration report](boards/tangnano20k/INTEGRATION-2026-10-19.md)
+for final counts, board evidence and reproduction commands.
 
 ## Implementation status (2026-10-12): step 5 started
 

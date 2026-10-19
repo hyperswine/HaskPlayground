@@ -1,0 +1,12 @@
+PASS: CDC CPUhalf=4.6296 memhalf=9.2593 phase=1.700: all masks, 1553 operations including 240 back-to-back posted writes, 2804 comparisons, 906 stalls/refreshes, four interrupted-read resets
+/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge_tb.v:132: $finish called at 387313390 (1ps)
+PASS: CDC CPUhalf=4.6296 memhalf=9.2593 phase=6.300: all masks, 1553 operations including 240 back-to-back posted writes, 2804 comparisons, 905 stalls/refreshes, four interrupted-read resets
+/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge_tb.v:132: $finish called at 387017070 (1ps)
+PASS: CDC CPUhalf=5.1370 memhalf=9.4170 phase=2.091: all masks, 1553 operations including 240 back-to-back posted writes, 2804 comparisons, 905 stalls/refreshes, four interrupted-read resets
+/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge_tb.v:132: $finish called at 393838379 (1ps)
+PASS: CDC CPUhalf=8.7130 memhalf=3.6190 phase=0.713: all masks, 1553 operations including 240 back-to-back posted writes, 2804 comparisons, 1522 stalls/refreshes, four interrupted-read resets
+/Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/clock_bridge_tb.v:132: $finish called at 254463165 (1ps)
+PASS: 108 MHz CPU CDC / 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 13 autonomous refreshes
+/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-clock-bridge-tests/burst_clock_bridge_tb.v:205: $finish called at 321085870 (1ps)
+PASS: 108 MHz CPU CDC / 54 MHz SDRAM pins CAS2/burst4/mode222: 207 reads, 98 masked writes, 828 beat comparisons, 13 autonomous refreshes
+/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/sdram-clock-bridge-tests/burst_clock_bridge_tb.v:205: $finish called at 321085870 (1ps)

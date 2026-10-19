@@ -1,0 +1,9 @@
+DONE
+Traceback (most recent call last):
+  File "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py", line 131, in <module>
+    if __name__=='__main__':main()
+                            ~~~~^^
+  File "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py", line 123, in main
+    if b'FPR EXIT 0\n' not in output:raise ValueError('CPU halted without successful runtime exit')
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: CPU halted without successful runtime exit

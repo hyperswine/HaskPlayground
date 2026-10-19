@@ -1,0 +1,1 @@
+PASS: instruction coherence; 590208 cycles, 8.197 ms

@@ -1519,7 +1519,8 @@ prop_pipeline_multiplier_is_exact = withTests 2000 . property $ do
 prop_registered_decode_hazard :: Property
 prop_registered_decode_hazard = withTests 200 . property $ do
   program <- forAll genProgram
-  let start = startSim (pipelined (runningMachine [(31,dataPointer)])) (ramFromList program)
+  compressed <- forAll Gen.bool
+  let start = startSim ((pipelined (runningMachine [(31,dataPointer)])) {cpuCompressed=compressed}) (ramFromList program)
       trace = P.take 700 (P.iterate (\sim -> stepSim sim Nothing) start)
   P.mapM_ (\sim -> do
     let machine = simMachine sim

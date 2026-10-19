@@ -1,0 +1,160 @@
+{
+  "complete": false,
+  "bitstream_sha256": "b29a375d39983a3fe5cdc0a3ccbd06b0650015e37b3db8d3766a6028f90dd577",
+  "cases": [
+    {
+      "name": "timing",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_gowin_timing.py",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/compare-only/timing-p2/impl/pnr/sdram_test.tr",
+        "--freq-mhz",
+        "72",
+        "--memory-freq-mhz",
+        "54"
+      ],
+      "returncode": 0,
+      "seconds": 0.026712791994214058
+    },
+    {
+      "name": "program",
+      "command": [
+        "/Users/jasonqin/Documents/Libs/oss-cad-suite/bin/openFPGALoader",
+        "-b",
+        "tangnano20k",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/compare-only/timing-p2/impl/pnr/sdram_test.fs"
+      ],
+      "returncode": 0,
+      "seconds": 2.727047749911435
+    },
+    {
+      "name": "uart",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "--probe",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.04042741598095745
+    },
+    {
+      "name": "compressed",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_compressed_board.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.26290104095824063
+    },
+    {
+      "name": "processor",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_processor.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 1.6206686249934137
+    },
+    {
+      "name": "high-ram",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_core.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.4457909999182448
+    },
+    {
+      "name": "cache",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_cache.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.2700339580187574
+    },
+    {
+      "name": "counters",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_counters.py",
+        "--freq-mhz",
+        "72",
+        "--sdram"
+      ],
+      "returncode": 0,
+      "seconds": 2.0953040410531685
+    },
+    {
+      "name": "interrupts",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_interrupts.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 3.0230698329396546
+    },
+    {
+      "name": "rv32i",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_rv32i.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 28.919442791957408
+    },
+    {
+      "name": "rv32m",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_rv32m.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 25.596240249928087
+    },
+    {
+      "name": "fpr-numeric",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/numeric/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board-selected/host"
+      ],
+      "returncode": 0,
+      "seconds": 6.587677499977872
+    },
+    {
+      "name": "fpr-i32",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/i32/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board-selected/host"
+      ],
+      "returncode": 1,
+      "seconds": 32.44994624995161
+    }
+  ]
+}

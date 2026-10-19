@@ -10,6 +10,7 @@ from pathlib import Path
 import argparse
 import re
 import subprocess
+from run_perf import sv_safe
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -192,6 +193,67 @@ square_loop:
     bne t2,t1,failed
     sw t2,20(s8)
 
+    # Timer interrupts become due during eight forced cache misses. Mix
+    # compressed branches and a straddling 32-bit instruction with load-use
+    # dependencies. The handler must resume exactly once, preserving data;
+    # stores on the branch's wrong path must never reach memory.
+    li s7,10
+    la t0,timer_handler
+    csrw mtvec,t0
+    li s11,0
+    li a4,8
+    li a5,0
+    li s1,0x80510000
+    li a6,0x10000
+    li t0,0x5a5a1234
+    sw t0,36(s8)
+    li t0,128
+    csrw mie,t0
+    csrsi mstatus,8
+timer_loop:
+    li t3,0x0200bff8
+    lw t0,0(t3)
+    lw t1,4(t3)
+    li t2,3000
+    add t2,t0,t2
+    sltu t0,t2,t0
+    add t1,t1,t0
+    li t3,0x02004000
+    li t0,-1
+    sw t0,0(t3)
+    sw t1,4(t3)
+    sw t2,0(t3)
+    lw a0,0(s1)
+    addi a0,a0,1
+#ifdef RVC_GUEST
+    .balign 4
+    c.nop
+    .option push
+    .option norvc
+    addi a0,a0,1
+    .option pop
+#else
+    addi a0,a0,1
+#endif
+    li t0,2
+    bne a0,t0,failed
+    addi a5,a5,1
+timer_wait:
+    bltu s11,a5,timer_wait
+    bne s11,a5,failed
+    beq a0,t0,timer_taken
+    sw zero,36(s8)
+timer_taken:
+    add s1,s1,a6
+    addi a4,a4,-1
+    bnez a4,timer_loop
+    csrci mstatus,8
+    csrw mie,zero
+    sw s11,32(s8)
+    lw t0,36(s8)
+    li t1,0x5a5a1234
+    bne t0,t1,failed
+
     # A private handler checks precise cause and trap value, then resumes.
     li s7,8
     la t0,trap_handler
@@ -281,6 +343,24 @@ trap_handler:
     add t0,t0,s10
     csrw mepc,t0
     mret
+    .balign 4
+timer_handler:
+    csrr s2,mcause
+    li s3,0x80000007
+    bne s2,s3,failed
+    csrr s2,mepc
+#ifdef RVC_GUEST
+    andi s2,s2,1
+#else
+    andi s2,s2,3
+#endif
+    bnez s2,failed
+    li s3,0x02004000
+    li s2,-1
+    sw s2,0(s3)
+    sw s2,4(s3)
+    addi s11,s11,1
+    mret
 failed:
     sw s7,4(s8)
     li t0,0xbad00001
@@ -303,7 +383,7 @@ SECTIONS {
 def run(args, expected=0, timeout=180):
     p = subprocess.run([str(a) for a in args], cwd=ROOT, capture_output=True,
                        text=True, timeout=timeout)
-    if p.returncode != expected:
+    if (p.returncode == 0 if expected is None else p.returncode != expected):
         raise AssertionError(f'{args}: exit {p.returncode}\n{p.stdout}\n{p.stderr}')
     return p.stdout + p.stderr
 
@@ -313,6 +393,9 @@ def main():
     parser.add_argument('--generated', type=Path,
                         help='generated Clash directory; defaults to SdramPipeline-0 or -1 matching --compressed')
     parser.add_argument('--compressed', action='store_true')
+    parser.add_argument('--simulator', choices=['iverilog', 'verilator'], default='iverilog')
+    parser.add_argument('--cache-line-bits', type=int, choices=range(7, 13), default=12,
+                        help='12 selects the production 64 KiB cache; 7 stresses small-cache conflicts')
     parser.add_argument('--cdc-bridge', action='store_true',help='cross into an offset half-speed backing-memory clock')
     parser.add_argument('--boot-loader', action='store_true', help='exercise the actual ROM and UART P/R upload')
     parser.add_argument('--uart-bit-cycles',type=int,default=868,
@@ -355,6 +438,7 @@ def main():
         out=out.with_name(out.name+'-adapter-'+args.burst_rtl.stem)
     if args.sdram_rtl.resolve()!=(HERE/'sdram.v').resolve():
         out=out.with_name(out.name+'-controller-'+args.sdram_rtl.stem)
+    out=out.with_name(out.name+f'-l{args.cache_line_bits}-{args.simulator}')
     out.mkdir(parents=True, exist_ok=True)
     if args.uart_bit_cycles!=868:
         # Change only UART reload constants in simulation copies, never the
@@ -385,8 +469,9 @@ def main():
                                          for i in range(0,len(image),4))+'\n')
     # Clash's Verilog backend can emit identifiers such as "new" and "byte";
     # these are legal Verilog identifiers but reserved in SystemVerilog.
-    run(['iverilog','-g2005','-s','pipeline_cpu_tb','-P',f'pipeline_cpu_tb.ROM_FILE="{out}/rom.hex"',
+    command=['iverilog','-g2005','-s','pipeline_cpu_tb','-P',f'pipeline_cpu_tb.ROM_FILE="{out}/rom.hex"',
          '-P','pipeline_cpu_tb.EXPECT_TRAPS=4',
+         '-P',f'pipeline_cpu_tb.LINE_BITS={args.cache_line_bits}',
          '-P',f'pipeline_cpu_tb.LOADER_TEST={int(args.boot_loader)}',
          '-P',f'pipeline_cpu_tb.UART_BIT={args.uart_bit_cycles}',
          '-P',f'pipeline_cpu_tb.PIN_MODEL={int(args.pin_model)}',
@@ -396,8 +481,21 @@ def main():
          '-P',f'pipeline_cpu_tb.PIN_TAC_NS={args.pin_tac_ns}',
          '-P',f'pipeline_cpu_tb.LOADER_DUMP={int(args.loader_command=="D")}',
          '-P',f'pipeline_cpu_tb.LOADER_EXTENDED={int(args.loader_command=="H")}',
-         '-o',out/'sim',*sources,HERE/'pipeline_cache.v',HERE/'clock_bridge.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v'])
-    common=['vvp',out/'sim',f'+IMAGE={out}/image.hex',f'+WORDS={len(image)//4}']
+         '-o',out/'sim',*sources,HERE/'pipeline_cache.v',HERE/'clock_bridge.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v']
+    if args.simulator=='verilator':
+        params=[str(command[i+1]).replace('pipeline_cpu_tb.', '-G', 1) for i,x in enumerate(command) if x=='-P']
+        copied=[]
+        for source in sources:
+            target=out/('sv-'+source.name)
+            target.write_text(sv_safe(source.read_text()));copied.append(target)
+        run(['verilator','--binary','--timing','-O3','-Wno-fatal','-Wno-lint','-Wno-style',
+             '--top-module','pipeline_cpu_tb','--Mdir',out/'obj','-j','4',*params,*copied,
+             HERE/'pipeline_cache.v',HERE/'clock_bridge.v',args.sdram_rtl.resolve(),args.burst_rtl.resolve(),HERE/'pipeline_cpu_tb.v'],timeout=300)
+        executable=[out/'obj/Vpipeline_cpu_tb']
+    else:
+        run(command)
+        executable=['vvp',out/'sim']
+    common=[*executable,f'+IMAGE={out}/image.hex',f'+WORDS={len(image)//4}']
     output=run(common,timeout=900 if args.boot_loader else 240)
     expected=('PASS: debug ROM memory dump' if args.loader_command=='D' else
               'PASS: extended ROM T/Q/V/H UART loader' if args.loader_command=='H' else
@@ -407,7 +505,7 @@ def main():
     print(output,end='',flush=True)
     if args.boot_loader:
         return
-    failed=run([*common,'+CORRUPT'],expected=1,timeout=240)
+    failed=run([*common,'+CORRUPT'],expected=None,timeout=240)
     assert 'guest failure stage=2' in failed,failed
     (out/'corrupt.log').write_text(failed)
     print('PASS: corrupt backend beat is rejected by the executing guest',flush=True)

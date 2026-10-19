@@ -1,0 +1,200 @@
+//Copyright (C)2014-2026 Gowin Semiconductor Corporation.
+//All rights reserved.
+
+INTRODUCTION:
+The document contains two main sections: Timing Report Directory and Core Timing Report.
+
+============================================================
+Note:Timing Report Directory
+
+1. Timing Message
+2. Timing Summaries
+	2.1 STA Tool Run Summary
+	2.2 Clock Summary
+	2.3 Max Frequency Summary
+	2.4 Total Negative Slack Summary
+3. Timing Details
+	3.1 Path Slacks Table
+		3.1.1 Setup Paths Table
+		3.1.2 Hold Paths Table
+		3.1.3 Recovery Paths Table
+		3.1.4 Removal Paths Table
+	3.2 Minimum Pulse Width Table
+	3.3 Timing Report By Analysis Type
+		3.3.1 Setup Analysis Report
+		3.3.2 Hold Analysis Report
+		3.3.3 Recovery Analysis Report
+		3.3.4 Removal Analysis Report
+	3.4 Minimum Pulse Width Report
+	3.5 High Fanout Nets Report
+	3.6 Route Congestions Report
+	3.7 Timing Exceptions Report
+		3.7.1 Setup Analysis Report
+		3.7.2 Hold Analysis Report
+		3.7.3 Recovery Analysis Report
+		3.7.4 Recovery Analysis Report
+	3.8 Timing Constraints Report
+
+============================================================
+
+Note:Core Timing Report
+
+1. Timing Messages
+<Report Title>: Timing Analysis Report
+<Design File>: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/impl/gwsynthesis/sdram_test.vg
+<Physical Constraints File>: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/pins.cst
+<Timing Constraints File>: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/clocks.sdc
+<Tool Version>: V1.9.12.04
+<Part Number>: GW2AR-LV18QN88C8/I7
+<Device>: GW2AR-18
+<Device Version>: C
+<Created Time>: Mon Oct 19 23:37:04 2026
+
+
+2. Timing Summaries
+2.1 STA Tool Run Summary
+<Setup Delay Model>:Slow 0.95V 85C C8/I7
+<Hold Delay Model>:Fast 1.05V 0C C8/I7
+<Numbers of Paths Analyzed>:31438
+<Numbers of Endpoints Analyzed>:15705
+<Numbers of Falling Endpoints>:0
+<Numbers of Setup Violated Endpoints>:0
+<Numbers of Hold Violated Endpoints>:0
+
+2.2 Clock Summary
+  NO.                 Clock Name                    Type      Period   Frequency   Rise     Fall        Source       Master            Objects
+ ===== ========================================= =========== ======== =========== ======= ======== ================ ========= ==========================
+  1     clk_27m                                   Base        37.037   27.000MHz   0.000   18.519                              clk_27m
+  2     clk_core                                  Generated   13.889   72.000MHz   0.000   6.944    clk_27m          clk_27m   pll/cpu/pll/CLKOUT
+  3     clk_memory                                Generated   18.519   54.000MHz   0.000   9.259    clk_27m          clk_27m   pll/memory/pll/CLKOUT
+  4     clk_sdram                                 Generated   18.519   54.000MHz   6.944   16.204   clk_27m          clk_27m   pll/memory/pll/CLKOUTP
+  5     pll/cpu/pll/CLKOUTP.default_gen_clk       Generated   13.889   72.000MHz   5.208   12.153   clk_27m_ibuf/I   clk_27m   pll/cpu/pll/CLKOUTP
+  6     pll/cpu/pll/CLKOUTD.default_gen_clk       Generated   27.778   36.000MHz   0.000   13.889   clk_27m_ibuf/I   clk_27m   pll/cpu/pll/CLKOUTD
+  7     pll/cpu/pll/CLKOUTD3.default_gen_clk      Generated   41.667   24.000MHz   0.000   20.833   clk_27m_ibuf/I   clk_27m   pll/cpu/pll/CLKOUTD3
+  8     pll/memory/pll/CLKOUTD.default_gen_clk    Generated   37.037   27.000MHz   0.000   18.519   clk_27m_ibuf/I   clk_27m   pll/memory/pll/CLKOUTD
+  9     pll/memory/pll/CLKOUTD3.default_gen_clk   Generated   55.556   18.000MHz   0.000   27.778   clk_27m_ibuf/I   clk_27m   pll/memory/pll/CLKOUTD3
+
+2.3 Max Frequency Summary
+  NO.   Clock Name   Constraint    Actual Fmax    Level   Entity
+ ===== ============ ============= ============== ======= ========
+  1     clk_core     72.000(MHz)   72.040(MHz)    7       TOP
+  2     clk_memory   54.000(MHz)   129.245(MHz)   5       TOP
+No timing paths to get frequency of clk_27m!
+No timing paths to get frequency of clk_sdram!
+No timing paths to get frequency of pll/cpu/pll/CLKOUTP.default_gen_clk!
+No timing paths to get frequency of pll/cpu/pll/CLKOUTD.default_gen_clk!
+No timing paths to get frequency of pll/cpu/pll/CLKOUTD3.default_gen_clk!
+No timing paths to get frequency of pll/memory/pll/CLKOUTD.default_gen_clk!
+No timing paths to get frequency of pll/memory/pll/CLKOUTD3.default_gen_clk!
+
+2.4 Total Negative Slack Summary
+                Clock Name                  Analysis Type   EndPoints TNS   Number of EndPoints
+ ========================================= =============== =============== =====================
+  clk_27m                                   setup           0.000           0
+  clk_27m                                   hold            0.000           0
+  clk_core                                  setup           0.000           0
+  clk_core                                  hold            0.000           0
+  clk_memory                                setup           0.000           0
+  clk_memory                                hold            0.000           0
+  clk_sdram                                 setup           0.000           0
+  clk_sdram                                 hold            0.000           0
+  pll/cpu/pll/CLKOUTP.default_gen_clk       setup           0.000           0
+  pll/cpu/pll/CLKOUTP.default_gen_clk       hold            0.000           0
+  pll/cpu/pll/CLKOUTD.default_gen_clk       setup           0.000           0
+  pll/cpu/pll/CLKOUTD.default_gen_clk       hold            0.000           0
+  pll/cpu/pll/CLKOUTD3.default_gen_clk      setup           0.000           0
+  pll/cpu/pll/CLKOUTD3.default_gen_clk      hold            0.000           0
+  pll/memory/pll/CLKOUTD.default_gen_clk    setup           0.000           0
+  pll/memory/pll/CLKOUTD.default_gen_clk    hold            0.000           0
+  pll/memory/pll/CLKOUTD3.default_gen_clk   setup           0.000           0
+  pll/memory/pll/CLKOUTD3.default_gen_clk   hold            0.000           0
+
+
+3. Timing Details
+3.1 Path Slacks Table
+3.1.1 Setup Paths Table
+<Report Command>:report_timing -setup -max_paths 25 -max_common_paths 1
+  Path Number   Path Slack          From Node                    To Node              From Clock      To Clock     Relation   Clock Skew   Data Delay
+ ============= ============ ========================== ============================ ============== ============== ========== ============ ============
+  1             0.008        cache/read_bank_0_s0/Q     cache/cpu_rdata_26_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.846
+  2             0.022        core/machine_0_2034_s0/Q   core/machine_0_4206_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.832
+  3             0.030        core/machine_0_2034_s0/Q   core/machine_0_4257_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.824
+  4             0.036        core/machine_0_2034_s0/Q   core/c$app_arg_61_0_s/A[9]   clk_core:[R]   clk_core:[R]   13.889     0.000        13.598
+  5             0.095        core/machine_0_3910_s1/Q   core/machine_0_2983_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.759
+  6             0.146        cache/read_bank_0_s0/Q     cache/cpu_rdata_30_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.708
+  7             0.147        core/machine_0_2034_s0/Q   core/machine_0_4263_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.706
+  8             0.174        core/machine_0_2034_s0/Q   core/machine_0_2969_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.680
+  9             0.198        core/machine_0_3910_s1/Q   core/machine_0_2989_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.656
+  10            0.211        core/machine_0_2034_s0/Q   core/machine_0_2973_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.643
+  11            0.214        core/machine_0_2034_s0/Q   core/c$app_arg_62_0_s/A[9]   clk_core:[R]   clk_core:[R]   13.889     0.000        13.420
+  12            0.244        core/machine_0_3910_s1/Q   core/machine_0_2981_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.610
+  13            0.252        cache/read_bank_3_s0/Q     cache/cpu_rdata_25_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.602
+  14            0.284        core/machine_0_2034_s0/Q   core/machine_0_2993_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.570
+  15            0.309        core/machine_0_2034_s0/Q   core/machine_0_4254_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.545
+  16            0.320        core/machine_0_3910_s1/Q   core/machine_0_2984_s1/D     clk_core:[R]   clk_core:[R]   13.889     0.000        13.534
+  17            0.341        cache/read_bank_0_s0/Q     cache/cpu_rdata_20_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.513
+  18            0.349        core/machine_0_4684_s1/Q   core/machine_0_5418_s1/CE    clk_core:[R]   clk_core:[R]   13.889     0.000        13.505
+  19            0.349        core/machine_0_4684_s1/Q   core/machine_0_5419_s1/CE    clk_core:[R]   clk_core:[R]   13.889     0.000        13.505
+  20            0.349        core/machine_0_4684_s1/Q   core/machine_0_5425_s1/CE    clk_core:[R]   clk_core:[R]   13.889     0.000        13.505
+  21            0.352        core/machine_0_4684_s1/Q   core/machine_0_5432_s1/CE    clk_core:[R]   clk_core:[R]   13.889     0.000        13.502
+  22            0.352        core/machine_0_4684_s1/Q   core/machine_0_5434_s1/CE    clk_core:[R]   clk_core:[R]   13.889     0.000        13.502
+  23            0.379        cache/read_bank_0_s0/Q     cache/cpu_rdata_29_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.475
+  24            0.385        cache/read_bank_0_s0/Q     cache/cpu_rdata_19_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.469
+  25            0.407        cache/read_bank_3_s0/Q     cache/cpu_rdata_24_s1/D      clk_core:[R]   clk_core:[R]   13.889     0.000        13.447
+
+3.1.2 Hold Paths Table
+<Report Command>:report_timing -hold -max_paths 25 -max_common_paths 1
+  Path Number   Path Slack               From Node                                       To Node                            From Clock        To Clock      Relation   Clock Skew   Data Delay
+ ============= ============ ==================================== ======================================================= ================ ================ ========== ============ ============
+  1             0.307        dual_clock.bridge/put_meta_1_s0/Q    dual_clock.bridge/put_sync_1_s0/D                       clk_memory:[R]   clk_memory:[R]   0.000      0.000        0.318
+  2             0.307        dual_clock.bridge/take_meta_1_s0/Q   dual_clock.bridge/take_sync_1_s0/D                      clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  3             0.307        dual_clock.bridge/take_meta_2_s0/Q   dual_clock.bridge/take_sync_2_s0/D                      clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  4             0.307        cache/m1_2_s0/Q                      cache/m2_2_s0/D                                         clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  5             0.307        cache/m1_3_s0/Q                      cache/m2_3_s0/D                                         clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  6             0.307        cache/d1_0_s0/Q                      cache/d2_0_s0/D                                         clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  7             0.307        cache/d1_1_s0/Q                      cache/d2_1_s0/D                                         clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  8             0.307        cache/d1_3_s0/Q                      cache/d2_3_s0/D                                         clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  9             0.307        cache/d1_11_s0/Q                     cache/d2_11_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  10            0.307        cache/d1_12_s0/Q                     cache/d2_12_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  11            0.307        cache/d1_16_s0/Q                     cache/d2_16_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  12            0.307        cache/d1_17_s0/Q                     cache/d2_17_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  13            0.307        cache/d1_18_s0/Q                     cache/d2_18_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  14            0.307        cache/d1_20_s0/Q                     cache/d2_20_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  15            0.307        cache/d1_23_s0/Q                     cache/d2_23_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  16            0.307        cache/d1_25_s0/Q                     cache/d2_25_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  17            0.307        cache/d1_26_s0/Q                     cache/d2_26_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  18            0.307        cache/d1_30_s0/Q                     cache/d2_30_s0/D                                        clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  19            0.307        cache/w1_s0/Q                        cache/w2_s0/D                                           clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  20            0.307        cache/v1_s0/Q                        cache/v2_s0/D                                           clk_core:[R]     clk_core:[R]     0.000      0.000        0.318
+  21            0.317        cache/a2_18_s0/Q                     cache/write_address_write_address_RAMREG_1_G[18]_s2/D   clk_core:[R]     clk_core:[R]     0.000      0.000        0.328
+  22            0.317        cache/a2_15_s0/Q                     cache/last_address_15_s0/D                              clk_core:[R]     clk_core:[R]     0.000      0.000        0.328
+  23            0.320        cache/a2_0_s0/Q                      cache/write_address_write_address_RAMREG_3_G[0]_s2/D    clk_core:[R]     clk_core:[R]     0.000      0.000        0.331
+  24            0.320        cache/a2_0_s0/Q                      cache/write_address_write_address_RAMREG_2_G[0]_s2/D    clk_core:[R]     clk_core:[R]     0.000      0.000        0.331
+  25            0.320        cache/d2_12_s0/Q                     cache/last_data_12_s0/D                                 clk_core:[R]     clk_core:[R]     0.000      0.000        0.331
+
+3.1.3 Recovery Paths Table
+<Report Command>:report_timing -recovery -max_paths 25 -max_common_paths 1
+  Path Number   Path Slack       From Node                          To Node                       From Clock      To Clock     Relation   Clock Skew   Data Delay
+ ============= ============ =================== =============================================== ============== ============== ========== ============ ============
+  1             12.537       reset_sync_1_s0/Q   dual_clock.bridge/cpu_state_0_s1/CLEAR          clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  2             12.537       reset_sync_1_s0/Q   dual_clock.bridge/cpu_state_1_s1/CLEAR          clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  3             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_0_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  4             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_1_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  5             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_2_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  6             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_3_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  7             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_4_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  8             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_5_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  9             12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_6_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  10            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_7_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  11            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_8_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  12            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_9_s0/CLEAR    clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  13            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_10_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  14            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_11_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  15            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_12_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  16            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_13_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  17            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_14_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  18            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_15_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  19            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_16_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  20            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_17_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  21            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_18_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317
+  22            12.537       reset_sync_1_s0/Q   dual_clock.bridge/replay_words[3]_19_s0/CLEAR   clk_core:[R]   clk_core:[R]   13.889     0.000        1.317

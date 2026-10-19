@@ -1,5 +1,11 @@
 # Tang Nano 20K SDRAM experiment
 
+The [integration report](../INTEGRATION-2026-10-19.md) records the combined
+cache and architecture-test branches, the selected decode-hazard timing
+change, and fresh simulation and physical regressions at CPU72/SDRAM54.
+The selected build uses 15,827 logic cells and closes internal timing at
++0.008 ns worst setup slack; that tight margin does not qualify SDRAM I/O.
+
 The [cache and clock-bridge report](CACHE-2026-10-19.md) makes the 72/54 MHz
 pipeline 2.33 times faster on the board's FP-RISC classifier (2.84 s against
 6.61 s): a 64 KiB cache (`SDRAM_CACHE_LINE_BITS`, default 12), refills that

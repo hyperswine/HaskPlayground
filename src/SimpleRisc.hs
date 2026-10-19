@@ -16,7 +16,8 @@
 
 {-# HLINT ignore "Replace case with maybe" #-}
 
--- | A deliberately small, unpipelined RV32IM computer.
+-- | A small RV32IM computer with an optional compressed frontend. Board
+-- images use the pipeline; the multi-cycle reference remains for testing.
 --
 -- Memory map:
 --
@@ -1565,7 +1566,15 @@ data ExecuteTwo = ExecuteTwo
     e2Rd :: Index 32, e2Writes :: Bool, e2FetchFault :: Bool, e2FaultValue :: Word32,
     -- | Its result is selected here (an ALU result other than a shift or a
     -- multiply, LUI, AUIPC, or a jump's link), so decode may take it.
-    e2Forwards :: Bool }
+    e2Forwards :: Bool,
+    -- | E2's outcome, decided at the E1->E2 edge and registered here. The
+    -- E2->M transition and decode's hazard check read these flip-flops
+    -- instead of recomputing the exception/action priority encoder from
+    -- E2's payload, keeping that encoder off the hazard critical path.
+    e2Action :: Action,
+    e2LoadFast :: Bool, e2StoreFast :: Bool, e2StoreWordFast :: Bool,
+    e2ShiftFast :: Bool, e2MultFast :: Bool,
+    e2WaitFast :: Unsigned 2 }
   deriving (Generic, NFDataX)
 
 -- | The commit stage: an instruction here is the oldest in the pipeline.
@@ -1821,43 +1830,17 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
               _ -> False
             target = cTarget comp
             address = cAddress comp
-            memory = case kind of KindLoad -> True; KindStore -> True; _ -> False
-            storing = case kind of KindStore -> True; _ -> False
-            misaligned = misalignedMemory funct3 address
-            dividing = execMulDiv control && testBit funct3 2
-            illegal = case kind of KindAlu -> isNothing aluResult && not dividing; KindInvalid -> True; _ -> False
-            -- the phases' order: a fetch fault, an illegal encoding, the
-            -- system instructions, a misaligned target, a misaligned
-            -- access, then an access outside RAM
-            action
-              | e2Pc x .&. instructionAlignmentMask machine /= 0 = Raise 0 (e2Pc x)
-              | e2FetchFault x = Raise 1 (e2FaultValue x)
-              | dividing = Divide
-              | illegal = Raise 2 (e2Raw x)
-              | otherwise = case kind of
-                  KindEcall -> Raise 11 0
-                  KindEbreak -> Raise 3 (e2Pc x)
-                  KindMret -> Mret
-                  KindWfi -> Wfi
-                  KindCsr -> CsrAccess
-                  KindFenceI -> FenceI
-                  _ | taken && target .&. instructionAlignmentMask machine /= 0 -> Raise 0 target
-                    | memory && misaligned -> Raise (if storing then 6 else 4) address
-                    | memory && not (isRamTarget (decodeTarget address)) -> Bus
-                    | otherwise -> Plain
+            -- The outcome was decided at the E1->E2 edge and registered in
+            -- E2: read the flip-flops here instead of recomputing the
+            -- exception/action priority encoder on the hazard path.
+            action = e2Action x
             slow = case action of Plain -> False; FenceI -> False; _ -> True
-            -- A memory operation has only these four reasons to leave for
-            -- the phases. Select its fast-path enables directly rather than
-            -- through the general exception/action priority encoder.
-            plainMemory = e2Pc x .&. instructionAlignmentMask machine == 0
-              && not (e2FetchFault x) && not misaligned && isRamTarget (decodeTarget address)
-            load = plainMemory && case kind of KindLoad -> True; _ -> False
-            store = plainMemory && storing
-            storeWord = store && funct3 == 2
+            load = e2LoadFast x
+            store = e2StoreFast x
+            storeWord = e2StoreWordFast x
             value = case kind of KindJump -> cLink comp; _ -> fromMaybe 0 aluResult
-            -- (MULH shares SLL's funct3; execShift marks it too)
-            shifting = execShift control && not (execMulDiv control)
-            multiplying = execMulDiv control && not (testBit funct3 2)
+            shifting = e2ShiftFast x
+            multiplying = e2MultFast x
             stage = MemoryStage
               { mPc = e2Pc x, mNext = if taken then target else cLink comp,
                 mValue = value, mRd = e2Rd x, mWrites = e2Writes x && not slow,
@@ -1868,7 +1851,7 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
                 mMask = storeMask funct3 (resize address),
                 mShift = shifting, mArith = execArithmeticShift control, mAmount = e2Op2 x,
                 mMultiply = multiplying, mProducts = partialProducts funct3 (e2A x) (e2B x),
-                mWait = if load || (store && not storeWord && not (cpuExternalMemory machine)) then 2 else if multiplying then 1 else 0,
+                mWait = e2WaitFast x,
                 mAction = action, mWord = e2Word x, mA = e2A x, mB = e2B x, mAddress = address }
             actual = if taken then target else cLink comp
             control' = case kind of KindBranch -> True; KindJump -> True; _ -> False
@@ -1899,16 +1882,69 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
             imm = e1Imm x
             op2 = e1Op2 x
             control = e1Control x
+            computed = (compute (e1Pc x) (e1Word x) a b imm op2) {cLink = e1Pc x + resize (e1Size x), cAlu = Nothing, cTaken = Nothing}
+            -- The E2 outcome, decided here at the E1->E2 edge: the same
+            -- priority order the E2->M transition used to recompute (fetch
+            -- fault, illegal encoding, system instructions, misaligned
+            -- target, misaligned access, then access outside RAM).
+            kind1 = execKind control
+            funct31 = execFunct3 control
+            target1 = cTarget computed
+            address1 = cAddress computed
+            taken1 = case kind1 of
+              KindJump -> True
+              KindBranch -> branchTakenPrepared funct31 (compareOperands a b) == Just True
+              _ -> False
+            memory1 = case kind1 of KindLoad -> True; KindStore -> True; _ -> False
+            storing1 = case kind1 of KindStore -> True; _ -> False
+            misaligned1 = misalignedMemory funct31 address1
+            dividing1 = execMulDiv control && testBit funct31 2
+            -- selectedAlu is Just for multiply/divide (a dummy zero), LUI,
+            -- AUIPC, and legal ALU operations, so only those flag bits (not
+            -- the result mux) are needed here.
+            illegal1 = case kind1 of
+              KindAlu -> not (execMulDiv control || execLui control || execAuipc control
+                || (execAluOp control && execLegal control)) && not dividing1
+              KindInvalid -> True
+              _ -> False
+            action1
+              | e1Pc x .&. instructionAlignmentMask machine /= 0 = Raise 0 (e1Pc x)
+              | e1FetchFault x = Raise 1 (e1FaultValue x)
+              | dividing1 = Divide
+              | illegal1 = Raise 2 (e1Raw x)
+              | otherwise = case kind1 of
+                  KindEcall -> Raise 11 0
+                  KindEbreak -> Raise 3 (e1Pc x)
+                  KindMret -> Mret
+                  KindWfi -> Wfi
+                  KindCsr -> CsrAccess
+                  KindFenceI -> FenceI
+                  _ | taken1 && target1 .&. instructionAlignmentMask machine /= 0 -> Raise 0 target1
+                    | memory1 && misaligned1 -> Raise (if storing1 then 6 else 4) address1
+                    | memory1 && not (isRamTarget (decodeTarget address1)) -> Bus
+                    | otherwise -> Plain
+            plainMemory1 = e1Pc x .&. instructionAlignmentMask machine == 0
+              && not (e1FetchFault x) && not misaligned1 && isRamTarget (decodeTarget address1)
+            load1 = plainMemory1 && case kind1 of KindLoad -> True; _ -> False
+            store1 = plainMemory1 && storing1
+            storeWord1 = store1 && funct31 == 2
+            shifting1 = execShift control && not (execMulDiv control)
+            multiplying1 = execMulDiv control && not (testBit funct31 2)
+            wait1 = if load1 || (store1 && not storeWord1 && not (cpuExternalMemory machine)) then 2 else if multiplying1 then 1 else 0
          in ExecuteTwo
               { e2Pc = e1Pc x, e2Predicted = e1Predicted x, e2Control = control,
-                e2Computed = (compute (e1Pc x) (e1Word x) a b imm op2) {cLink = e1Pc x + resize (e1Size x), cAlu = Nothing, cTaken = Nothing},
+                e2Computed = computed,
                 e2Candidates = aluCandidates control a op2,
                 e2AluCompare = compareOperands a op2,
                 e2BranchCompare = compareOperands a b,
                 e2B = b, e2Op2 = op2, e2Imm = imm,
                 e2A = a, e2Word = e1Word x, e2Raw = e1Raw x,
                 e2Rd = e1Rd x, e2Writes = e1Writes x, e2FetchFault = e1FetchFault x, e2FaultValue = e1FaultValue x,
-                e2Forwards = False }
+                e2Forwards = False,
+                e2Action = action1,
+                e2LoadFast = load1, e2StoreFast = store1, e2StoreWordFast = storeWord1,
+                e2ShiftFast = shifting1, e2MultFast = multiplying1,
+                e2WaitFast = wait1 }
       e1Advance = isNothing (pE2 pipe) || e2Advance
       -- Decode and register read ---------------------------------------------
       d = pD pipe
@@ -2009,6 +2045,13 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
         Just f | fFree -> replace (pFWrite pipe) (expand f) (pFQueue pipe)
         _ -> pFQueue pipe
       nextD = if dFree then pF pipe else d
+      -- Compare each registered consumer before selecting the next D.
+      -- Selecting the wide instruction first puts dFree's backpressure
+      -- chain in front of both register-index comparators. Only the final
+      -- one-bit choice should depend on dFree.
+      nextBlocked = if dFree
+        then decodeHazard (pF pipe) nextE1 nextE2 nextM
+        else decodeHazard d nextE1 nextE2 nextM
       -- Read for the registered word that would enter D next, whether or
       -- not it does: no stall decision reaches the read address.
       entering = maybe 0 fWord (pF pipe)
@@ -2062,7 +2105,7 @@ pipeStepDecodedWith decodeTarget machine memoryWord =
                   Just f -> let (_, _, operands) = decodeOut f in operands
                   Nothing -> pDOperands pipe,
                 pDFresh = dFree,
-                pDBlocked = decodeHazard nextD nextE1 nextE2 nextM,
+                pDBlocked = nextBlocked,
                 pE1 = nextE1,
                 pE2 = nextE2,
                 pM = nextM,

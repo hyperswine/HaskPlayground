@@ -1,0 +1,14 @@
+   text	   data	    bss	    dec	    hex	filename
+    795	     24	      4	    823	    337	/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/hello.elf
+Image: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/hello.bin (820 bytes)
+   text	   data	    bss	    dec	    hex	filename
+    618	      0	      2	    620	    26c	/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/memory_stress.elf
+Image: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/memory_stress.bin (618 bytes)
+C arithmetic run 1: b'hello from rv32im\n12345*6789=83810205\n4000000000/3=1333333333\n-7/2=-3\n-7%2=-1\n7/0=-1\n7%0=7\nINT_MIN/-1=-2147483648\nmulh(-7,2^31)=3\nDONE'
+C arithmetic run 2: b'hello from rv32im\n12345*6789=83810205\n4000000000/3=1333333333\n-7/2=-3\n-7%2=-1\n7/0=-1\n7%0=7\nINT_MIN/-1=-2147483648\nmulh(-7,2^31)=3\nDONE'
+C arithmetic run 3: b'hello from rv32im\n12345*6789=83810205\n4000000000/3=1333333333\n-7/2=-3\n-7%2=-1\n7/0=-1\n7%0=7\nINT_MIN/-1=-2147483648\nmulh(-7,2^31)=3\nDONE'
+UART receive and echo: b'ZDONE'
+Ctrl-C reset recovery: b'hello from rv32im\n12345*6789=83810205\n4000000000/3=1333333333\n-7/2=-3\n-7%2=-1\n7/0=-1\n7%0=7\nINT_MIN/-1=-2147483648\nmulh(-7,2^31)=3\nDONE'
+Memory clear and reload: b'hello from rv32im\n12345*6789=83810205\n4000000000/3=1333333333\n-7/2=-3\n-7%2=-1\n7/0=-1\n7%0=7\nINT_MIN/-1=-2147483648\nmulh(-7,2^31)=3\nDONE'
+Byte/halfword/word stress: b'MEMORY HOLDS\nDONE'
+PASS: byte/halfword/word stress, 5 exact C arithmetic runs, UART RX/TX, Ctrl-C recovery, and memory clear/reload

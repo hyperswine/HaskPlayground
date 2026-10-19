@@ -1,0 +1,4 @@
+584 bytes -> /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/rv32c-board-checks/compressed-frame.hex
+RV32C BOARD HOLDS
+DONE
+PASS: physical RV32IMC integer forms, pc+2/pc+4 links, straddled fetch, raw illegal traps, mret, fence.i and RAM boundary

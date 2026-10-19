@@ -1,0 +1,225 @@
+{
+  "complete": true,
+  "bitstream_sha256": "5eb222ff39eee54dd53d45a69e1dee94481dd585dcb903c8f3000a56f91b7e3c",
+  "cases": [
+    {
+      "name": "timing",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_gowin_timing.py",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/impl/pnr/sdram_test.tr",
+        "--freq-mhz",
+        "72",
+        "--memory-freq-mhz",
+        "54"
+      ],
+      "returncode": 0,
+      "seconds": 0.03153554198797792
+    },
+    {
+      "name": "program",
+      "command": [
+        "/Users/jasonqin/Documents/Libs/oss-cad-suite/bin/openFPGALoader",
+        "-b",
+        "tangnano20k",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/impl/pnr/sdram_test.fs"
+      ],
+      "returncode": 0,
+      "seconds": 2.7233405830338597
+    },
+    {
+      "name": "uart",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "--probe",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.0713102500885725
+    },
+    {
+      "name": "compressed",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_compressed_board.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.2853574169566855
+    },
+    {
+      "name": "processor",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_processor.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 1.6529195419279858
+    },
+    {
+      "name": "high-ram",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_core.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.44320412492379546
+    },
+    {
+      "name": "cache",
+      "command": [
+        "python3",
+        "boards/tangnano20k/sdram/check_cache.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 0.26902608398813754
+    },
+    {
+      "name": "counters",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_counters.py",
+        "--freq-mhz",
+        "72",
+        "--sdram"
+      ],
+      "returncode": 0,
+      "seconds": 2.0563730420544744
+    },
+    {
+      "name": "interrupts",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_interrupts.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 3.0589837089646608
+    },
+    {
+      "name": "rv32i",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_rv32i.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 28.867326791980304
+    },
+    {
+      "name": "rv32m",
+      "command": [
+        "python3",
+        "boards/tangnano20k/check_rv32m.py",
+        "--freq-mhz",
+        "72"
+      ],
+      "returncode": 0,
+      "seconds": 25.578320291941054
+    },
+    {
+      "name": "fpr-numeric",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/numeric/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host"
+      ],
+      "returncode": 0,
+      "seconds": 6.604517332976684
+    },
+    {
+      "name": "fpr-i32",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/i32/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host"
+      ],
+      "returncode": 0,
+      "seconds": 32.24725958390627
+    },
+    {
+      "name": "fpr-host",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/host/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host",
+        "--env",
+        "TEST_UART=connected",
+        "--input",
+        "hello RV32"
+      ],
+      "returncode": 0,
+      "seconds": 48.51340166700538
+    },
+    {
+      "name": "classifier-1",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/board/dtree-1/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host"
+      ],
+      "returncode": 0,
+      "seconds": 24.587447124999017
+    },
+    {
+      "name": "classifier-2",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/board/dtree-1/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host"
+      ],
+      "returncode": 0,
+      "seconds": 24.572409249958582
+    },
+    {
+      "name": "classifier-3",
+      "command": [
+        "python3",
+        "/Users/jasonqin/Documents/GitHub/fprisc/tools/run_tangnano20k_base.py",
+        "/Users/jasonqin/Documents/GitHub/fprisc/build/tangnano20k-clock72/board/dtree-1/base.bin",
+        "--freq-mhz",
+        "72",
+        "--root",
+        "/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/board/host"
+      ],
+      "returncode": 0,
+      "seconds": 24.58535066701006
+    }
+  ],
+  "classifier_us": [
+    2059070,
+    2059077,
+    2059050
+  ]
+}

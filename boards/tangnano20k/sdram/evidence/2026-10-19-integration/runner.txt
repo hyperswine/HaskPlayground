@@ -1,0 +1,10 @@
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.006s
+
+OK
+clash: SdramPipeline rvc=1
+clash: SdramPipeline rvc=1
+clash: SdramPipeline rvc=1
+clash: SdramPipeline rvc=1
+clash: SdramPipeline rvc=1

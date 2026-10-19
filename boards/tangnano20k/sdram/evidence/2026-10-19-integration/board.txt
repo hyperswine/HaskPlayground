@@ -1,0 +1,18 @@
+timing: PASS: STA under supplied constraints (SDRAM I/O signoff unverified); 72 MHz constraint, 72.040 MHz Fmax, 0.008 ns worst setup slack; 0 setup / 0 hold violating endpoints
+program: DONE
+uart: PASS: board UART diagnostic
+compressed: PASS: physical RV32IMC integer forms, pc+2/pc+4 links, straddled fetch, raw illegal traps, mret, fence.i and RAM boundary
+processor: PASS: byte/halfword/word stress, 5 exact C arithmetic runs, UART RX/TX, Ctrl-C recovery, and memory clear/reload
+high-ram: PASS: high-address execution, 1 MiB full working set, all banks, last word and byte lanes
+cache: PASS: instruction coherence; 590208 cycles, 8.197 ms
+counters: PASS run 10: 27 counter/retirement/trap checks
+interrupts: PASS run 5: 27 interrupt checks, 67 bytes received by interrupt while busy
+rv32i: /opt/homebrew/Cellar/riscv-gnu-toolchain/main/lib/gcc/riscv64-unknown-elf/14.2.0/../../../../riscv64-unknown-elf/bin/ld: warning: /var/folders/rd/0pnnmwhx69qdhg4mf34ltqnh0000gn/T/simplerisc-i-stress-f2k2yent/rv32i_stress.elf has a LOAD segment with RWX permissions
+rv32m: /opt/homebrew/Cellar/riscv-gnu-toolchain/main/lib/gcc/riscv64-unknown-elf/14.2.0/../../../../riscv64-unknown-elf/bin/ld: warning: /var/folders/rd/0pnnmwhx69qdhg4mf34ltqnh0000gn/T/simplerisc-m-stress-kzh2y57x/rv32m_stress.elf has a LOAD segment with RWX permissions
+fpr-numeric: DONE
+fpr-i32: DONE
+fpr-host: DONE
+classifier-1: DONE
+classifier-2: DONE
+classifier-3: DONE
+PASS: physical regression; classifier us [2059070, 2059077, 2059050]

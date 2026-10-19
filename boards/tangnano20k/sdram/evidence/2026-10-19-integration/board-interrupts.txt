@@ -1,0 +1,8 @@
+   text	   data	    bss	    dec	    hex	filename
+   2707	      0	    224	   2931	    b73	/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/interrupts.elf
+Image: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/interrupts.bin (2707 bytes)
+PASS run 1: 27 interrupt checks, 67 bytes received by interrupt while busy
+PASS run 2: 27 interrupt checks, 67 bytes received by interrupt while busy
+PASS run 3: 27 interrupt checks, 67 bytes received by interrupt while busy
+PASS run 4: 27 interrupt checks, 67 bytes received by interrupt while busy
+PASS run 5: 27 interrupt checks, 67 bytes received by interrupt while busy

@@ -1,0 +1,12 @@
+PASS run 1: 3840 RV32I reference checks
+PASS run 2: 3840 RV32I reference checks
+PASS run 3: 3840 RV32I reference checks
+PASS run 4: 3840 RV32I reference checks
+PASS run 5: 3840 RV32I reference checks
+PASS run 6: 3840 RV32I reference checks
+PASS run 7: 3840 RV32I reference checks
+PASS run 8: 3840 RV32I reference checks
+PASS run 9: 3840 RV32I reference checks
+PASS run 10: 3840 RV32I reference checks
+PASS: 38400 hardware RV32I checks at 72 MHz
+/opt/homebrew/Cellar/riscv-gnu-toolchain/main/lib/gcc/riscv64-unknown-elf/14.2.0/../../../../riscv64-unknown-elf/bin/ld: warning: /var/folders/rd/0pnnmwhx69qdhg4mf34ltqnh0000gn/T/simplerisc-i-stress-f2k2yent/rv32i_stress.elf has a LOAD segment with RWX permissions

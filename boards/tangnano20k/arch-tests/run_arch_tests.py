@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run riscv-arch-test (RISCOF, Spike as reference) against SimpleRisc images.
 
-For each selected image this generates the Verilog with Clash (unless it is
-already there), makes a simulation copy, builds a Verilator model with a stub
+For each selected image this generates the Verilog with Clash (reusing it
+only when source and output hashes match), makes a simulation copy, builds a Verilator model with a stub
 boot ROM that jumps straight to the preloaded image (no UART loader), and runs
 RISCOF with the simplerisc DUT plugin and the spike reference plugin. The
 ISA string, and with it the set of tests RISCOF selects, follows the image:
@@ -10,12 +10,15 @@ RV32IMCZicsr_Zifencei with RVC, RV32IMZicsr_Zifencei without.
 
 Results go to output/arch-tests/results.md (a pass/fail table per suite and
 test, one column per image) and results.json. Simulation only.
+Use --regenerate after changing the installed compiler or dependency build;
+the generation manifest tracks project inputs, not tool binaries.
 
   boards/tangnano20k/arch-tests/run_arch_tests.py [--images sdram-rvc bram ...]
 """
 from pathlib import Path
 import argparse
 import configparser
+import hashlib
 import json
 import os
 import re
@@ -31,6 +34,7 @@ from run_perf import sv_safe  # noqa: E402
 
 ARCH_TEST_TAG = '3.9.1'
 ARCH_TEST_URL = 'https://github.com/riscv-non-isa/riscv-arch-test.git'
+BRAM_OVERSIZE = {f'I/{op}-01' for op in ('beq', 'bge', 'bgeu', 'blt', 'bltu', 'bne', 'jal')}
 
 # name: (Clash module, top entity, RVC, RAM bytes, testbench)
 IMAGES = {
@@ -54,21 +58,62 @@ def run(cmd, log=None, **kwargs):
 
 
 def arch_test_dir(a):
-    if a.arch_test.exists():
-        return a.arch_test
-    print(f'fetching riscv-arch-test {ARCH_TEST_TAG} into {a.arch_test}')
-    run(['git', 'clone', '-q', '--depth', '1', '--branch', ARCH_TEST_TAG, ARCH_TEST_URL, a.arch_test])
+    if not a.arch_test.exists():
+        print(f'fetching riscv-arch-test {ARCH_TEST_TAG} into {a.arch_test}')
+        run(['git', 'clone', '-q', '--depth', '1', '--branch', ARCH_TEST_TAG, ARCH_TEST_URL, a.arch_test])
+    def git(*args):
+        return subprocess.check_output(['git', '-C', str(a.arch_test), *args], text=True).strip()
+    if git('rev-parse', 'HEAD') != git('rev-parse', f'{ARCH_TEST_TAG}^{{commit}}') or git('status', '--porcelain', '--untracked-files=no'):
+        raise SystemExit(f'architecture tests must be an unmodified {ARCH_TEST_TAG} checkout')
     return a.arch_test
 
 
+def hashes(paths, relative):
+    return {str(p.relative_to(relative)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
+
+
+def generation_inputs(module, rvc):
+    paths = list((ROOT/'src').rglob('*.hs')) + list((HERE.parent/'bootrom').glob('*.hex'))
+    paths += [ROOT/p for p in ('cabal.project', 'cabal.project.freeze', 'haskplayground.cabal')]
+    return {'module': module, 'rvc': rvc, 'sources': hashes(paths, ROOT)}
+
+
 def generate(module, rvc, out, regenerate):
+    # Clash emits both annotated top entities when compiling SdramPipeline.
+    # Reuse its BRAM entity only with the same verified input/output manifest.
+    if module == 'SimpleRisc' and not regenerate:
+        sibling = out/'gen'/f'SdramPipeline-{rvc}'
+        try:
+            previous = json.loads((sibling.parent/f'SdramPipeline-{rvc}.json').read_text())
+        except (OSError, ValueError):
+            previous = None
+        expected = {'inputs': generation_inputs('SdramPipeline', rvc),
+                    'outputs': hashes(sibling.rglob('*.v'), sibling)}
+        if previous == expected and list((sibling/'SimpleRisc.topEntity').glob('*.v')):
+            return sibling/'SimpleRisc.topEntity'
     generated = out/'gen'/f'{module}-{rvc}'
     entity = generated/f'{module}.topEntity'
-    if regenerate or not list(entity.glob('*.v')):
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    manifest = generated.parent/f'{module}-{rvc}.json'
+    inputs = generation_inputs(module, rvc)
+    outputs = hashes(generated.rglob('*.v'), generated)
+    try:
+        previous = json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        previous = None
+    if regenerate or not list(entity.glob('*.v')) or previous != {'inputs': inputs, 'outputs': outputs}:
+        # A failed generation must never leave a reusable success manifest.
+        manifest.unlink(missing_ok=True)
         options = ['-isrc', '-hide-package', 'haskplayground'] + (['-DRISCV_COMPRESSED'] if rvc else [])
         print(f'clash: {module} rvc={rvc}')
         run(['cabal', 'run', '-v0', 'clash', '--', *options, f'src/{module}.hs', '--verilog', '-fclash-clear',
              '-outputdir', generated], log=out/'gen'/f'{module}-{rvc}.log', cwd=ROOT)
+        if generation_inputs(module, rvc) != inputs:
+            raise SystemExit('sources changed during Clash generation; rerun against a stable checkout')
+        outputs = hashes(generated.rglob('*.v'), generated)
+        if not list(entity.glob('*.v')):
+            raise SystemExit(f'Clash produced no RTL in {entity}')
+        manifest.write_text(json.dumps({'inputs': inputs, 'outputs': outputs}, indent=2)+'\n')
     return entity
 
 
@@ -208,12 +253,34 @@ def run_riscof(name, model, a, arch, out):
         else:
             d, r = dut.read_text().split(), ref.read_text().split()
             # A pass also needs the halt through the finisher (stub ROM marker).
-            status = 'Pass' if d == r and note.startswith('ARCH END 600d0003') else 'Fail'
+            status = 'Pass' if r and d == r and note.startswith('ARCH END 600d0003') else 'Fail'
             if d != r:
                 diffs = [i for i in range(max(len(d), len(r))) if (d[i:i+1] or [None]) != (r[i:i+1] or [None])]
                 note += f'; {len(diffs)} of {len(r)} signature words differ, first at word {diffs[0]}'
         results[f'{suite_name}/{test}'] = {'status': status, 'note': note}
     return results, elapsed
+
+
+def validation_errors(all_results):
+    """Fail closed, including interrupted discovery and unexpected RAM skips.
+
+    Counts and oversize exceptions belong to the pinned 3.9.1 suite. They
+    must be reviewed explicitly when upgrading it, not learned from a run.
+    RISCOF itself exits nonzero for the known BRAM missing signatures, so
+    independently check every selected case instead of ignoring that exit.
+    """
+    errors = []
+    for image, results in all_results.items():
+        expected = 92 if IMAGES[image][2] else 63
+        if len(results) != expected:
+            errors.append(f'{image}: expected {expected} results, got {len(results)}')
+        for test, result in results.items():
+            allowed_skip = image.startswith('bram') and test in BRAM_OVERSIZE and result['status'] == 'Too big'
+            if result['status'] != 'Pass' and not allowed_skip:
+                errors.append(f'{image} {test}: {result["status"]}: {result["note"]}')
+    if not all_results:
+        errors.append('no images tested')
+    return errors
 
 
 def write_table(all_results, timings, out):
@@ -266,6 +333,9 @@ def main():
         print(f'{name}: {passed}/{len(all_results[name])} passed')
     print(write_table(all_results, timings, out))
     print(f'results: {out/"results.md"}')
+    errors = validation_errors(all_results)
+    if errors:
+        raise SystemExit('Architecture regression failed:\n'+'\n'.join(errors))
 
 
 if __name__ == '__main__':

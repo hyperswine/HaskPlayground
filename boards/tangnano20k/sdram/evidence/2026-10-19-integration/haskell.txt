@@ -1,0 +1,410 @@
+Build profile: -w ghc-9.8.2 -O1
+In order, the following will be built (use -v for more details):
+ - haskplayground-0.1.0.0 (lib) (file src/SimpleRisc.hs changed)
+ - haskplayground-0.1.0.0 (test:haskplayground-test) (dependency rebuilt)
+Preprocessing library for haskplayground-0.1.0.0...
+Building library for haskplayground-0.1.0.0...
+[18 of 25] Compiling SimpleRisc       ( src/SimpleRisc.hs, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SimpleRisc.o, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SimpleRisc.dyn_o ) [Source file changed]
+
+src/SimpleRisc.hs:1211:16: warning: [GHC-30606] [-Wredundant-constraints]
+    Redundant constraint: 1 <= n
+    In the type signature for:
+         initialFifo :: forall (n :: Nat).
+                        (KnownNat n, KnownNat (n + 1), 1 <= n) =>
+                        Fifo n
+     |
+1211 | initialFifo :: (KnownNat n, KnownNat (n + 1), 1 <= n) => Fifo n
+     |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/SimpleRisc.hs:1351:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘at’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at src/SimpleRisc.hs:80:1-20
+      (and originally defined in ‘Clash.Sized.Vector’)
+     |
+1351 |     writing at = case taken of
+     |             ^^
+
+src/SimpleRisc.hs:2762:7: warning: [GHC-40910] [-Wunused-local-binds]
+    Defined but not used: ‘instruction’
+     |
+2762 |   let instruction = cpuInstruction machine
+     |       ^^^^^^^^^^^
+[19 of 25] Compiling SdramSimpleRisc  ( src/SdramSimpleRisc.hs, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SdramSimpleRisc.o, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SdramSimpleRisc.dyn_o ) [SimpleRisc changed]
+[20 of 25] Compiling SdramPipeline    ( src/SdramPipeline.hs, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SdramPipeline.o, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/build/SdramPipeline.dyn_o ) [SimpleRisc changed]
+
+src/SdramPipeline.hs:83:18: warning: [GHC-40910] [-Wunused-local-binds]
+    Defined but not used: ‘index’
+   |
+83 |           (next,(index,write,tx))=R.machineStepCoreBy R.pipelinedCpuStep decodeTarget injected (memoryWord,received,txReady,emergency)
+   |                  ^^^^^
+
+src/SdramPipeline.hs:115:10: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘at’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at src/SdramPipeline.hs:4:1-20
+      (and originally defined in ‘Clash.Sized.Vector’)
+    |
+115 |  writing at=case taken of
+    |          ^^
+Preprocessing test suite 'haskplayground-test' for haskplayground-0.1.0.0...
+Building test suite 'haskplayground-test' for haskplayground-0.1.0.0...
+[5 of 6] Compiling SimpleRisc       ( test/SimpleRisc.hs, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/t/haskplayground-test/build/haskplayground-test/haskplayground-test-tmp/SimpleRisc.o ) [Source file changed]
+
+test/SimpleRisc.hs:952:7: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘settled’ shadows the existing binding
+      defined at test/SimpleRisc.hs:106:1
+    |
+952 |       settled = stepDevices False False NoEffect (stepDevices False False NoEffect devices)
+    |       ^^^^^^^
+
+test/SimpleRisc.hs:986:3: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘delay’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Signal’)
+    |
+986 |   delay <- forAll (Gen.integral (Range.linear 200 400))
+    |   ^^^^^
+
+test/SimpleRisc.hs:1032:18: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching or Data.List.uncons instead. Consider refactoring to use Data.List.NonEmpty."
+     |
+1032 |       fetching = P.head (P.dropWhile ((/= Fetch) . cpuPhase) (P.iterate step m))
+     |                  ^^^^^^
+
+test/SimpleRisc.hs:1038:21: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching or Data.List.uncons instead. Consider refactoring to use Data.List.NonEmpty."
+     |
+1038 |       let entered = P.head (P.dropWhile ((== Trap) . cpuPhase) (P.iterate step next))
+     |                     ^^^^^^
+
+test/SimpleRisc.hs:1072:15: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘at’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Sized.Vector’)
+     |
+1072 |   let request at wr value = Just (BusRequest (ioBase+at) 2 wr value)
+     |               ^^
+
+test/SimpleRisc.hs:1073:25: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘reset’ shadows the existing binding
+      bound at test/SimpleRisc.hs:1079:7
+     |
+1073 |       clock io req held reset = fst (SP.spiIoStep io (req,reset,held,high))
+     |                         ^^^^^
+
+test/SimpleRisc.hs:1104:15: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘rises’ shadows the existing binding
+      bound at test/SimpleRisc.hs:1114:20
+     |
+1104 |       run spi rises sent fuel
+     |               ^^^^^
+
+test/SimpleRisc.hs:1104:21: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘sent’ shadows the existing binding
+      bound at test/SimpleRisc.hs:1114:14
+     |
+1104 |       run spi rises sent fuel
+     |                     ^^^^
+
+test/SimpleRisc.hs:1165:23: warning: [GHC-40910] [-Wunused-local-binds]
+    Defined but not used: ‘sck’
+     |
+1165 |       (io', (answer, (sck, mosi, _), ramCommand)) = ioStep io (request, False, misoBit, rigRamOut rig)
+     |                       ^^^
+
+test/SimpleRisc.hs:1220:16: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching or Data.List.uncons instead. Consider refactoring to use Data.List.NonEmpty."
+     |
+1220 |       status = P.head (rigAnswers (rigAccess ioDmaStatus False 0 received))
+     |                ^^^^^^
+
+test/SimpleRisc.hs:1230:17: warning: [GHC-63394] [-Wx-partial]
+    In the use of ‘head’
+    (imported from Prelude, but defined in GHC.List):
+    "This is a partial function, it throws an error on empty lists. Use pattern matching or Data.List.uncons instead. Consider refactoring to use Data.List.NonEmpty."
+     |
+1230 |       refusal = P.head (rigAnswers (rigAccess ioDmaStatus False 0 refused))
+     |                 ^^^^^^
+
+test/SimpleRisc.hs:1244:19: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘io’ shadows the existing binding
+      bound at test/SimpleRisc.hs:1251:17
+     |
+1244 |       go fuel sim io
+     |                   ^^
+
+test/SimpleRisc.hs:1305:16: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘odd’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Class.Parity’)
+     |
+1305 |     (8, (\f3 k odd rs1 rs2 -> [bType (4 * k + (if odd then 2 else 0)) rs2 rs1 f3 0])
+     |                ^^^
+
+test/SimpleRisc.hs:1311:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘odd’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Class.Parity’)
+     |
+1311 |     (3, (\k odd rd -> [(9 `shiftL` 7) .|. 0x17, iType (4 * (k + 1) + (if odd then 2 else 0)) 9 0 rd 0x67])
+     |             ^^^
+
+test/SimpleRisc.hs:1327:5: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘forward’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Signal.Delayed.Internal’)
+     |
+1327 |     forward = Gen.integral (Range.linear 1 remaining)
+     |     ^^^^^^^
+
+test/SimpleRisc.hs:1346:18: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘at’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘Clash.Sized.Vector’)
+     |
+1346 |             from at c = do
+     |                  ^^
+
+test/SimpleRisc.hs:1402:21: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Num a0) arising from the literal ‘1’ at test/SimpleRisc.hs:1402:21
+        (Enum a0)
+          arising from the arithmetic sequence ‘1 .. 8’
+          at test/SimpleRisc.hs:1402:20-27
+        (Integral a0)
+          arising from a use of ‘fromIntegral’
+          at test/SimpleRisc.hs:1405:58-69
+        (Integral a0)
+          arising from a use of ‘fromIntegral’
+          at test/SimpleRisc.hs:1410:80-91
+    • In the expression: 1
+      In the first argument of ‘P.zip’, namely ‘[1 .. 8]’
+      In the first argument of ‘(P.++)’, namely ‘P.zip [1 .. 8] values’
+     |
+1402 |   let regs = P.zip [1 .. 8] values P.++ [(31, dataPointer)]
+     |                     ^
+
+test/SimpleRisc.hs:1463:21: warning: [GHC-18042] [-Wtype-defaults]
+    • Defaulting the type variable ‘a0’ to type ‘Integer’ in the following constraints
+        (Num a0) arising from the literal ‘1’ at test/SimpleRisc.hs:1463:21
+        (Enum a0)
+          arising from the arithmetic sequence ‘1 .. 8’
+          at test/SimpleRisc.hs:1463:20-27
+        (Integral a0)
+          arising from a use of ‘fromIntegral’
+          at test/SimpleRisc.hs:1465:53-64
+    • In the expression: 1
+      In the first argument of ‘P.zip’, namely ‘[1 .. 8]’
+      In the first argument of ‘(P.++)’, namely ‘P.zip [1 .. 8] values’
+     |
+1463 |       regs = P.zip [1 .. 8] values P.++ [(31, dataPointer)]
+     |                     ^
+
+test/SimpleRisc.hs:1467:15: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘cycle’ shadows the existing binding
+      imported from ‘Clash.Prelude’ at test/SimpleRisc.hs:17:1-38
+      (and originally defined in ‘GHC.List’)
+     |
+1467 |       run sim cycle pending
+     |               ^^^^^
+
+test/SimpleRisc.hs:1476:7: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘quiet’ shadows the existing binding
+      defined at test/SimpleRisc.hs:164:1
+     |
+1476 |       quiet = finish (run start (0 :: Int) [])
+     |       ^^^^^
+
+test/SimpleRisc.hs:1851:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘pipelined’ shadows the existing binding
+      defined at test/SimpleRisc.hs:1395:1
+     |
+1851 |   P.mapM_ (\pipelined -> do
+     |             ^^^^^^^^^
+
+test/SimpleRisc.hs:1870:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘pipelined’ shadows the existing binding
+      defined at test/SimpleRisc.hs:1395:1
+     |
+1870 |   P.mapM_ (\pipelined -> do
+     |             ^^^^^^^^^
+
+test/SimpleRisc.hs:1885:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘pipelined’ shadows the existing binding
+      defined at test/SimpleRisc.hs:1395:1
+     |
+1885 |   P.mapM_ (\pipelined -> do
+     |             ^^^^^^^^^
+
+test/SimpleRisc.hs:1906:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘pipelined’ shadows the existing binding
+      defined at test/SimpleRisc.hs:1395:1
+     |
+1906 |   P.mapM_ (\pipelined -> do
+     |             ^^^^^^^^^
+
+test/SimpleRisc.hs:1928:13: warning: [GHC-63397] [-Wname-shadowing]
+    This binding for ‘pipelined’ shadows the existing binding
+      defined at test/SimpleRisc.hs:1395:1
+     |
+1928 |   P.mapM_ (\pipelined -> do
+     |             ^^^^^^^^^
+[6 of 6] Compiling Main             ( test/Spec.hs, dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/t/haskplayground-test/build/haskplayground-test/haskplayground-test-tmp/Main.o ) [SimpleRisc changed]
+[7 of 7] Linking dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/t/haskplayground-test/build/haskplayground-test/haskplayground-test [Objects changed]
+ld: warning: -U option is redundant when using -undefined dynamic_lookup
+Running 1 test suites...
+Test suite haskplayground-test: RUNNING...
+━━━ test ━━━
+  ✓ prop_example passed 100 tests.
+  ✓ 1 succeeded.
+━━━ SimpleRisc ━━━
+  ✓ Frontend assembly, expansion and register reads have separate boundaries passed 300 tests.
+  ✓ Registered decode hazards match arriving producer stages passed 200 tests.
+  ✓ Compressed mret and FENCE.I discard stale halfwords passed 1 test.
+  ✓ Compressed ALU stream matches independent RV32 interpreter passed 200 tests.
+  ✓ Compressed pipeline retains straight-line instruction throughput passed 1 test.
+  ✓ Compressed mixed fetch, stores and pc+2 links passed 1 test.
+  ✓ Compressed hints and precise raw illegal traps passed 1 test.
+  ✓ Compressed boundary fetch and mepc IALIGN16 passed 1 test.
+  ✓ Bus completes once and preserves concurrent RX passed 100 tests.
+  ✓ Bus waits, precise faults and cancellation passed 100 tests.
+  ✓ Registered memory target selection passed 100 tests.
+  ✓ Finisher exits reset into the ROM; BOOTCAUSE reads and clears passed 100 tests.
+  ✓ Split counters match a 64-bit reference passed 100 tests.
+  ✓ Counter CSR reads wait for carry passed 100 tests.
+  ✓ Precise retirement and UART stalls passed 1 test.
+  ✓ Counter writes override implicit increments passed 1 test.
+  ✓ All six CSR read/modify/write forms passed 100 tests.
+  ✓ CSR access rules and WARL masks passed 100 tests.
+  ✓ Guest trap handler resumes with mret passed 1 test.
+  ✓ MRET restores machine status passed 100 tests.
+  ✓ mtip compares all 64 bits passed 100 tests.
+  ✓ Timer interrupt wakes WFI passed 100 tests.
+  ✓ UART interrupt claims through the PLIC passed 100 tests.
+  ✓ Reset quietens interrupt sources passed 1 test.
+  ✓ SPI exchanges bytes in mode 0 passed 100 tests.
+  ✓ SDRAM SPI survives cache holds passed 1 test.
+  ✓ FIFO is a bounded queue passed 100 tests.
+  ✓ A program reaches the I/O complex passed 1 test.
+  ✓ SPI DMA moves blocks passed 100 tests.
+  ✓ Core matches the reference model on random programs passed 300 tests.
+    ends in ECALL                  83% ████████████████▌···
+    ends in an illegal instruction  5% ▉···················
+    ends in a misaligned access     7% █▎··················
+    ends in an access fault         2% ▍···················
+    ends in a misaligned jump       3% ▌···················
+    jumps into the ROM              0% ····················
+    retires 30 or more             25% █████···············
+    takes a software interrupt     18% ███▌················
+    runs a loop                    38% ███████▌············
+  ✓ Pipeline matches the reference model on random programs passed 300 tests.
+    ends in ECALL                  83% ████████████████▌···
+    ends in an illegal instruction  5% ▉···················
+    ends in a misaligned access     7% █▎··················
+    ends in an access fault         2% ▍···················
+    ends in a misaligned jump       3% ▌···················
+    jumps into the ROM              0% ····················
+    retires 30 or more             25% █████···············
+    takes a software interrupt     18% ███▌················
+    runs a loop                    38% ███████▌············
+  ✓ The pipeline's multiplier is exact passed 2000 tests.
+  ✓ Interrupts are transparent to the phases passed 100 tests.
+    interrupted 100% ████████████████████
+  ✓ Interrupts are transparent to the pipeline passed 100 tests.
+    interrupted 100% ████████████████████
+  ✓ MRET takes a pending interrupt at once passed 100 tests.
+  ✓ Boot ROM quietens interrupt sources before R passed 1 test.
+  ✓ Precise staged exception entry passed 100 tests.
+  ✓ Unhandled traps return to the boot ROM; Ctrl-C resets passed 1 test.
+  ✓ Faulting store never writes RAM passed 1 test.
+  ✓ Every register bank and x0 survives decode/writeback passed 100 tests.
+  ✓ RV32I arithmetic result reaches BRAM passed 100 tests.
+  ✓ Boot ROM loads programs with a guard word passed 20 tests.
+  ✓ Boot ROM implements Base T/Q/V/H commands passed 1 test.
+  ✓ Boot ROM clears RAM passed 1 test.
+  ✓ RV32M matches the reference semantics passed 400 tests.
+  ✓ Test encoders match known instructions passed 1 test.
+  ✓ Backward branch in final word loops passed 100 tests.
+  ✓ SDRAM holds full word addresses across waits passed 100 tests.
+  ✓ SDRAM map and boot ROM reads passed 1 test.
+  ✓ SDRAM reset drains pending memory passed 1 test.
+  ✓ Registered CSR selection matches reference passed 100 tests.
+  ✓ Registered execution matches compute passed 100 tests.
+  ✓ Split comparisons match signed/unsigned references passed 100 tests.
+  ✓ Simple instructions overlap unless dependent passed 100 tests.
+  ✓ Two-stage shifts cover every distance passed 1 test.
+  ✓ Store into next instruction is fetched fresh passed 1 test.
+  ✓ MISC-MEM decoding passed 1 test.
+  ✓ RAM accesses take the fast path passed 100 tests.
+  ✓ A taken jump fetches its target early passed 1 test.
+  ✓ UART TX store waits for ready passed 100 tests.
+  ✓ Circuit programs and runs over UART passed 1 test.
+  ✓ UART TX timing and byte latch passed 100 tests.
+  ✓ UART RX 8-N-1 sampling passed 100 tests.
+  ✓ UART RX holding register passed 100 tests.
+  ✓ 64 succeeded.
+━━━ NeoMusic audio engine ━━━
+  ✓ transposition under arbitrary tuning passed 100 tests.
+  ✓ invalid inputs are rejected passed 1 test.
+  ✓ PCM duration, pitch, silence and WAV framing passed 1 test.
+  ✓ velocity, gain, pan and send passed 1 test.
+  ✓ reverb tails and synth releases passed 1 test.
+  ✓ adsr is exactly the classic envelope passed 100 tests.
+  ✓ patch modulations: release, LFO, velocity, bounds, pitched or not passed 1 test.
+  ✓ voices: classic expansion, strings, filters, pan, pitched or not passed 1 test.
+  ✓ recordings: WAV, SFZ, layers, takes, rooms passed 1 test.
+  ✓ 9 succeeded.
+━━━ NeoMusic score and views ━━━
+  ✓ phrase axes and score laws passed 100 tests.
+  ✓ expanded source preserves timeline passed 100 tests.
+  ✓ functions, operators, comments and negative notes passed 1 test.
+  ✓ parallel retrograde and fractional timing passed 1 test.
+  ✓ language rejects malformed and ambiguous inputs passed 1 test.
+  ✓ sheet and audio agree exactly on onset and gate passed 1 test.
+  ✓ strict sheet/MIDI bounds and exact tick resolution passed 1 test.
+  ✓ numeric view preserves steps, durations and independent voices passed 1 test.
+  ✓ numeric lanes align on shared onsets passed 1 test.
+  ✓ legend states tempo, tuning and keys beside the numbers passed 1 test.
+  ✓ level scales, so nested levels compose passed 100 tests.
+  ✓ score validation is independent of the legacy tree passed 1 test.
+  ✓ gate: sounding length is a ratio, separate from occupied time passed 100 tests.
+  ✓ pedal holds every note to the end of its own score passed 1 test.
+  ✓ gate in MIDI, staff and numeric views passed 1 test.
+  ✓ tempo laws: identity, composition, stretch, closed form passed 100 tests.
+  ✓ tempo laws: swing keeps beats, locality, monotone clock passed 100 tests.
+  ✓ MIDI tempo map plays back at the audio's times passed 100 tests.
+  ✓ tempo in the language, staff and numeric views passed 1 test.
+  ✓ signals: pitch adds, level multiplies, glide joins successors passed 1 test.
+  ✓ signals: a bend really moves the pitch; oscillators count beats passed 1 test.
+  ✓ signals in the language, prelude, MIDI, staff and numeric views passed 1 test.
+  ✓ cents: a fine offset under the steps, in every view passed 1 test.
+  ✓ staff carries the numeric notation under the notes passed 1 test.
+  ✓ number parameters: arithmetic, notes, whole numbers, kinds passed 1 test.
+  ✓ the prelude: ordinary definitions a score can shadow passed 1 test.
+  ✓ tempo cycles: segments repeat; swing is one; source round-trips passed 1 test.
+  ✓ sounds and mix in .neomusic passed 1 test.
+  ✓ voices in .neomusic passed 1 test.
+  ✓ recordings in .neomusic passed 1 test.
+  ✓ humanizing: noise, start and lag passed 1 test.
+  ✓ phrase signals: across a group, not each note passed 1 test.
+  ✓ LilyPond golden views passed 1 test.
+  ✓ 33 succeeded.
+━━━ PsramRegs ━━━
+  ✓ boot passed 1 test.
+  ✓ matches the psram_regs.ino model passed 40 tests.
+  ✓ write-through and flush passed 1 test.
+  ✓ verify failure sets ERR passed 1 test.
+  ✓ stale partial frame dropped passed 1 test.
+  ✓ lost messages reported passed 1 test.
+  ✓ UART end to end passed 1 test.
+  ✓ UART burst keeps snapshots whole passed 1 test.
+  ✓ 8 succeeded.
+Test suite haskplayground-test: PASS
+Test suite logged to:
+/Users/jasonqin/Documents/GitHub/HaskPlayground/./dist-newstyle/build/aarch64-osx/ghc-9.8.2/haskplayground-0.1.0.0/t/haskplayground-test/test/haskplayground-0.1.0.0-haskplayground-test.log
+1 of 1 test suites (1 of 1 test cases) passed.

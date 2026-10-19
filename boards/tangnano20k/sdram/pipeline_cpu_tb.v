@@ -2,6 +2,7 @@
 module pipeline_cpu_tb #(
  parameter ROM_FILE="output/tangnano20k/pipeline-rtl/rom.hex",
  parameter EXPECT_TRAPS=4,
+ parameter LINE_BITS=12,
  parameter LOADER_TEST=0,
  parameter UART_BIT=868,
  parameter PIN_MODEL=0,
@@ -41,7 +42,7 @@ module pipeline_cpu_tb #(
  wire c_req,c_write,c_ready,c_done,c_valid;
  wire [20:0] c_address;wire [31:0] c_wdata,c_rdata;wire [3:0] c_mask;wire [1:0] c_word_index;
  reg fake_done=0,fake_valid=0;reg [31:0] fake_rdata=0;reg [1:0] fake_word_index=0;
- sdram_pipeline_cache #(.ROM_FILE(ROM_FILE)) cache(clk,core_reset,
+ sdram_pipeline_cache #(.LINE_BITS(LINE_BITS),.ROM_FILE(ROM_FILE)) cache(clk,core_reset,
    cpu_address,cpu_write,cpu_wdata,cpu_mask,hold_cpu,cpu_rdata,
    c_req,c_write,c_address,c_wdata,c_mask,c_ready,c_done,c_rdata,c_valid,c_word_index);
  generate if(CDC_BRIDGE)begin: clock_crossing
@@ -63,6 +64,7 @@ module pipeline_cpu_tb #(
  reg [31:0] expected_xor=0;
  integer tick=0,backend_tick=0,delay=0,phase=0,reads=0,writes=0,held_clocks=0;
  integer long_held=0,ready_stalls=0,markers=0,quiet=0;
+ integer timer_misses=0;
  reg saved_write=0,long_seen=0,break_sent=0,corrupt=0;
  reg [20:0] saved_address=0;reg [31:0] saved_data=0;reg [3:0] saved_mask=0;
  integer lane;
@@ -86,6 +88,9 @@ module pipeline_cpu_tb #(
        reads<=reads+1;
        if(address[1:0]!=0)$fatal(1,"unaligned line refill %h",address);
        if(address==COUNTER_LINE)delay<=1000;
+       if(address>=21'h144000 && address<21'h164000)begin
+         delay<=5000;timer_misses<=timer_misses+1;
+       end
        if(address==LONG_LINE && ram[STATUS]==32'h600d0001 && !long_seen)begin
          delay<=12000;long_seen<=1;
        end
@@ -289,8 +294,10 @@ module pipeline_cpu_tb #(
        if(ram[STATUS+6]!==EXPECT_TRAPS)$fatal(1,"precise trap count");
        if(ram[STATUS+2]<1000 || ram[STATUS+3]==0 || ram[STATUS+3]>=64)$fatal(1,"hold/counter contract");
        if(ram[STATUS+7]<1000)$fatal(1,"mtime did not advance across memory hold");
+       if(timer_misses!=8 || ram[STATUS+8]!==8 || ram[STATUS+9]!==32'h5a5a1234)
+         $fatal(1,"timer/cache/flush coverage misses=%0d interrupts=%0d sentinel=%h",timer_misses,ram[STATUS+8],ram[STATUS+9]);
        if(!break_sent || long_held<8000 || ready_stalls==0)$fatal(1,"hold/backpressure/UART leg was not exercised");
-       $display("PASS: pipeline/cache guest, high RAM, masked stores, fence.i, IM/branches/traps, counters and Ctrl-C; %0d fills %0d writes %0d held clocks",reads,writes,held_clocks);
+       $display("PASS: pipeline/cache guest, high RAM, masked stores, fence.i, IM/branches/traps, eight timer interrupts across misses, counters and Ctrl-C; %0d fills %0d writes %0d held clocks",reads,writes,held_clocks);
        $finish;
      end
    end else quiet=0;

@@ -1,0 +1,14 @@
+empty
+Jtag frequency : requested 6.00MHz    -> real 6.00MHz
+Parse file Parse /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/timing-precompare-p2/impl/pnr/sdram_test.fs:
+Done
+DONE
+Erase SRAM Load SRAM
+Load SRAM: [======================                            ] 43.33%
+
+Load SRAM: [============================================      ] 86.67%
+
+Load SRAM: [==================================================] 100.00%
+
+Done
+DONE

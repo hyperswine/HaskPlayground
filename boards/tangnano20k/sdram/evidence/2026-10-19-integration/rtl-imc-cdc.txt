@@ -1,0 +1,6 @@
+PASS: pipeline/cache guest, high RAM, masked stores, fence.i, IM/branches/traps, eight timer interrupts across misses, counters and Ctrl-C; 93 fills 20 writes 116953 held clocks
+- /Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cpu_tb.v:301: Verilog $finish
+- S i m u l a t i o n   R e p o r t: Verilator 5.052 2026-09-05
+- Verilator: $finish at 1ms; walltime 0.211 s; speed 6.317 ms/s
+- Verilator: cpu 0.210 s on 1 threads; allocated 12 MB
+PASS: corrupt backend beat is rejected by the executing guest

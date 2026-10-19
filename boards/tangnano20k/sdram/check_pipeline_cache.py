@@ -30,11 +30,13 @@ def main():
     fixture = (HERE/'pipeline_cache_tb.v').read_text()
     results = []
 
-    def run(name, rtl, tb, expected=0, failure='undefined tag collision used as a hit'):
+    def run(name, rtl, tb, expected=0, failure='undefined tag collision used as a hit', banks=False):
         rtl_path = out/(name+'.v');rtl_path.write_text(rtl)
         tb_path = out/(name+'-tb.v');tb_path.write_text(tb)
         executable = out/(name+'-sim')
         command = ['iverilog', '-g2012', '-s', 'pipeline_cache_tb', '-o', str(executable), str(rtl_path), str(tb_path)]
+        if banks:
+            command[1:1] = ['-P', 'pipeline_cache_tb.LINE_BITS=12', '-P', 'pipeline_cache_tb.BANK_SWEEP=1']
         compiled = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=60)
         if compiled.returncode:
             raise AssertionError(compiled.stdout+compiled.stderr)
@@ -44,7 +46,8 @@ def main():
         if executed.returncode != expected:
             raise AssertionError(f'{name}: exit {executed.returncode}\n{text}')
         if expected == 0:
-            assert 'PASS: 241 reads, 137 ordered masked writes' in text, text
+            assert ('PASS: 401 reads, 169 ordered masked writes' if banks else
+                    'PASS: 241 reads, 137 ordered masked writes') in text, text
         else:
             assert failure in text, text
         results.append({'name': name, 'passed': True, 'expected_exit': expected,
@@ -60,6 +63,12 @@ def main():
     run('normal-write-update', updating, fixture)
     invalidating = source.replace(default_policy, 'parameter WRITE_UPDATE=0,')
     run('normal-invalidate', invalidating, fixture)
+    run('all-32-banks-write-update', updating, fixture, banks=True)
+    run('all-32-banks-invalidate', invalidating, fixture, banks=True)
+    bank_guard = '(words_index>>9)==b'
+    assert source.count(bank_guard) == 1
+    run('missing-bank-write-select', source.replace(bank_guard, "1'b1"), fixture,
+        expected=1, failure='reply', banks=True)
     read = 'if(advance)entry_tag<=tags[cpu_address[LINE_BITS+1:2]];'
     poisoned_read = "if(advance)entry_tag<=(tag_write && tag_write_index==cpu_address[LINE_BITS+1:2]) ? {(20-LINE_BITS){1'bx}}:tags[cpu_address[LINE_BITS+1:2]];"
     assert source.count(read) == 1, 'update the collision injection for the current tag read port'

@@ -1,0 +1,1250 @@
+{
+ "bram": {
+  "I/add-01": {
+   "note": "ARCH END 600d0003 cycles=7462",
+   "status": "Pass"
+  },
+  "I/addi-01": {
+   "note": "ARCH END 600d0003 cycles=5472",
+   "status": "Pass"
+  },
+  "I/and-01": {
+   "note": "ARCH END 600d0003 cycles=7393",
+   "status": "Pass"
+  },
+  "I/andi-01": {
+   "note": "ARCH END 600d0003 cycles=5481",
+   "status": "Pass"
+  },
+  "I/auipc-01": {
+   "note": "ARCH END 600d0003 cycles=1080",
+   "status": "Pass"
+  },
+  "I/beq-01": {
+   "note": "ARCH TOO BIG image 235824 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bge-01": {
+   "note": "ARCH TOO BIG image 239936 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bgeu-01": {
+   "note": "ARCH TOO BIG image 306016 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/blt-01": {
+   "note": "ARCH TOO BIG image 231712 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bltu-01": {
+   "note": "ARCH TOO BIG image 310112 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bne-01": {
+   "note": "ARCH TOO BIG image 235824 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/fence-01": {
+   "note": "ARCH END 600d0003 cycles=385",
+   "status": "Pass"
+  },
+  "I/jal-01": {
+   "note": "ARCH TOO BIG image 1761424 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/jalr-01": {
+   "note": "ARCH END 600d0003 cycles=1833",
+   "status": "Pass"
+  },
+  "I/lb-align-01": {
+   "note": "ARCH END 600d0003 cycles=1060",
+   "status": "Pass"
+  },
+  "I/lbu-align-01": {
+   "note": "ARCH END 600d0003 cycles=1039",
+   "status": "Pass"
+  },
+  "I/lh-align-01": {
+   "note": "ARCH END 600d0003 cycles=1039",
+   "status": "Pass"
+  },
+  "I/lhu-align-01": {
+   "note": "ARCH END 600d0003 cycles=1039",
+   "status": "Pass"
+  },
+  "I/lui-01": {
+   "note": "ARCH END 600d0003 cycles=628",
+   "status": "Pass"
+  },
+  "I/lw-align-01": {
+   "note": "ARCH END 600d0003 cycles=1039",
+   "status": "Pass"
+  },
+  "I/misalign1-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=409",
+   "status": "Pass"
+  },
+  "I/or-01": {
+   "note": "ARCH END 600d0003 cycles=7461",
+   "status": "Pass"
+  },
+  "I/ori-01": {
+   "note": "ARCH END 600d0003 cycles=5458",
+   "status": "Pass"
+  },
+  "I/sb-align-01": {
+   "note": "ARCH END 600d0003 cycles=1360",
+   "status": "Pass"
+  },
+  "I/sh-align-01": {
+   "note": "ARCH END 600d0003 cycles=1370",
+   "status": "Pass"
+  },
+  "I/sll-01": {
+   "note": "ARCH END 600d0003 cycles=1294",
+   "status": "Pass"
+  },
+  "I/slli-01": {
+   "note": "ARCH END 600d0003 cycles=1190",
+   "status": "Pass"
+  },
+  "I/slt-01": {
+   "note": "ARCH END 600d0003 cycles=7422",
+   "status": "Pass"
+  },
+  "I/slti-01": {
+   "note": "ARCH END 600d0003 cycles=5459",
+   "status": "Pass"
+  },
+  "I/sltiu-01": {
+   "note": "ARCH END 600d0003 cycles=6633",
+   "status": "Pass"
+  },
+  "I/sltu-01": {
+   "note": "ARCH END 600d0003 cycles=8927",
+   "status": "Pass"
+  },
+  "I/sra-01": {
+   "note": "ARCH END 600d0003 cycles=1301",
+   "status": "Pass"
+  },
+  "I/srai-01": {
+   "note": "ARCH END 600d0003 cycles=1182",
+   "status": "Pass"
+  },
+  "I/srl-01": {
+   "note": "ARCH END 600d0003 cycles=1336",
+   "status": "Pass"
+  },
+  "I/srli-01": {
+   "note": "ARCH END 600d0003 cycles=1208",
+   "status": "Pass"
+  },
+  "I/sub-01": {
+   "note": "ARCH END 600d0003 cycles=7495",
+   "status": "Pass"
+  },
+  "I/sw-align-01": {
+   "note": "ARCH END 600d0003 cycles=1193",
+   "status": "Pass"
+  },
+  "I/xor-01": {
+   "note": "ARCH END 600d0003 cycles=7451",
+   "status": "Pass"
+  },
+  "I/xori-01": {
+   "note": "ARCH END 600d0003 cycles=5506",
+   "status": "Pass"
+  },
+  "M/div-01": {
+   "note": "ARCH END 600d0003 cycles=53094",
+   "status": "Pass"
+  },
+  "M/divu-01": {
+   "note": "ARCH END 600d0003 cycles=64543",
+   "status": "Pass"
+  },
+  "M/mul-01": {
+   "note": "ARCH END 600d0003 cycles=8565",
+   "status": "Pass"
+  },
+  "M/mulh-01": {
+   "note": "ARCH END 600d0003 cycles=8565",
+   "status": "Pass"
+  },
+  "M/mulhsu-01": {
+   "note": "ARCH END 600d0003 cycles=9167",
+   "status": "Pass"
+  },
+  "M/mulhu-01": {
+   "note": "ARCH END 600d0003 cycles=9857",
+   "status": "Pass"
+  },
+  "M/rem-01": {
+   "note": "ARCH END 600d0003 cycles=53094",
+   "status": "Pass"
+  },
+  "M/remu-01": {
+   "note": "ARCH END 600d0003 cycles=64543",
+   "status": "Pass"
+  },
+  "Zifencei/Fencei": {
+   "note": "ARCH END 600d0003 cycles=417",
+   "status": "Pass"
+  },
+  "privilege/ebreak": {
+   "note": "ARCH END 600d0003 cycles=1163",
+   "status": "Pass"
+  },
+  "privilege/ecall": {
+   "note": "ARCH END 600d0003 cycles=1145",
+   "status": "Pass"
+  },
+  "privilege/misalign-beq-01": {
+   "note": "ARCH END 600d0003 cycles=1178",
+   "status": "Pass"
+  },
+  "privilege/misalign-bge-01": {
+   "note": "ARCH END 600d0003 cycles=1181",
+   "status": "Pass"
+  },
+  "privilege/misalign-bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=1181",
+   "status": "Pass"
+  },
+  "privilege/misalign-blt-01": {
+   "note": "ARCH END 600d0003 cycles=1178",
+   "status": "Pass"
+  },
+  "privilege/misalign-bltu-01": {
+   "note": "ARCH END 600d0003 cycles=1181",
+   "status": "Pass"
+  },
+  "privilege/misalign-bne-01": {
+   "note": "ARCH END 600d0003 cycles=1178",
+   "status": "Pass"
+  },
+  "privilege/misalign-jal-01": {
+   "note": "ARCH END 600d0003 cycles=4481",
+   "status": "Pass"
+  },
+  "privilege/misalign-lh-01": {
+   "note": "ARCH END 600d0003 cycles=1216",
+   "status": "Pass"
+  },
+  "privilege/misalign-lhu-01": {
+   "note": "ARCH END 600d0003 cycles=1216",
+   "status": "Pass"
+  },
+  "privilege/misalign-lw-01": {
+   "note": "ARCH END 600d0003 cycles=2286",
+   "status": "Pass"
+  },
+  "privilege/misalign-sh-01": {
+   "note": "ARCH END 600d0003 cycles=1186",
+   "status": "Pass"
+  },
+  "privilege/misalign-sw-01": {
+   "note": "ARCH END 600d0003 cycles=2191",
+   "status": "Pass"
+  },
+  "privilege/misalign2-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=1202",
+   "status": "Pass"
+  }
+ },
+ "bram-rvc": {
+  "C/cadd-01": {
+   "note": "ARCH END 600d0003 cycles=7383",
+   "status": "Pass"
+  },
+  "C/caddi-01": {
+   "note": "ARCH END 600d0003 cycles=3654",
+   "status": "Pass"
+  },
+  "C/caddi16sp-01": {
+   "note": "ARCH END 600d0003 cycles=909",
+   "status": "Pass"
+  },
+  "C/caddi4spn-01": {
+   "note": "ARCH END 600d0003 cycles=494",
+   "status": "Pass"
+  },
+  "C/cand-01": {
+   "note": "ARCH END 600d0003 cycles=7403",
+   "status": "Pass"
+  },
+  "C/candi-01": {
+   "note": "ARCH END 600d0003 cycles=3731",
+   "status": "Pass"
+  },
+  "C/cbeqz-01": {
+   "note": "ARCH END 600d0003 cycles=2455",
+   "status": "Pass"
+  },
+  "C/cbnez-01": {
+   "note": "ARCH END 600d0003 cycles=2867",
+   "status": "Pass"
+  },
+  "C/cebreak-01": {
+   "note": "ARCH END 600d0003 cycles=1155",
+   "status": "Pass"
+  },
+  "C/cj-01": {
+   "note": "ARCH END 600d0003 cycles=839",
+   "status": "Pass"
+  },
+  "C/cjal-01": {
+   "note": "ARCH END 600d0003 cycles=1157",
+   "status": "Pass"
+  },
+  "C/cjalr-01": {
+   "note": "ARCH END 600d0003 cycles=1877",
+   "status": "Pass"
+  },
+  "C/cjr-01": {
+   "note": "ARCH END 600d0003 cycles=1843",
+   "status": "Pass"
+  },
+  "C/cli-01": {
+   "note": "ARCH END 600d0003 cycles=496",
+   "status": "Pass"
+  },
+  "C/clui-01": {
+   "note": "ARCH END 600d0003 cycles=529",
+   "status": "Pass"
+  },
+  "C/clw-01": {
+   "note": "ARCH END 600d0003 cycles=671",
+   "status": "Pass"
+  },
+  "C/clwsp-01": {
+   "note": "ARCH END 600d0003 cycles=1072",
+   "status": "Pass"
+  },
+  "C/cmv-01": {
+   "note": "ARCH END 600d0003 cycles=1071",
+   "status": "Pass"
+  },
+  "C/cnop-01": {
+   "note": "ARCH END 600d0003 cycles=387",
+   "status": "Pass"
+  },
+  "C/cor-01": {
+   "note": "ARCH END 600d0003 cycles=7408",
+   "status": "Pass"
+  },
+  "C/cslli-01": {
+   "note": "ARCH END 600d0003 cycles=1160",
+   "status": "Pass"
+  },
+  "C/csrai-01": {
+   "note": "ARCH END 600d0003 cycles=1165",
+   "status": "Pass"
+  },
+  "C/csrli-01": {
+   "note": "ARCH END 600d0003 cycles=1149",
+   "status": "Pass"
+  },
+  "C/csub-01": {
+   "note": "ARCH END 600d0003 cycles=7339",
+   "status": "Pass"
+  },
+  "C/csw-01": {
+   "note": "ARCH END 600d0003 cycles=1200",
+   "status": "Pass"
+  },
+  "C/cswsp-01": {
+   "note": "ARCH END 600d0003 cycles=1200",
+   "status": "Pass"
+  },
+  "C/cxor-01": {
+   "note": "ARCH END 600d0003 cycles=7379",
+   "status": "Pass"
+  },
+  "C/misalign1-cjalr-01": {
+   "note": "ARCH END 600d0003 cycles=398",
+   "status": "Pass"
+  },
+  "C/misalign1-cjr-01": {
+   "note": "ARCH END 600d0003 cycles=397",
+   "status": "Pass"
+  },
+  "I/add-01": {
+   "note": "ARCH END 600d0003 cycles=7448",
+   "status": "Pass"
+  },
+  "I/addi-01": {
+   "note": "ARCH END 600d0003 cycles=5458",
+   "status": "Pass"
+  },
+  "I/and-01": {
+   "note": "ARCH END 600d0003 cycles=7377",
+   "status": "Pass"
+  },
+  "I/andi-01": {
+   "note": "ARCH END 600d0003 cycles=5464",
+   "status": "Pass"
+  },
+  "I/auipc-01": {
+   "note": "ARCH END 600d0003 cycles=1072",
+   "status": "Pass"
+  },
+  "I/beq-01": {
+   "note": "ARCH TOO BIG image 235824 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bge-01": {
+   "note": "ARCH TOO BIG image 239936 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bgeu-01": {
+   "note": "ARCH TOO BIG image 306016 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/blt-01": {
+   "note": "ARCH TOO BIG image 231712 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bltu-01": {
+   "note": "ARCH TOO BIG image 310112 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/bne-01": {
+   "note": "ARCH TOO BIG image 235824 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/fence-01": {
+   "note": "ARCH END 600d0003 cycles=377",
+   "status": "Pass"
+  },
+  "I/jal-01": {
+   "note": "ARCH TOO BIG image 1761424 bytes, RAM 65536 bytes",
+   "status": "Too big"
+  },
+  "I/jalr-01": {
+   "note": "ARCH END 600d0003 cycles=1825",
+   "status": "Pass"
+  },
+  "I/lb-align-01": {
+   "note": "ARCH END 600d0003 cycles=1052",
+   "status": "Pass"
+  },
+  "I/lbu-align-01": {
+   "note": "ARCH END 600d0003 cycles=1031",
+   "status": "Pass"
+  },
+  "I/lh-align-01": {
+   "note": "ARCH END 600d0003 cycles=1031",
+   "status": "Pass"
+  },
+  "I/lhu-align-01": {
+   "note": "ARCH END 600d0003 cycles=1031",
+   "status": "Pass"
+  },
+  "I/lui-01": {
+   "note": "ARCH END 600d0003 cycles=620",
+   "status": "Pass"
+  },
+  "I/lw-align-01": {
+   "note": "ARCH END 600d0003 cycles=1031",
+   "status": "Pass"
+  },
+  "I/misalign1-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=401",
+   "status": "Pass"
+  },
+  "I/or-01": {
+   "note": "ARCH END 600d0003 cycles=7447",
+   "status": "Pass"
+  },
+  "I/ori-01": {
+   "note": "ARCH END 600d0003 cycles=5444",
+   "status": "Pass"
+  },
+  "I/sb-align-01": {
+   "note": "ARCH END 600d0003 cycles=1352",
+   "status": "Pass"
+  },
+  "I/sh-align-01": {
+   "note": "ARCH END 600d0003 cycles=1362",
+   "status": "Pass"
+  },
+  "I/sll-01": {
+   "note": "ARCH END 600d0003 cycles=1286",
+   "status": "Pass"
+  },
+  "I/slli-01": {
+   "note": "ARCH END 600d0003 cycles=1182",
+   "status": "Pass"
+  },
+  "I/slt-01": {
+   "note": "ARCH END 600d0003 cycles=7408",
+   "status": "Pass"
+  },
+  "I/slti-01": {
+   "note": "ARCH END 600d0003 cycles=5445",
+   "status": "Pass"
+  },
+  "I/sltiu-01": {
+   "note": "ARCH END 600d0003 cycles=6619",
+   "status": "Pass"
+  },
+  "I/sltu-01": {
+   "note": "ARCH END 600d0003 cycles=8910",
+   "status": "Pass"
+  },
+  "I/sra-01": {
+   "note": "ARCH END 600d0003 cycles=1293",
+   "status": "Pass"
+  },
+  "I/srai-01": {
+   "note": "ARCH END 600d0003 cycles=1174",
+   "status": "Pass"
+  },
+  "I/srl-01": {
+   "note": "ARCH END 600d0003 cycles=1328",
+   "status": "Pass"
+  },
+  "I/srli-01": {
+   "note": "ARCH END 600d0003 cycles=1200",
+   "status": "Pass"
+  },
+  "I/sub-01": {
+   "note": "ARCH END 600d0003 cycles=7479",
+   "status": "Pass"
+  },
+  "I/sw-align-01": {
+   "note": "ARCH END 600d0003 cycles=1185",
+   "status": "Pass"
+  },
+  "I/xor-01": {
+   "note": "ARCH END 600d0003 cycles=7435",
+   "status": "Pass"
+  },
+  "I/xori-01": {
+   "note": "ARCH END 600d0003 cycles=5492",
+   "status": "Pass"
+  },
+  "M/div-01": {
+   "note": "ARCH END 600d0003 cycles=53086",
+   "status": "Pass"
+  },
+  "M/divu-01": {
+   "note": "ARCH END 600d0003 cycles=64529",
+   "status": "Pass"
+  },
+  "M/mul-01": {
+   "note": "ARCH END 600d0003 cycles=8552",
+   "status": "Pass"
+  },
+  "M/mulh-01": {
+   "note": "ARCH END 600d0003 cycles=8552",
+   "status": "Pass"
+  },
+  "M/mulhsu-01": {
+   "note": "ARCH END 600d0003 cycles=9151",
+   "status": "Pass"
+  },
+  "M/mulhu-01": {
+   "note": "ARCH END 600d0003 cycles=9843",
+   "status": "Pass"
+  },
+  "M/rem-01": {
+   "note": "ARCH END 600d0003 cycles=53086",
+   "status": "Pass"
+  },
+  "M/remu-01": {
+   "note": "ARCH END 600d0003 cycles=64529",
+   "status": "Pass"
+  },
+  "Zifencei/Fencei": {
+   "note": "ARCH END 600d0003 cycles=409",
+   "status": "Pass"
+  },
+  "privilege/ebreak": {
+   "note": "ARCH END 600d0003 cycles=1156",
+   "status": "Pass"
+  },
+  "privilege/ecall": {
+   "note": "ARCH END 600d0003 cycles=1138",
+   "status": "Pass"
+  },
+  "privilege/misalign-beq-01": {
+   "note": "ARCH END 600d0003 cycles=710",
+   "status": "Pass"
+  },
+  "privilege/misalign-bge-01": {
+   "note": "ARCH END 600d0003 cycles=713",
+   "status": "Pass"
+  },
+  "privilege/misalign-bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=713",
+   "status": "Pass"
+  },
+  "privilege/misalign-blt-01": {
+   "note": "ARCH END 600d0003 cycles=710",
+   "status": "Pass"
+  },
+  "privilege/misalign-bltu-01": {
+   "note": "ARCH END 600d0003 cycles=714",
+   "status": "Pass"
+  },
+  "privilege/misalign-bne-01": {
+   "note": "ARCH END 600d0003 cycles=710",
+   "status": "Pass"
+  },
+  "privilege/misalign-jal-01": {
+   "note": "ARCH END 600d0003 cycles=755",
+   "status": "Pass"
+  },
+  "privilege/misalign-lh-01": {
+   "note": "ARCH END 600d0003 cycles=1209",
+   "status": "Pass"
+  },
+  "privilege/misalign-lhu-01": {
+   "note": "ARCH END 600d0003 cycles=1209",
+   "status": "Pass"
+  },
+  "privilege/misalign-lw-01": {
+   "note": "ARCH END 600d0003 cycles=2281",
+   "status": "Pass"
+  },
+  "privilege/misalign-sh-01": {
+   "note": "ARCH END 600d0003 cycles=1179",
+   "status": "Pass"
+  },
+  "privilege/misalign-sw-01": {
+   "note": "ARCH END 600d0003 cycles=2186",
+   "status": "Pass"
+  },
+  "privilege/misalign2-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=733",
+   "status": "Pass"
+  }
+ },
+ "sdram": {
+  "I/add-01": {
+   "note": "ARCH END 600d0003 cycles=47141",
+   "status": "Pass"
+  },
+  "I/addi-01": {
+   "note": "ARCH END 600d0003 cycles=36846",
+   "status": "Pass"
+  },
+  "I/and-01": {
+   "note": "ARCH END 600d0003 cycles=46865",
+   "status": "Pass"
+  },
+  "I/andi-01": {
+   "note": "ARCH END 600d0003 cycles=38051",
+   "status": "Pass"
+  },
+  "I/auipc-01": {
+   "note": "ARCH END 600d0003 cycles=18832",
+   "status": "Pass"
+  },
+  "I/beq-01": {
+   "note": "ARCH END 600d0003 cycles=101251",
+   "status": "Pass"
+  },
+  "I/bge-01": {
+   "note": "ARCH END 600d0003 cycles=104099",
+   "status": "Pass"
+  },
+  "I/bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=124423",
+   "status": "Pass"
+  },
+  "I/blt-01": {
+   "note": "ARCH END 600d0003 cycles=101755",
+   "status": "Pass"
+  },
+  "I/bltu-01": {
+   "note": "ARCH END 600d0003 cycles=123311",
+   "status": "Pass"
+  },
+  "I/bne-01": {
+   "note": "ARCH END 600d0003 cycles=104663",
+   "status": "Pass"
+  },
+  "I/fence-01": {
+   "note": "ARCH END 600d0003 cycles=15706",
+   "status": "Pass"
+  },
+  "I/jal-01": {
+   "note": "ARCH END 600d0003 cycles=30828",
+   "status": "Pass"
+  },
+  "I/jalr-01": {
+   "note": "ARCH END 600d0003 cycles=24246",
+   "status": "Pass"
+  },
+  "I/lb-align-01": {
+   "note": "ARCH END 600d0003 cycles=19867",
+   "status": "Pass"
+  },
+  "I/lbu-align-01": {
+   "note": "ARCH END 600d0003 cycles=19731",
+   "status": "Pass"
+  },
+  "I/lh-align-01": {
+   "note": "ARCH END 600d0003 cycles=19731",
+   "status": "Pass"
+  },
+  "I/lhu-align-01": {
+   "note": "ARCH END 600d0003 cycles=19731",
+   "status": "Pass"
+  },
+  "I/lui-01": {
+   "note": "ARCH END 600d0003 cycles=17132",
+   "status": "Pass"
+  },
+  "I/lw-align-01": {
+   "note": "ARCH END 600d0003 cycles=19744",
+   "status": "Pass"
+  },
+  "I/misalign1-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=15799",
+   "status": "Pass"
+  },
+  "I/or-01": {
+   "note": "ARCH END 600d0003 cycles=47111",
+   "status": "Pass"
+  },
+  "I/ori-01": {
+   "note": "ARCH END 600d0003 cycles=37363",
+   "status": "Pass"
+  },
+  "I/sb-align-01": {
+   "note": "ARCH END 600d0003 cycles=20316",
+   "status": "Pass"
+  },
+  "I/sh-align-01": {
+   "note": "ARCH END 600d0003 cycles=20407",
+   "status": "Pass"
+  },
+  "I/sll-01": {
+   "note": "ARCH END 600d0003 cycles=19730",
+   "status": "Pass"
+  },
+  "I/slli-01": {
+   "note": "ARCH END 600d0003 cycles=18896",
+   "status": "Pass"
+  },
+  "I/slt-01": {
+   "note": "ARCH END 600d0003 cycles=46950",
+   "status": "Pass"
+  },
+  "I/slti-01": {
+   "note": "ARCH END 600d0003 cycles=38414",
+   "status": "Pass"
+  },
+  "I/sltiu-01": {
+   "note": "ARCH END 600d0003 cycles=41898",
+   "status": "Pass"
+  },
+  "I/sltu-01": {
+   "note": "ARCH END 600d0003 cycles=53849",
+   "status": "Pass"
+  },
+  "I/sra-01": {
+   "note": "ARCH END 600d0003 cycles=19522",
+   "status": "Pass"
+  },
+  "I/srai-01": {
+   "note": "ARCH END 600d0003 cycles=18855",
+   "status": "Pass"
+  },
+  "I/srl-01": {
+   "note": "ARCH END 600d0003 cycles=19735",
+   "status": "Pass"
+  },
+  "I/srli-01": {
+   "note": "ARCH END 600d0003 cycles=19068",
+   "status": "Pass"
+  },
+  "I/sub-01": {
+   "note": "ARCH END 600d0003 cycles=47251",
+   "status": "Pass"
+  },
+  "I/sw-align-01": {
+   "note": "ARCH END 600d0003 cycles=20164",
+   "status": "Pass"
+  },
+  "I/xor-01": {
+   "note": "ARCH END 600d0003 cycles=47155",
+   "status": "Pass"
+  },
+  "I/xori-01": {
+   "note": "ARCH END 600d0003 cycles=37331",
+   "status": "Pass"
+  },
+  "M/div-01": {
+   "note": "ARCH END 600d0003 cycles=94056",
+   "status": "Pass"
+  },
+  "M/divu-01": {
+   "note": "ARCH END 600d0003 cycles=109857",
+   "status": "Pass"
+  },
+  "M/mul-01": {
+   "note": "ARCH END 600d0003 cycles=49765",
+   "status": "Pass"
+  },
+  "M/mulh-01": {
+   "note": "ARCH END 600d0003 cycles=49765",
+   "status": "Pass"
+  },
+  "M/mulhsu-01": {
+   "note": "ARCH END 600d0003 cycles=52270",
+   "status": "Pass"
+  },
+  "M/mulhu-01": {
+   "note": "ARCH END 600d0003 cycles=55554",
+   "status": "Pass"
+  },
+  "M/rem-01": {
+   "note": "ARCH END 600d0003 cycles=94056",
+   "status": "Pass"
+  },
+  "M/remu-01": {
+   "note": "ARCH END 600d0003 cycles=109857",
+   "status": "Pass"
+  },
+  "Zifencei/Fencei": {
+   "note": "ARCH END 600d0003 cycles=15812",
+   "status": "Pass"
+  },
+  "privilege/ebreak": {
+   "note": "ARCH END 600d0003 cycles=18275",
+   "status": "Pass"
+  },
+  "privilege/ecall": {
+   "note": "ARCH END 600d0003 cycles=18207",
+   "status": "Pass"
+  },
+  "privilege/misalign-beq-01": {
+   "note": "ARCH END 600d0003 cycles=18315",
+   "status": "Pass"
+  },
+  "privilege/misalign-bge-01": {
+   "note": "ARCH END 600d0003 cycles=18343",
+   "status": "Pass"
+  },
+  "privilege/misalign-bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=18400",
+   "status": "Pass"
+  },
+  "privilege/misalign-blt-01": {
+   "note": "ARCH END 600d0003 cycles=18315",
+   "status": "Pass"
+  },
+  "privilege/misalign-bltu-01": {
+   "note": "ARCH END 600d0003 cycles=18343",
+   "status": "Pass"
+  },
+  "privilege/misalign-bne-01": {
+   "note": "ARCH END 600d0003 cycles=18363",
+   "status": "Pass"
+  },
+  "privilege/misalign-jal-01": {
+   "note": "ARCH END 600d0003 cycles=22763",
+   "status": "Pass"
+  },
+  "privilege/misalign-lh-01": {
+   "note": "ARCH END 600d0003 cycles=18464",
+   "status": "Pass"
+  },
+  "privilege/misalign-lhu-01": {
+   "note": "ARCH END 600d0003 cycles=18464",
+   "status": "Pass"
+  },
+  "privilege/misalign-lw-01": {
+   "note": "ARCH END 600d0003 cycles=19748",
+   "status": "Pass"
+  },
+  "privilege/misalign-sh-01": {
+   "note": "ARCH END 600d0003 cycles=18328",
+   "status": "Pass"
+  },
+  "privilege/misalign-sw-01": {
+   "note": "ARCH END 600d0003 cycles=19439",
+   "status": "Pass"
+  },
+  "privilege/misalign2-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=18499",
+   "status": "Pass"
+  }
+ },
+ "sdram-rvc": {
+  "C/cadd-01": {
+   "note": "ARCH END 600d0003 cycles=42326",
+   "status": "Pass"
+  },
+  "C/caddi-01": {
+   "note": "ARCH END 600d0003 cycles=27734",
+   "status": "Pass"
+  },
+  "C/caddi16sp-01": {
+   "note": "ARCH END 600d0003 cycles=17572",
+   "status": "Pass"
+  },
+  "C/caddi4spn-01": {
+   "note": "ARCH END 600d0003 cycles=16014",
+   "status": "Pass"
+  },
+  "C/cand-01": {
+   "note": "ARCH END 600d0003 cycles=42217",
+   "status": "Pass"
+  },
+  "C/candi-01": {
+   "note": "ARCH END 600d0003 cycles=27776",
+   "status": "Pass"
+  },
+  "C/cbeqz-01": {
+   "note": "ARCH END 600d0003 cycles=23934",
+   "status": "Pass"
+  },
+  "C/cbnez-01": {
+   "note": "ARCH END 600d0003 cycles=25028",
+   "status": "Pass"
+  },
+  "C/cebreak-01": {
+   "note": "ARCH END 600d0003 cycles=18244",
+   "status": "Pass"
+  },
+  "C/cj-01": {
+   "note": "ARCH END 600d0003 cycles=17824",
+   "status": "Pass"
+  },
+  "C/cjal-01": {
+   "note": "ARCH END 600d0003 cycles=19471",
+   "status": "Pass"
+  },
+  "C/cjalr-01": {
+   "note": "ARCH END 600d0003 cycles=23691",
+   "status": "Pass"
+  },
+  "C/cjr-01": {
+   "note": "ARCH END 600d0003 cycles=23712",
+   "status": "Pass"
+  },
+  "C/cli-01": {
+   "note": "ARCH END 600d0003 cycles=16258",
+   "status": "Pass"
+  },
+  "C/clui-01": {
+   "note": "ARCH END 600d0003 cycles=16330",
+   "status": "Pass"
+  },
+  "C/clw-01": {
+   "note": "ARCH END 600d0003 cycles=17366",
+   "status": "Pass"
+  },
+  "C/clwsp-01": {
+   "note": "ARCH END 600d0003 cycles=19740",
+   "status": "Pass"
+  },
+  "C/cmv-01": {
+   "note": "ARCH END 600d0003 cycles=17900",
+   "status": "Pass"
+  },
+  "C/cnop-01": {
+   "note": "ARCH END 600d0003 cycles=15763",
+   "status": "Pass"
+  },
+  "C/cor-01": {
+   "note": "ARCH END 600d0003 cycles=42126",
+   "status": "Pass"
+  },
+  "C/cslli-01": {
+   "note": "ARCH END 600d0003 cycles=18172",
+   "status": "Pass"
+  },
+  "C/csrai-01": {
+   "note": "ARCH END 600d0003 cycles=18184",
+   "status": "Pass"
+  },
+  "C/csrli-01": {
+   "note": "ARCH END 600d0003 cycles=18110",
+   "status": "Pass"
+  },
+  "C/csub-01": {
+   "note": "ARCH END 600d0003 cycles=42069",
+   "status": "Pass"
+  },
+  "C/csw-01": {
+   "note": "ARCH END 600d0003 cycles=19316",
+   "status": "Pass"
+  },
+  "C/cswsp-01": {
+   "note": "ARCH END 600d0003 cycles=19340",
+   "status": "Pass"
+  },
+  "C/cxor-01": {
+   "note": "ARCH END 600d0003 cycles=42346",
+   "status": "Pass"
+  },
+  "C/misalign1-cjalr-01": {
+   "note": "ARCH END 600d0003 cycles=15702",
+   "status": "Pass"
+  },
+  "C/misalign1-cjr-01": {
+   "note": "ARCH END 600d0003 cycles=15700",
+   "status": "Pass"
+  },
+  "I/add-01": {
+   "note": "ARCH END 600d0003 cycles=47141",
+   "status": "Pass"
+  },
+  "I/addi-01": {
+   "note": "ARCH END 600d0003 cycles=36839",
+   "status": "Pass"
+  },
+  "I/and-01": {
+   "note": "ARCH END 600d0003 cycles=46869",
+   "status": "Pass"
+  },
+  "I/andi-01": {
+   "note": "ARCH END 600d0003 cycles=38034",
+   "status": "Pass"
+  },
+  "I/auipc-01": {
+   "note": "ARCH END 600d0003 cycles=18816",
+   "status": "Pass"
+  },
+  "I/beq-01": {
+   "note": "ARCH END 600d0003 cycles=101216",
+   "status": "Pass"
+  },
+  "I/bge-01": {
+   "note": "ARCH END 600d0003 cycles=104095",
+   "status": "Pass"
+  },
+  "I/bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=124429",
+   "status": "Pass"
+  },
+  "I/blt-01": {
+   "note": "ARCH END 600d0003 cycles=101763",
+   "status": "Pass"
+  },
+  "I/bltu-01": {
+   "note": "ARCH END 600d0003 cycles=123265",
+   "status": "Pass"
+  },
+  "I/bne-01": {
+   "note": "ARCH END 600d0003 cycles=104683",
+   "status": "Pass"
+  },
+  "I/fence-01": {
+   "note": "ARCH END 600d0003 cycles=15663",
+   "status": "Pass"
+  },
+  "I/jal-01": {
+   "note": "ARCH END 600d0003 cycles=30776",
+   "status": "Pass"
+  },
+  "I/jalr-01": {
+   "note": "ARCH END 600d0003 cycles=24246",
+   "status": "Pass"
+  },
+  "I/lb-align-01": {
+   "note": "ARCH END 600d0003 cycles=19851",
+   "status": "Pass"
+  },
+  "I/lbu-align-01": {
+   "note": "ARCH END 600d0003 cycles=19723",
+   "status": "Pass"
+  },
+  "I/lh-align-01": {
+   "note": "ARCH END 600d0003 cycles=19723",
+   "status": "Pass"
+  },
+  "I/lhu-align-01": {
+   "note": "ARCH END 600d0003 cycles=19723",
+   "status": "Pass"
+  },
+  "I/lui-01": {
+   "note": "ARCH END 600d0003 cycles=17116",
+   "status": "Pass"
+  },
+  "I/lw-align-01": {
+   "note": "ARCH END 600d0003 cycles=19720",
+   "status": "Pass"
+  },
+  "I/misalign1-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=15783",
+   "status": "Pass"
+  },
+  "I/or-01": {
+   "note": "ARCH END 600d0003 cycles=47094",
+   "status": "Pass"
+  },
+  "I/ori-01": {
+   "note": "ARCH END 600d0003 cycles=37341",
+   "status": "Pass"
+  },
+  "I/sb-align-01": {
+   "note": "ARCH END 600d0003 cycles=20312",
+   "status": "Pass"
+  },
+  "I/sh-align-01": {
+   "note": "ARCH END 600d0003 cycles=20390",
+   "status": "Pass"
+  },
+  "I/sll-01": {
+   "note": "ARCH END 600d0003 cycles=19690",
+   "status": "Pass"
+  },
+  "I/slli-01": {
+   "note": "ARCH END 600d0003 cycles=18884",
+   "status": "Pass"
+  },
+  "I/slt-01": {
+   "note": "ARCH END 600d0003 cycles=46909",
+   "status": "Pass"
+  },
+  "I/slti-01": {
+   "note": "ARCH END 600d0003 cycles=38417",
+   "status": "Pass"
+  },
+  "I/sltiu-01": {
+   "note": "ARCH END 600d0003 cycles=41899",
+   "status": "Pass"
+  },
+  "I/sltu-01": {
+   "note": "ARCH END 600d0003 cycles=53841",
+   "status": "Pass"
+  },
+  "I/sra-01": {
+   "note": "ARCH END 600d0003 cycles=19522",
+   "status": "Pass"
+  },
+  "I/srai-01": {
+   "note": "ARCH END 600d0003 cycles=18842",
+   "status": "Pass"
+  },
+  "I/srl-01": {
+   "note": "ARCH END 600d0003 cycles=19708",
+   "status": "Pass"
+  },
+  "I/srli-01": {
+   "note": "ARCH END 600d0003 cycles=19048",
+   "status": "Pass"
+  },
+  "I/sub-01": {
+   "note": "ARCH END 600d0003 cycles=47242",
+   "status": "Pass"
+  },
+  "I/sw-align-01": {
+   "note": "ARCH END 600d0003 cycles=20110",
+   "status": "Pass"
+  },
+  "I/xor-01": {
+   "note": "ARCH END 600d0003 cycles=47150",
+   "status": "Pass"
+  },
+  "I/xori-01": {
+   "note": "ARCH END 600d0003 cycles=37299",
+   "status": "Pass"
+  },
+  "M/div-01": {
+   "note": "ARCH END 600d0003 cycles=94038",
+   "status": "Pass"
+  },
+  "M/divu-01": {
+   "note": "ARCH END 600d0003 cycles=109852",
+   "status": "Pass"
+  },
+  "M/mul-01": {
+   "note": "ARCH END 600d0003 cycles=49727",
+   "status": "Pass"
+  },
+  "M/mulh-01": {
+   "note": "ARCH END 600d0003 cycles=49727",
+   "status": "Pass"
+  },
+  "M/mulhsu-01": {
+   "note": "ARCH END 600d0003 cycles=52273",
+   "status": "Pass"
+  },
+  "M/mulhu-01": {
+   "note": "ARCH END 600d0003 cycles=55529",
+   "status": "Pass"
+  },
+  "M/rem-01": {
+   "note": "ARCH END 600d0003 cycles=94038",
+   "status": "Pass"
+  },
+  "M/remu-01": {
+   "note": "ARCH END 600d0003 cycles=109852",
+   "status": "Pass"
+  },
+  "Zifencei/Fencei": {
+   "note": "ARCH END 600d0003 cycles=15796",
+   "status": "Pass"
+  },
+  "privilege/ebreak": {
+   "note": "ARCH END 600d0003 cycles=18270",
+   "status": "Pass"
+  },
+  "privilege/ecall": {
+   "note": "ARCH END 600d0003 cycles=18202",
+   "status": "Pass"
+  },
+  "privilege/misalign-beq-01": {
+   "note": "ARCH END 600d0003 cycles=16919",
+   "status": "Pass"
+  },
+  "privilege/misalign-bge-01": {
+   "note": "ARCH END 600d0003 cycles=16955",
+   "status": "Pass"
+  },
+  "privilege/misalign-bgeu-01": {
+   "note": "ARCH END 600d0003 cycles=17010",
+   "status": "Pass"
+  },
+  "privilege/misalign-blt-01": {
+   "note": "ARCH END 600d0003 cycles=16919",
+   "status": "Pass"
+  },
+  "privilege/misalign-bltu-01": {
+   "note": "ARCH END 600d0003 cycles=16955",
+   "status": "Pass"
+  },
+  "privilege/misalign-bne-01": {
+   "note": "ARCH END 600d0003 cycles=16975",
+   "status": "Pass"
+  },
+  "privilege/misalign-jal-01": {
+   "note": "ARCH END 600d0003 cycles=17307",
+   "status": "Pass"
+  },
+  "privilege/misalign-lh-01": {
+   "note": "ARCH END 600d0003 cycles=18462",
+   "status": "Pass"
+  },
+  "privilege/misalign-lhu-01": {
+   "note": "ARCH END 600d0003 cycles=18462",
+   "status": "Pass"
+  },
+  "privilege/misalign-lw-01": {
+   "note": "ARCH END 600d0003 cycles=19750",
+   "status": "Pass"
+  },
+  "privilege/misalign-sh-01": {
+   "note": "ARCH END 600d0003 cycles=18324",
+   "status": "Pass"
+  },
+  "privilege/misalign-sw-01": {
+   "note": "ARCH END 600d0003 cycles=19434",
+   "status": "Pass"
+  },
+  "privilege/misalign2-jalr-01": {
+   "note": "ARCH END 600d0003 cycles=17103",
+   "status": "Pass"
+  }
+ }
+}

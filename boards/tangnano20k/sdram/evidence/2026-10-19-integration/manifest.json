@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-19",
+  "integration_commit": "50c744d",
+  "merged_branches": {
+    "write-update-debug": "c4914ac",
+    "arch-tests": "992f638"
+  },
+  "sources_sha256": {
+    "src/SimpleRisc.hs": "71d9e2e033806e3729261dbe8b3c3a08cc0480f07c3fcf520c505e73ca749b38",
+    "src/SdramPipeline.hs": "da90e43ae4782e51e62076032a25c02380e9a2b022162def0b961d60c132b129",
+    "src/RiscVCompressed.hs": "2104bdb10ca4eefc4e04e9a8e98e550c7a301e3aa7a37f39c17b9420e6409157",
+    "test/SimpleRisc.hs": "69fdd7abfdee2a47065921f19a910b79e455fa39d67b55782734a5d02cc3377e",
+    "boards/tangnano20k/arch-tests/run_arch_tests.py": "1ba56458e186a7210396480873269bbda27bd0837f33f0707ca6b5427f632412",
+    "boards/tangnano20k/arch-tests/test_runner.py": "8568ff645ec099b174a010aa0158d795518318fb09a9b6259812f2dab676e220",
+    "boards/tangnano20k/arch-tests/sdram_tb.v": "8ad3cc12c566d544978164fadfd0aadc268aecfd1c285680e6203560464dd286",
+    "boards/tangnano20k/sdram/pipeline_cache.v": "c84e9d71b22188455e7ff0c7c64f24c88e22a7a27fdaab2281925daef9fc95c4",
+    "boards/tangnano20k/sdram/pipeline_cache_tb.v": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+    "boards/tangnano20k/sdram/pipeline_cpu_tb.v": "819ec73e332bffc5f30ca5921a7da3e2658f92fe3490a4b8126774372e675bfa",
+    "boards/tangnano20k/sdram/check_pipeline_rtl.py": "ccb995c9a44548fe06837ab433c73ed2745b84efff6daf1ada45ebfeb4d7a6be",
+    "boards/tangnano20k/sdram/check_pipeline_cache.py": "f4bb266f5dbc98e43b8f0d4e99b4c1bce896414381ddee02b6f6713e1f0b0c56",
+    "boards/tangnano20k/sdram/clock_bridge.v": "3f7bec73cc8011275f6e316d95cee12190d06d32e2a3b9a2dd45b4128b60d986",
+    "boards/tangnano20k/sdram/burst_memory.v": "b96af62e6b1ec957c112d6607d6bfd901560776dedbac9078588cb8910ddb35a",
+    "boards/tangnano20k/sdram/sdram.v": "fac724ff34098570c5ad55b18fa2fd43770496c11005e8b6992ad27f7830693e",
+    "boards/tangnano20k/sdram/build.sh": "ec2ca34c19c26f26e67e95d532ae4c34736d7258e9844e1dd5c51f80866b4306",
+    "boards/tangnano20k/sdram/io_timing_gw2ar18_qn88.json": "0d55614b70979419f46782ef77b65339a7daaae840b7ce0fb1b36c453f465a93"
+  },
+  "selected_build": {
+    "path": "output/tangnano20k/integration-20261019/timing-precompare-p2/impl/pnr/sdram_test.fs",
+    "bitstream_sha256": "5eb222ff39eee54dd53d45a69e1dee94481dd585dcb903c8f3000a56f91b7e3c",
+    "timing_report_sha256": "bb39c95c086dbd2989034dc54be4eba17cf217478d7c5d176cc3ab7310f41784",
+    "resource_report_sha256": "866b2d31f55a64104d1a0048db0d8c035ec4ee56e623ebc51ee513e62135aefa",
+    "tool": "Gowin V1.9.12.04",
+    "part": "GW2AR-LV18QN88C8/I7",
+    "cpu_mhz": 72,
+    "sdram_mhz": 54,
+    "sdram_phase_degrees": 135,
+    "rvc": true,
+    "cache_bytes": 65536,
+    "write_update": true,
+    "placement": 2,
+    "fmax_mhz": 72.04,
+    "worst_setup_ns": 0.008,
+    "setup_violations": 0,
+    "hold_violations": 0,
+    "logic": 15827,
+    "registers": 5113,
+    "bsram": 37,
+    "dsp": 3,
+    "external_sdram_io_qualified": false
+  },
+  "rtl_equivalence": {
+    "condition": "byte-identical after removing whole-line // comments",
+    "files_sha256": {
+      "output/tangnano20k/sdram-generated/SdramPipeline-1/SdramPipeline.topEntity/sdram_pipeline_risc.v": "bc483fd88659018f86d9d04e3cb3a3d60913c9a5c8714278fe059b84c9009342",
+      "output/tangnano20k/integration-20261019/arch-final/gen/SdramPipeline-1/SdramPipeline.topEntity/sdram_pipeline_risc.v": "5af81c56e46e5627757a70f0b71e5aec19d2acac4a2d822ab71613128ed57760"
+    },
+    "logic_sha256": "afa5cd506b94713a8f7f3d73e7e2cfb575efdd53807119c7ddfb8dfb9b40dc47"
+  },
+  "architecture": {
+    "bram": {
+      "Pass": 56,
+      "Too big": 7
+    },
+    "bram-rvc": {
+      "Pass": 85,
+      "Too big": 7
+    },
+    "sdram": {
+      "Pass": 63
+    },
+    "sdram-rvc": {
+      "Pass": 92
+    }
+  },
+  "board": {
+    "complete": true,
+    "classifier_us": [
+      2059070,
+      2059077,
+      2059050
+    ],
+    "training": {
+      "correct": 124,
+      "count": 128,
+      "digest": 21562
+    },
+    "test": {
+      "correct": 61,
+      "count": 64,
+      "digest": 909572
+    },
+    "sd_card_tested": false,
+    "bram_hardware_retested": false,
+    "additional_i32_repeats_passed": 3
+  },
+  "fprisc_fixtures_sha256": {
+    "../fprisc/build/tangnano20k-clock72/numeric/base.bin": "f8c96d45f2f10346d2026d27ae0ed4dda2a94517eca917a1cd4ba3613fc2cad8",
+    "../fprisc/build/tangnano20k-clock72/i32/base.bin": "d890f4014df31225b99d58980375eefd65588b8b760e5ffeb0bd4b215a4f62e2",
+    "../fprisc/build/tangnano20k-clock72/host/base.bin": "520bcf4984771ca59c419e8cbe491e6da84cf77743233d86f4a12d9dc8f4aaa8",
+    "../fprisc/build/tangnano20k-clock72/board/dtree-1/base.bin": "f8abaa0ed11ef3e2576f4ccceccf33948982557c05c17927b15e9e62e4c9a9af"
+  },
+  "rejected_smaller_candidate": {
+    "fmax_mhz": 72.114,
+    "worst_setup_ns": 0.022,
+    "logic": 14153,
+    "bitstream_sha256": "b29a375d39983a3fe5cdc0a3ccbd06b0650015e37b3db8d3766a6028f90dd577",
+    "architecture": {
+      "bram": {
+        "Pass": 56,
+        "Too big": 7
+      },
+      "bram-rvc": {
+        "Pass": 85,
+        "Too big": 7
+      },
+      "sdram": {
+        "Pass": 63
+      },
+      "sdram-rvc": {
+        "Pass": 92
+      }
+    },
+    "reason": "FP-RISC I32 returned DONE without FPR EXIT 0 on initial run and after SRAM reprogramming; upload XOR readback succeeded; cause not isolated"
+  },
+  "evidence_sha256": {
+    "arch-results.json": "a283e01544c79d375480596b3afd4138e54265e90cd70cf1a033c0336e8e301a",
+    "board-cache.txt": "73f5afdcfbd3b2f0804584f5d0579465cb50430fea2330a14c40fd6e4df43ded",
+    "board-classifier-1.txt": "eacab4b434841105829a19c35f9e7f28a9e027e108034cd609b4db9724dd15e4",
+    "board-classifier-2.txt": "46a46612d11b631b48acc66f3b9933748a7272eb2bf18c6deb35dd6d2961053b",
+    "board-classifier-3.txt": "bc9c70630bc4aadc3fa92aea002f0733bee8fa6cb6cd76129817e61090e6fd65",
+    "board-compressed.txt": "72d7f768e5580fb044da3ed18d90877efc818df33da64662f93a8e63a02bca84",
+    "board-counters.txt": "d3f7b58a02897d7d26e979158090d0f0935976e15c4e96a46737f87875fea5b3",
+    "board-fpr-host.txt": "76ed5658a0660bce17e432621147413a53a2b0b029aeba20bf5956f5e62ee8be",
+    "board-fpr-i32.txt": "585adb883f3d6e67dce2d7728751579567d1b08a733e82fafff079a5ca400723",
+    "board-fpr-numeric.txt": "3b08975eb83b0cc72a02daf1a5c365f3b234a07b2fd9a41d922c058f0b29d376",
+    "board-high-ram.txt": "1f3977bb3135df3990b856e9fe02f4b82391aaf5a0f26f4b773bd50e669a9b79",
+    "board-i32-repeat-1.txt": "585adb883f3d6e67dce2d7728751579567d1b08a733e82fafff079a5ca400723",
+    "board-i32-repeat-2.txt": "585adb883f3d6e67dce2d7728751579567d1b08a733e82fafff079a5ca400723",
+    "board-i32-repeat-3.txt": "585adb883f3d6e67dce2d7728751579567d1b08a733e82fafff079a5ca400723",
+    "board-interrupts.txt": "ec3998b3e36da05943377fa61fca843e70ab4936e004a16dbfa429e0c4aa2165",
+    "board-processor.txt": "c0a4cd01c62a80874f2f38fcf69de5135394bc84ca8a327f6e7e4b997476c53e",
+    "board-program.txt": "793a39588626ad38650254619657d4d8f09a1be2aa4d873ee1f435a522f646ca",
+    "board-results.json": "78a319e088c53a419ebba059c7afec220d2b54e0dcd25bb90350c78c4940929f",
+    "board-rv32i.txt": "7c67faa6015565168eb781826f7255e6c7222cf1b1e663458969b8a9398ab553",
+    "board-rv32m.txt": "0cf6bfcd37fdac750acaa7641c17947e63f8bae2b7b4ad99abf290b7a305da8e",
+    "board-timing.txt": "58ea7744ea4e9bdbee9edfb5eb74a84091c593b76a91905565756a9ba5f0c147",
+    "board-uart.txt": "1991e5bb5722e226f000cee15125ed17e5edbeaaf655c1161203e31f30b8de16",
+    "board.txt": "5b829bd2c7a79f601efafd3d73741a79ea5e5a06b67f4dca154019773a4d2fc2",
+    "bridge.txt": "9cc8cd482eaeb20e5026c1ce6cc16f3f309e940833cffe8b11b6adfe93ba519b",
+    "cache-results.json": "dbf717aafeac353c3bf1e1afed0f65fd4e5340a98dbeb9470c6d6933c09fd51d",
+    "haskell.txt": "5312c96e8da9b017639ba8dbc3a8a0dfd2f69b1eef0a261b7b82c37650b8db8f",
+    "io-audit.txt": "7aa6f16d9f93cb3a4434de61c918ca5714c7df306f01b101d2043a8b203b87b5",
+    "rejected-smaller-board.json": "a237a58d9000d6ed665b92118f62be245f36dc6e12851f73b9a6d3b81622f803",
+    "rejected-smaller-board.txt": "2bd56fab2c31e0370a20beeaf4404edc714019eee65c899e543afb38d4e34810",
+    "rejected-smaller-i32-repeat.txt": "b21b285b495b9fa0ac17ae6e04b0d6550c24f2f159a3bc4cfc4858b10872c6dd",
+    "resources-summary.txt": "d3f057101dbfe358b5479c5c590d6b5dd247d41377ceee44fe2913e843c8f74a",
+    "rtl-im-cdc.txt": "4b15065c583074bb008613195dbfdc1b8798bcc527dda4b634013ac98d7cca67",
+    "rtl-imc-cdc.txt": "aa6901e4742eb574f376408ee2c608d22c56ffc15f625d28e9133fce69dbdae2",
+    "rtl-imc-small.txt": "e5c770acb2035766a5086ed67f336aaa9d79fd6bb203a4d05b37ecb8eb3854f2",
+    "rtl-loader.txt": "d58b59e80b74f85cba292bdfc7df7d29486336034edb2bf8f040c8c3de6a7a0a",
+    "runner.txt": "9770b0e322181bd2c3bbf31119bba50947a3de451f9cb5eb003a5443eba7a152",
+    "timing-summary.txt": "2f56722b31fbf9d7fc45aee35131c29c8800b74b714845e5af9b24f68cbc4489"
+  },
+  "evidence_text_normalization": "ANSI color and trailing whitespace removed from archived text logs; raw logs remain under output"
+}

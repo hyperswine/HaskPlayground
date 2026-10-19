@@ -1,0 +1,13 @@
+   text	   data	    bss	    dec	    hex	filename
+   1139	      0	      8	   1147	    47b	/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/counters.elf
+Image: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/c/counters.bin (1139 bytes)
+PASS run 1: 27 counter/retirement/trap checks
+PASS run 2: 27 counter/retirement/trap checks
+PASS run 3: 27 counter/retirement/trap checks
+PASS run 4: 27 counter/retirement/trap checks
+PASS run 5: 27 counter/retirement/trap checks
+PASS run 6: 27 counter/retirement/trap checks
+PASS run 7: 27 counter/retirement/trap checks
+PASS run 8: 27 counter/retirement/trap checks
+PASS run 9: 27 counter/retirement/trap checks
+PASS run 10: 27 counter/retirement/trap checks

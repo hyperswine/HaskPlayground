@@ -1,0 +1,87 @@
+{
+  "complete": true,
+  "source_sha256": "c84e9d71b22188455e7ff0c7c64f24c88e22a7a27fdaab2281925daef9fc95c4",
+  "fixture_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+  "cases": [
+    {
+      "name": "normal-write-update",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "c84e9d71b22188455e7ff0c7c64f24c88e22a7a27fdaab2281925daef9fc95c4",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "PASS: 241 reads, 137 ordered masked writes, 37 line fills, 1998 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/normal-write-update-tb.v:67: $finish called at 23865000 (1ps)\n"
+    },
+    {
+      "name": "normal-invalidate",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "7131ac47410128e44384a4cb6a4d52a168d0d98e4084af59ecf5800afce215a7",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "PASS: 241 reads, 137 ordered masked writes, 91 line fills, 2936 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/normal-invalidate-tb.v:67: $finish called at 33245000 (1ps)\n"
+    },
+    {
+      "name": "all-32-banks-write-update",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "c84e9d71b22188455e7ff0c7c64f24c88e22a7a27fdaab2281925daef9fc95c4",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "PASS: 401 reads, 169 ordered masked writes, 85 line fills, 6956 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/all-32-banks-write-update-tb.v:67: $finish called at 75365000 (1ps)\n"
+    },
+    {
+      "name": "all-32-banks-invalidate",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "7131ac47410128e44384a4cb6a4d52a168d0d98e4084af59ecf5800afce215a7",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "PASS: 401 reads, 169 ordered masked writes, 175 line fills, 8486 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/all-32-banks-invalidate-tb.v:67: $finish called at 90665000 (1ps)\n"
+    },
+    {
+      "name": "missing-bank-write-select",
+      "passed": true,
+      "expected_exit": 1,
+      "rtl_sha256": "d9ade2d7f3a0f526de3628fb408f406fb7ceb6d10a5993963297d9921f8d72d5",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/missing-bank-write-select-tb.v:57: reply 384 expected abc00400 got abc00200\n       Time: 61675000  Scope: pipeline_cache_tb\n"
+    },
+    {
+      "name": "tag-collision-poison",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "1ca58adcb399eecce0c442d0ae845d16d520a231a48c1e607ae0482077324fbe",
+      "testbench_sha256": "edf57cf989c999bb88b70cec402b655c86c1503a329ecc441d2fea212275f41d",
+      "output": "PASS: 98 logical tag collisions ignored\nPASS: 241 reads, 137 ordered masked writes, 91 line fills, 2936 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/tag-collision-poison-tb.v:74: $finish called at 33245000 (1ps)\n"
+    },
+    {
+      "name": "missing-collision-guard",
+      "passed": true,
+      "expected_exit": 1,
+      "rtl_sha256": "1a7648de8508b21db993a7f6da7156cadbe95e414015e5a1b43bdbe844b95eaa",
+      "testbench_sha256": "edf57cf989c999bb88b70cec402b655c86c1503a329ecc441d2fea212275f41d",
+      "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/missing-collision-guard-tb.v:22: undefined tag collision used as a hit\n       Time: 3525000  Scope: pipeline_cache_tb\n"
+    },
+    {
+      "name": "data-collision-poison",
+      "passed": true,
+      "expected_exit": 0,
+      "rtl_sha256": "98dd18bf484b2b22a029f5f80aaf9902d9b9f7c21a60b64c927d88c6478b0393",
+      "testbench_sha256": "15388598dc2272cef9a88c695d4629fb1a4503b7db77f42630afc07383fb4127",
+      "output": "PASS: 16 data read/write collisions forwarded\nPASS: 241 reads, 137 ordered masked writes, 37 line fills, 1998 held clocks\n/Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/data-collision-poison-tb.v:72: $finish called at 23865000 (1ps)\n"
+    },
+    {
+      "name": "missing-data-forward",
+      "passed": true,
+      "expected_exit": 1,
+      "rtl_sha256": "2d1075d62b43517096b69e75eddd43bea46b3c1134f0304312a3b04bb53032c1",
+      "testbench_sha256": "15388598dc2272cef9a88c695d4629fb1a4503b7db77f42630afc07383fb4127",
+      "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/missing-data-forward-tb.v:60: reply 330 expected abc00000 got xxxxxx00\n       Time: 21765000  Scope: pipeline_cache_tb\n"
+    },
+    {
+      "name": "missing-final-beat-capture",
+      "passed": true,
+      "expected_exit": 1,
+      "rtl_sha256": "93103092b32d824631472344c3cc4ee6ad902d83e1e11aaae3c01f9a75ee4240",
+      "testbench_sha256": "4841aeaee50dd259f05b27b57cbc79693246a01df48197d19b06f3e25d6c9b20",
+      "output": "FATAL: /Users/jasonqin/Documents/GitHub/HaskPlayground/output/tangnano20k/integration-20261019/cache-final/missing-final-beat-capture-tb.v:57: reply 81 expected abc00403 got deadbeed\n       Time: 4865000  Scope: pipeline_cache_tb\n"
+    }
+  ]
+}

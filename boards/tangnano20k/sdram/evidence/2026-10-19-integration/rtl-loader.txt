@@ -1,0 +1,7 @@
+DONE14a21185
+LDONE
+PASS: extended ROM T/Q/V/H UART loader, XOR readback, program execution and trap DONE
+- /Users/jasonqin/Documents/GitHub/HaskPlayground/boards/tangnano20k/sdram/pipeline_cpu_tb.v:271: Verilog $finish
+- S i m u l a t i o n   R e p o r t: Verilator 5.052 2026-09-05
+- Verilator: $finish at 7ms; walltime 0.770 s; speed 8.831 ms/s
+- Verilator: cpu 0.761 s on 1 threads; allocated 12 MB
