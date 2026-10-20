@@ -34,7 +34,7 @@ async function fixture(t) {
       deliveries.push({ verification: true, body: parsed, headers });
       return { status: 200, body: JSON.stringify({ challenge: parsed.challenge }) };
     }
-    assert.ok(headers['webhook-signature'].split(' ').includes(new Webhook(activeKey).sign(headers['webhook-id'], new Date(Number(headers['webhook-timestamp'])*1000), body))); 
+    assert.ok(headers['webhook-signature'].split(' ').includes(new Webhook(activeKey).sign(headers['webhook-id'], new Date(Number(headers['webhook-timestamp'])*1000), body)));
     assert.equal(headers['webhook-id'], parsed.eventId);
     deliveries.push({ body: parsed, headers });
     return { status, body: '' };
