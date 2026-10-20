@@ -14,6 +14,16 @@ environment file it uses to find the project's packages).
 
 `cabal repl haskplayground` loads the library in GHCi.
 
+## Google Chat
+
+`cabal run google-chat -- login spaces` signs in as `support@vpply.com`;
+`cabal run google-chat -- spaces` lists accessible conversations. See the
+[setup and command guide](app/google-chat/README.md) for private credentials,
+message reading, and sending.
+
+The [Google Chat MCP plugin](plugins/google-chat-readonly/README.md)
+packages chat listing, message reading, and thread reading for local desktop use.
+
 `cabal run haskplayground-exe -- examples/fact.fpl` For speed.
 
 `cabal run haskplayground-exe -- zonesim` to run a thing.

@@ -12,6 +12,7 @@ license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
+    app/google-chat/README.md
     CHANGELOG.md
     examples/NeoMusicLanguage.md
     examples/neomusic/*.neomusic
@@ -139,6 +140,41 @@ executable terra-bgm
   ghc-options: -O2
 
 -- The Clash compiler, for the board builds: cabal run clash -- <file> --verilog
+common google-chat-deps
+  import: warnings
+  build-depends:
+      base >=4.18 && <5, aeson, bytestring, text, directory, filepath,
+      http-client, http-client-tls, http-types, network, unix, time, process
+
+executable google-chat
+  import: google-chat-deps
+  main-is: Main.hs
+  hs-source-dirs: app/google-chat
+  other-modules: GoogleChat
+  ghc-options: -threaded
+
+executable google-chat-reader
+  import: google-chat-deps
+  main-is: ReaderMain.hs
+  hs-source-dirs: app/google-chat
+  other-modules: GoogleChat
+  ghc-options: -threaded
+
+executable google-chat-writer
+  import: google-chat-deps
+  main-is: WriterMain.hs
+  hs-source-dirs: app/google-chat
+  other-modules: GoogleChat
+  ghc-options: -threaded
+
+test-suite google-chat-test
+  import: google-chat-deps
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs: test/google-chat, app/google-chat
+  other-modules: GoogleChat
+  ghc-options: -threaded
+
 executable clash
   import: warnings
   main-is: Clash.hs

@@ -16,5 +16,15 @@ file.txt
 top
 
 __pycache__/
+.private/
+.env
+.env.*
+client_secret*.json
+credentials.json
+token.json
+plugins/google-chat-readonly/node_modules/
+plugins/google-chat-readonly/dist/
+plugins/google-chat-readonly/bin/
+plugins/google-chat-readonly/runtime.json
 !boards/tangnano20k/bootrom/bootrom.hex
 !boards/tangnano20k/bootrom/bootrom-sdram.hex
