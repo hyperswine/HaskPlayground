@@ -1,0 +1,146 @@
+-- "Screw", orchestral: the screw-anime cue (app/screw-anime) re-scored for a
+-- recorded orchestra. Same melody, harmony and 30-second arc, cut to the M3x8
+-- screw cinematic (Playground/high-level-stuff/screw-cinematic):
+--
+--   bars 1-4    0.0-6.7 s   intro: harp plays the chorus hook, strings swell in
+--   bars 5-8    6.7-13.3 s  verse: flute melody over IVM7-III7-vim7-v7 I7,
+--                           cello pizzicato groove, horn guide tones
+--   bars 9-12   13.3-20 s   pre-chorus: violins climb, string ostinato, horn line,
+--                           timpani roll and a harp glissando into a half-beat gap
+--   bars 13-16  20-26.7 s   chorus on IVM7-V-iiim7-vim7: violins + flute on the
+--                           hook, horns an octave below, full strings, timpani
+--   bars 17-18  26.7-30 s   IV-V-I, the strings' D major ringing into the hall
+--
+-- Recordings: VSCO 2 Community Edition (CC0) via examples/neomusic/vsco.
+-- Room: the Jack Lyons Concert Hall, University of York, central seats.
+-- Impulse response from OpenAIR (openairlib.net), Audiolab, University of
+-- York, CC BY 4.0; made stereo by examples/neomusic/rooms/make-room.py.
+-- Set NEOMUSIC_SAMPLES to the directory holding VSCO-2-CE and rooms/.
+tempo 144
+tuning 12 at D4
+meter 4
+key D
+
+-- Sustained sounds ring into the room after note-off; the short ones (string
+-- ostinato, bass spiccato) let go quickly so the eighths stay separate.
+sound strings  = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.9) sampled "vsco/strings.sfz"
+sound ostinato = gain ((0.5 + 0.5 * velocity) * adsr 0.005 0 1 0.12) sampled "vsco/strings.sfz"
+sound violins  = gain ((0.5 + 0.5 * velocity) * adsr 0.03 0 1 0.6) sampled "vsco/violins.sfz"
+sound bass     = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.7) sampled "vsco/bass.sfz"
+sound spicc    = gain ((0.5 + 0.5 * velocity) * adsr 0.005 0 1 0.15) sampled "vsco/bass.sfz"
+sound pizz     = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 0.8) sampled "vsco/cello-pizz.sfz"
+sound harp     = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/harp.sfz"
+sound flute    = gain ((0.5 + 0.5 * velocity) * adsr 0.02 0 1 0.4) sampled "vsco/flute.sfz"
+sound horn     = gain ((0.5 + 0.5 * velocity) * adsr 0.03 0 1 0.5) sampled "vsco/horn.sfz"
+sound timpani  = gain ((0.5 + 0.5 * velocity) * adsr 0.001 0 1 1.5) sampled "vsco/timpani.sfz"
+reverb space "rooms/jack-lyons/jack-lyons-lp2-stereo.wav" wet 0.55 predelay 0
+master peak 0.89 tail 3 rate 48000 bits 24
+
+instrument strings  = strings gain 0.67 send 0.6
+instrument ostinato = ostinato gain 0.55 pan 0.1 send 0.5
+instrument violins  = violins gain 5.8 pan -0.25 send 0.55
+instrument bass     = bass gain 2.0 pan 0.15 send 0.45
+instrument spicc    = spicc gain 2.85 pan 0.15 send 0.4
+instrument pizz     = pizz gain 1.5 pan -0.15 send 0.4
+instrument harp     = harp gain 4.2 pan 0.35 send 0.5
+instrument flute    = flute gain 1.25 pan 0.2 send 0.45
+instrument horn     = horn gain 1.2 pan -0.1 send 0.6
+instrument timp     = timpani gain 2.7 send 0.5
+
+-- Chords, 0 = D4: cellos on the root, violas and violins above.
+G    = (-19 -12 -3 0 4 7)      -- Gmaj9: G B D F# A
+A    = (-17 -10 -1 2 7 9)      -- Aadd9
+Fsm  = (-20 -13 -1 2 4 7)      -- F#m7
+Bm   = (-15 -8 0 4 7 9)        -- Bm7
+Fs7  = (-20 -13 -1 2 4 8)      -- F#7, with its A#
+Am7  = (-17 -10 -2 2 5 7)
+D7   = (-24 -12 0 4 7 10)
+Em   = (-22 -15 -3 0 2 5)      -- Em7
+Asus = (-17 -10 0 2 7 9)
+Dmaj = (-24 -12 4 7 12 14 16)  -- Dadd9, the last chord
+
+-- The melody (screw-anime's), bar by bar.
+v1 = _:1/2 7:1/2 9:1/2 12:1/2 14 12:1/2 9:1/2
+v2 = 8 11:1/2 14:1/2 11 8:1/2 4:1/2
+v3 = _:1/2 4:1/2 9:1/2 11:1/2 12 14:1/2 12:1/2
+v4 = 12 10:1/2 7:1/2 9 10:1/2 12:1/2
+verse = v1 v2 v3 v4
+climb = 7:1/2 9:1/2 12 9:1/2 12:1/2 14
+        9:1/2 11:1/2 14 11:1/2 14:1/2 16
+        11:1/2 12:1/2 14:1/2 16 14:1/2 16:1/2 19:1/2
+        19:2 21:1/2 23 _:1/2
+hook = 19:3/4 21:3/4 19:1/2 16 14:1/2 16:1/2
+       19:3/2 16:1/2 14:1/2 12:1/2 14:1/2 16:1/2
+       21:1/2 23 21:1/2 19:1/2 21 16:1/2
+       19:3/4 16:3/4 14:1/2 12:1/2 14:1/2 12
+ending = 14:1/2 16:1/2 19 21:1/2 19:1/2 23   24:3 _
+
+-- Patterns
+up8 #a #b #c #d = [a b c d [a + 12] [b + 12] [c + 12] [d + 12]]:1/2   -- harp, one bar
+groove #r #x = [r:3/4 r:1/4 [r + 12]:1/2 r:1/2 r:3/4 r:1/4 [r + 12]:1/2 x:1/2]
+half #r #x = [r:3/4 r:1/4 [r + 12]:1/2 x:1/2]
+eighths #r = [r [r + 12]]:1/2*4
+pulse x = [x:1/2]*8
+boom #r = [r _ r:1/2 r:1/2 _]
+roll #r #k = [r:1/4]*k
+
+-- Each part a little uneven in timing and strength, with its own pattern.
+harp: humanize 1
+  [ vel 0.75 [hook + 12]
+    _:16
+    up8 -5 -3 0 2  up8 -3 -1 2 4  up8 -3 0 4 7
+    [7 9 11 12 14 16 19 21 23 24 26 28 31 33]:1/4 _:1/2
+    vel 0.8 [up8 -3 0 4 7  up8 -1 2 7 9  up8 -1 2 4 7  up8 0 4 7 9]
+    up8 -3 0 4 7  [4 7 12 16 19 24 28 31]:1/2 ]
+
+strings: humanize 2
+  [ cresc 0.4 0.6 [G:4 A:4 Fsm:4 Bm:4]
+    vel 0.45 [G:4 Fs7:4 Bm:4 Am7:2 D7:2]
+    _:16
+    vel 0.95 [G:4 A:4 Fsm:4 Bm:4]
+    vel 0.85 [G:2 A:2]  vel 0.8 [Dmaj:4] ]
+
+ostinato: humanize 3
+  [ _:32
+    cresc 0.5 0.95 [pulse Em pulse Fsm pulse G Asus:1/2 Asus:1/2 Asus:1/2 Asus:1/2 A:1/2 A:1/2 A:1/2 _:1/2]
+    _:24 ]
+
+violins: humanize 4 [_:32 cresc 0.6 0.95 [climb] vel 0.95 [hook] vel 0.9 [ending]]
+
+flute: humanize 5 [_:16 vel 0.65 [verse + 12] _:16 vel 0.8 [hook + 12] vel 0.75 [ending + 12]]
+
+horn: humanize 6
+  [ _:16
+    vel 0.4 [-3:4 -4:4 0:4 -2:4]
+    cresc 0.5 0.9 [2:4 4:4 5:4 7:7/2 _:1/2]
+    vel 0.95 [hook - 12]
+    vel 0.85 [ending - 12] ]
+
+pizz: humanize 7
+  [ _:16
+    vel 0.75 [groove -19 -21 groove -20 -16 groove -15 -16 half -17 -17 half -24 -23]
+    _:16
+    vel 0.8 [eighths -19 eighths -17 eighths -20 eighths -15]
+    _:8 ]
+
+bass: humanize 8
+  [ cresc 0.4 0.6 [-31:4 -29:4 -32:4 -27:4]
+    vel 0.55 [-31:4 -32:4 -27:4 -29:2 -24:2]
+    _:16
+    _:16
+    vel 0.85 [-31:2 -29:2 -24:4] ]
+
+spicc: humanize 9
+  [ _:32
+    cresc 0.55 0.9 [pulse -34 pulse -32 pulse -31 [-29:1/2]*7 _:1/2]
+    vel 0.9 [pulse -31 pulse -29 pulse -32 pulse -27]
+    _:8 ]
+
+timp: humanize 10
+  [ _:8 vel 0.35 [-20 _:3 -15 _:3]
+    vel 0.45 [-19 _:3 -20 _:3 -15 _:3 -17 _:1 -24 _:1]
+    cresc 0.5 0.75 [-22 _ -22 _ -20 _ -20 _ -19 _ -19 _]
+    cresc 0.3 1 [roll -17 14] _:1/2
+    vel 1 [(-24 -19):2 _:2] vel 0.9 [boom -17 boom -20 boom -15]
+    vel 0.85 [-19:2 -17:2]
+    cresc 0.4 1 [roll -24 8] vel 1 [-24:2] ]
