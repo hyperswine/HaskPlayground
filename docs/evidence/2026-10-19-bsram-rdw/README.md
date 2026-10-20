@@ -1,6 +1,6 @@
 # BSRAM read-during-write probe runs, 2026-10-19
 
-Output of `bsram-rdw/` (see WRITE-UPDATE-2026-10-19.md) on the Tang Nano 20K,
+Output of `bsram-rdw/` (see ../../2026-10-19-TANGNANO20K-SDRAM-WRITE-UPDATE.md) on the Tang Nano 20K,
 54 MHz unless noted, 2^20 trials per class. Columns: class, same-edge reads
 that were wrong, of those equal to the write data, wrong readbacks of W,
 wrong readbacks of R (class 15: reads of the new word / not).

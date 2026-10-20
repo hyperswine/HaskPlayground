@@ -1,6 +1,6 @@
 # NeoMusic curves within a note
 
-**Status:** superseded 2026-10-13 by `neomusic-signals.md`: bends, swells,
+**Status:** superseded 2026-10-13 by `2026-10-13-NEOMUSIC-SIGNALS.md`: bends, swells,
 vibrato and cents are now instances of one signal algebra (`pitch` and `level`),
 and vibrato's rate is in cycles per beat rather than the instrument's Hz. The
 views and MIDI rules below still apply. Originally implemented 2026-10-12. Item 3 of the primitives list (after the

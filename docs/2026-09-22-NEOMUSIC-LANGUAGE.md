@@ -1,6 +1,6 @@
 # NeoMusic scores and `.neomusic` files
 
-Implemented from `neomusic-review.md` on 2026-09-22: the prerequisite core model,
+Implemented from `2026-09-22-NEOMUSIC-REVIEW.md` on 2026-09-22: the prerequisite core model,
 text authoring, MIDI, and the first LilyPond piano view (review steps 1–4).
 
 ## Run it
@@ -68,7 +68,7 @@ A `key` or `meter` header affects only the sheet view.
   `pitch (2 + cents 14)` two steps and 14 cents in any tuning. A level's
   constant part is the note's strength (0..1); a level that could go below 0
   is an error. Shapes stretch with the note; oscillation keeps to the beat.
-  See `neomusic-signals.md`.
+  See `2026-10-13-NEOMUSIC-SIGNALS.md`.
 - The prelude names the common signals. `vel v` is `level v`, multiplying, so
   `vel 0.5 [0 vel 0.6 [4] 7]` plays at 0.5, 0.3, 0.5 (notes start at 1, so a
   single `vel` sets the level, and nothing can exceed the level around it).
@@ -84,9 +84,9 @@ A `key` or `meter` header affects only the sheet view.
   MIDI velocities follow it. The prelude's `cresc a b [...]` and
   `dim a b [...]` are `level across a -> b`. The staff marks a run of notes
   that continues one crescendo or diminuendo once, where it starts. See
-  `examples/neomusic/orchestral.neomusic` and `neomusic-phrase.md`.
+  `examples/neomusic/orchestral.neomusic` and `2026-10-14-NEOMUSIC-PHRASE.md`.
 - **Humanizing.** Players are never exactly even, and three primitives say so
-  (see `neomusic-humanize.md`):
+  (see `2026-10-14-NEOMUSIC-HUMANIZE.md`):
   - `noise seed rate` is a signal: random knots within -1..1, `rate` to a
     beat, joined by lines, the same on every render.
   - `start s` holds the value `s` has at a note's start through the note.
@@ -124,7 +124,7 @@ A `key` or `meter` header affects only the sheet view.
   performance only. A tempo change acts on everything sounding during its
   beats, in every voice, so it doesn't matter which hand's line you write it in
   and the hands can't drift apart. Nested changes multiply. See
-  `examples/neomusic/tempo.neomusic` and `neomusic-timemap.md`.
+  `examples/neomusic/tempo.neomusic` and `2026-10-12-NEOMUSIC-TIMEMAP.md`.
 - `glide f [...]` makes each single note slide into the note that directly
   follows it in the same instrument, over the last fraction `f` of its sound
   (a pitch shape added to the note); chords, rests, the last note, and a note
@@ -202,10 +202,10 @@ note's pitch, octaves above C4), `adsr a d s r`, `linear a b secs`,
 so. Sounds may refer to each other in any order, but not in a cycle, and a
 sound named like a built-in replaces it in that file. Every sound is checked
 even if unused. See `examples/neomusic/forest.neomusic` and
-`neomusic-sounds.md`.
+`2026-10-14-NEOMUSIC-SOUNDS.md`.
 
 **Voices.** `sound NAME = VOICE` builds a sound from three sources and a few
-shapers, each shaper acting on the voice after it (see `neomusic-voice.md`):
+shapers, each shaper acting on the voice after it (see `2026-10-14-NEOMUSIC-VOICE.md`):
 
 | Word | Meaning |
 |---|---|
@@ -291,7 +291,7 @@ Modules, each depending only on the ones above it:
 |---|---|
 | `NeoMusic.Pitch` | `Step`, `Tuning`, `freq`, `equalTemperament` |
 | `NeoMusic.Recording` | WAV reading (`Recording`, read on first use) and SFZ instruments (`SampleSet`, `Region`, `parseSfz`, `readSampleSet`) |
-| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`, `Sampled`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `neomusic-voice.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `neomusic-patch.md` |
+| `NeoMusic.Audio` | the synthesis engine in Hz and seconds: `Voice` (sources `Tone`, `Noise`, `Plucked`, `Sampled`; shapers `Gain`, `Bend`, `Lowpass`, `Highpass`, `Bandpass`, `Unison`, `Pan`; mixing `:&`; `Classic` patches, see `2026-10-14-NEOMUSIC-VOICE.md`), `Patch` (oscillators, and `amp`, `pitch` and `cutoff` as `Mod` signals over seconds: `adsr`, `cutoffHz`, `filterCutoff`, `Lfo`, `Velocity`, `Key`...) and presets, `Note`/`Timeline`, `Mix`, `renderTimelineMix`, export; see `2026-10-14-NEOMUSIC-PATCH.md` |
 | `NeoMusic.Score` | the unitless score, `Performance`, `validate`, `render` (beats to seconds, once) |
 | `NeoMusic.Language`, `.Midi`, `.Numeric`, `.Sheet` | the text format and the views |
 Import the modules you need. `Score` and `Audio` share some field names

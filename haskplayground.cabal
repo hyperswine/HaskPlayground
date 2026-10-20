@@ -14,7 +14,7 @@ extra-source-files:
     README.md
     app/google-chat/README.md
     CHANGELOG.md
-    examples/NeoMusicLanguage.md
+    docs/2026-09-22-NEOMUSIC-LANGUAGE.md
     examples/neomusic/*.neomusic
     test/golden/neomusic/*.ly
     src/NeoMusic/prelude.neomusic

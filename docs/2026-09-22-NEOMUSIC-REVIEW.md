@@ -1,7 +1,7 @@
 # NeoMusic review, and a path to `.neomusic` files and piano sheet music
 
-**Status:** review + proposal, 2026-09-22. Covers `neo-music-design.md` (v0.1),
-`examples/NeoMusic.md` (v1), `neomusicv2.md` (v2), `src/NeoMusic.hs` (663 lines),
+**Status:** review + proposal, 2026-09-22. Covers `2026-09-12-NEOMUSIC-DESIGN.md` (v0.1),
+`2026-09-12-NEOMUSIC-V1.md` (v1), `2026-09-16-NEOMUSIC-V2.md` (v2), `src/NeoMusic.hs` (663 lines),
 `test/NeoMusicTests.hs` and `app/screw-bgm/Main.hs`. All 7 NeoMusic tests pass
 (`stack test --fast`).
 

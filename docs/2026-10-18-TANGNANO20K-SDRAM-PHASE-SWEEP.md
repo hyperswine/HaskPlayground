@@ -73,7 +73,7 @@ internal timing closure alone cannot establish SDRAM operation.
 
 Read access/hold, command/write setup/hold, package delays, relative PLL
 jitter and output-enable turnaround still need the applicable Gowin limits
-and complete coverage described in the [I/O audit](SDRAM-IO-2026-10-18.md).
+and complete coverage described in the [I/O audit](2026-10-18-TANGNANO20K-SDRAM-IO.md).
 The vendor request remains pending. No supply or temperature measurements
 were made; this is one board at ambient conditions, without PVT qualification.
 The CPU image also has a different placement, so this standalone window is

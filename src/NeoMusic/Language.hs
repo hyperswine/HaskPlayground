@@ -3,7 +3,7 @@
 -- Values are music (scores) and numbers (exact rationals). Definitions take
 -- music parameters and, marked @#@ in the signature, number parameters. A
 -- prelude of ordinary definitions ("NeoMusic.Prelude") is read before every
--- document; a document's own definitions shadow it. See neomusic-prelude.md.
+-- document; a document's own definitions shadow it. See docs/2026-10-13-NEOMUSIC-PRELUDE.md.
 module NeoMusic.Language
   ( Document(..), SheetView(..), Staff(..), Assets(..), noAssets
   , parseDocument, parseDocumentWith, documentAssets, loadDocument
@@ -238,7 +238,7 @@ data SoundPart = SOsc A.Osc | SAmp A.Mod | SPitch A.Mod | SCutoff A.Mod
   | SResonance Double | SHighpass Double | SWidth Double
 
 -- | A sound as written: a classic patch from a base, adjusted part by part
--- (neomusic-sounds.md), or a voice expression (neomusic-voice.md).
+-- (docs/2026-10-14-NEOMUSIC-SOUNDS.md), or a voice expression (docs/2026-10-14-NEOMUSIC-VOICE.md).
 data SoundDef = ClassicSound (Maybe Name) [SoundPart] | VoiceSound VoiceE
 
 -- | A voice expression, with the sounds and recordings it names still to be

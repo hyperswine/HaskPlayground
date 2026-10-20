@@ -2,7 +2,7 @@
 
 **Status:** decided and implemented 2026-10-14, with the recommendations below
 taken as given (asked to proceed directly). Step 3 of the follow-ups from the
-spirit review. It revises the shape set from `neomusic-timemap.md`, whose
+spirit review. It revises the shape set from `2026-10-12-NEOMUSIC-TIMEMAP.md`, whose
 clock, semantics and views are unchanged.
 
 ## 1. Problem

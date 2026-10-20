@@ -27,7 +27,7 @@ a value from a different memory. This work does not qualify a faster clock.
 
 Download and inspected-file hashes are retained in
 [the investigation record](evidence/2026-10-18-sdram-io-audit.json).
-The [vendor request](SDRAM-IO-VENDOR-REQUEST.md) specifies the missing
+The [vendor request](2026-10-18-TANGNANO20K-SDRAM-IO-VENDOR-REQUEST.md) specifies the missing
 information and exact board/controller configuration. It was sent to Gowin
 support on 2026-10-18; the Sent label, recipient and subject were verified.
 
@@ -133,7 +133,7 @@ turnaround, first/last burst beats, command spacing, refresh and initialization.
 Then sweep clock phase on the physical full-capacity tester before repeating
 FP-RISC and SD acceptance. The previous 72/54 MHz image is unchanged by this
 audit. That initial audit did not program the board or card. The subsequent
-[physical phase sweep](SDRAM-PHASE-SWEEP-2026-10-18.md) used FPGA SRAM only,
+[physical phase sweep](2026-10-18-TANGNANO20K-SDRAM-PHASE-SWEEP.md) used FPGA SRAM only,
 found the passing 54 MHz steps and restored the tested processor image;
 the SD card was not accessed.
 

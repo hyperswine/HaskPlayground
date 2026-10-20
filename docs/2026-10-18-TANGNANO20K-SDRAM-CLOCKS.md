@@ -1,6 +1,6 @@
 # Split CPU/SDRAM clock experiment, 2026-10-18
 
-The subsequent [SDRAM I/O audit](SDRAM-IO-2026-10-18.md) adds explicit
+The subsequent [SDRAM I/O audit](2026-10-18-TANGNANO20K-SDRAM-IO.md) adds explicit
 model-completeness checks. The timing results below are historical internal
 STA/physical acceptance results, not complete SDRAM I/O signoff.
 

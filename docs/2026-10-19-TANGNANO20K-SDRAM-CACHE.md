@@ -32,7 +32,7 @@ direct-mapped cache (6.98 of 9.53 million refills were instruction
 fetches). Each refill cost 25.7 CPU clocks through the old mailbox bridge,
 against 9.0 at a single 48 MHz clock, so splitting the clocks made every miss
 about 1.9 times longer in wall time. That, not the CPU changes, is most of the
-36% regression the [clock report](CLOCKS-2026-10-18.md) measured. Writes were
+36% regression the [clock report](2026-10-18-TANGNANO20K-SDRAM-CLOCKS.md) measured. Writes were
 the next cost: every store is written through, each as its own round trip of
 about 20 CPU clocks with one in flight, and every miss first waited for all
 queued stores (14% of all clocks).
@@ -136,7 +136,7 @@ to those sometimes changes a bit of another word. Write-update's isolated
 stores trip it; refill bursts did not. The data array is now explicit 512x32
 banks, write-update is the default, and the 72/54 MHz 64 KiB image runs the
 classifier in 2,059,065 µs on the board. See
-[WRITE-UPDATE-2026-10-19.md](WRITE-UPDATE-2026-10-19.md), which also has the
+[2026-10-19-TANGNANO20K-SDRAM-WRITE-UPDATE.md](2026-10-19-TANGNANO20K-SDRAM-WRITE-UPDATE.md), which also has the
 whole-netlist gate-level harness (`run_gls.py`) and the block-RAM probe.
 
 ## Also observed

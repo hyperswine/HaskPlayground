@@ -7,7 +7,7 @@ nextpnr-himbaechel, gowin_pack, openFPGALoader).
 | Design | Source | Build script | Clock |
 |---|---|---|---|
 | SimpleRisc (RV32IM, 64 KiB RAM) | `src/SimpleRisc.hs` | `build.sh`; verified with `build_gowin.sh` | PLL; the Gowin-verified build is 78 MHz (placement mode 2) |
-| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | IMC CPU 72 MHz / SDRAM 54 MHz; 64 KiB banked write-update cache; [integrated timing and regressions](INTEGRATION-2026-10-19.md), classifier 2.06 s; +0.008 ns internal setup margin; SDRAM I/O qualification pending |
+| SimpleRisc SDRAM pipeline (8 MiB, experimental) | `src/SdramPipeline.hs` | `sdram/build.sh pipeline` (Gowin) | IMC CPU 72 MHz / SDRAM 54 MHz; 64 KiB banked write-update cache; [integrated timing and regressions](../../docs/2026-10-19-TANGNANO20K-INTEGRATION.md), classifier 2.06 s; +0.008 ns internal setup margin; SDRAM I/O qualification pending |
 | Earlier serial SDRAM core | `src/SdramSimpleRisc.hs` | `sdram/build.sh serial` (Gowin) | cached 66 MHz |
 | PsramRegs | `src/PsramRegs.hs` | `build_psram.sh` | 27 MHz oscillator |
 
@@ -90,7 +90,7 @@ accepting SDRAM-sized writes. `bootrom/build.sh` rebuilds both committed
 images. `bootrom/check_loader.py` runs both actual C parsers with native
 UART/memory hooks, including the exact caps, oversized frames, corrupted
 RAM readback, reset causes and legacy commands.
-The [Base loader report](bootrom/BASE-LOADER-2026-10-18.md) records the
+The [Base loader report](../../docs/2026-10-18-TANGNANO20K-BASE-LOADER.md) records the
 implementation, verification and 48 MHz SDRAM build.
 
 A program ends by writing the finisher, which resets the CPU into the ROM
@@ -134,14 +134,14 @@ protocol and an interrupt-driven UART echo. The trap/status,
 scratch and identification CSRs are available, together with writable 64-bit
 `mcycle`/`minstret` counters and their read-only `cycle`/`instret` aliases.
 Unknown CSRs and writes to read-only CSRs trap. See
-[MACHINE-MODE-2026-10-05.md](MACHINE-MODE-2026-10-05.md) for implementation
+[2026-10-05-TANGNANO20K-MACHINE-MODE.md](../../docs/2026-10-05-TANGNANO20K-MACHINE-MODE.md) for implementation
 boundaries and measured board results. `check_traps.py` runs a guest C handler
 that checks CSR operations, trap cause/PC/value and return status.
 `check_counters.py` checks counter rollover, half writes, aliases, exact
 retirement and faulting instructions that must not retire.
 `check_finisher.py` verifies explicit success/failure exits with a nonzero
 trap vector and an infinite loop after the store; see
-[SYSTEM-BUS-2026-10-05.md](SYSTEM-BUS-2026-10-05.md).
+[2026-10-05-TANGNANO20K-SYSTEM-BUS.md](../../docs/2026-10-05-TANGNANO20K-SYSTEM-BUS.md).
 `check_bus.py --freq-mhz 96` checks mixed-width RAM traffic, signed UART RX
 loads and single consumption through the registered data bus on three runs.
 
@@ -196,7 +196,7 @@ takes about 11 minutes including Clash. Results on 2026-10-19:
 
 Deliberate choices the tests accept: misaligned loads, stores and targets
 trap rather than being emulated, and the core runs in machine mode only.
-See [the report](ARCH-TESTS-2026-10-19.md) for the per-test table and what
+See [the report](../../docs/2026-10-19-TANGNANO20K-ARCH-TESTS.md) for the per-test table and what
 it does not cover.
 
 ## Clock speed: nextpnr is optimistic
@@ -215,7 +215,7 @@ judge:
 | machine traps, Zicsr and split counters (2026-10-05) | 147.19 MHz, seed 2, route target 144 MHz | 96 MHz: counter, trap, CPU, RV32IM and FP-RISC suites | seed 1 at target 115.2 MHz loses string characters at 96 MHz despite a reported 142.90 MHz maximum |
 | finisher and registered device target (2026-10-05) | 144.61 MHz, seed 3, route target 144 MHz | 96 MHz: finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seed 2 misses the route margin target at 137.84 MHz; not loaded |
 | registered data bus (2026-10-05) | 144.61 MHz, seed 7, route target 144 MHz | 96 MHz: bus, finisher, counter, trap, CPU, RV32IM and FP-RISC suites | seeds 3, 2, 1, 4, 5 and 6 miss the margin; not loaded |
-| boot ROM, RAM at `0x8000_0000` (2026-10-11) | Gowin 96.480 MHz (vendor flow) | 96 MHz: every CPU suite plus FP-RISC; see [the report](BOOT-ROM-2026-10-11.md) | not tested higher |
+| boot ROM, RAM at `0x8000_0000` (2026-10-11) | Gowin 96.480 MHz (vendor flow) | 96 MHz: every CPU suite plus FP-RISC; see [the report](../../docs/2026-10-11-TANGNANO20K-BOOT-ROM.md) | not tested higher |
 
 `build.sh` therefore places and routes for `FREQ_MHZ * MARGIN`
 (`MARGIN=1.5` by default, seed 3 tried first). To test above what timing allows, build with
@@ -262,7 +262,7 @@ on that run too. The verified SRAM image SHA-256 is
 The 96 MHz result above is historical coverage, not a pass of the expanded
 ALU regression. The clock sweep found shift corruption at 96 MHz on that
 image and corrected it with the registered shifter. See
-[CLOCK-SWEEP-2026-10-05.md](CLOCK-SWEEP-2026-10-05.md) for the current
+[2026-10-05-TANGNANO20K-CLOCK-SWEEP.md](../../docs/2026-10-05-TANGNANO20K-CLOCK-SWEEP.md) for the current
 114 MHz validation, failed higher clocks, bitstream hashes and replay commands.
 The build and host-tool defaults remain 96 MHz; use an explicit `--freq-mhz`
 matching the image loaded into the board.
@@ -350,7 +350,7 @@ FREQ_MHZ=108 boards/tangnano20k/build_gowin.sh
 
 The current verified SimpleRisc build runs ordinary instructions in a
 pipeline and the rest in the multi-cycle phases
-([PIPELINE-2026-10-12.md](PIPELINE-2026-10-12.md)). It is:
+([2026-10-12-TANGNANO20K-PIPELINE.md](../../docs/2026-10-12-TANGNANO20K-PIPELINE.md)). It is:
 
 ```bash
 GOWIN_PLACE_OPTION=2 FREQ_MHZ=78 boards/tangnano20k/build_gowin.sh
@@ -359,19 +359,19 @@ GOWIN_PLACE_OPTION=2 FREQ_MHZ=78 boards/tangnano20k/build_gowin.sh
 The UART then runs at 78,000,000 / 868 = 89,862 baud: pass `--freq-mhz 78`
 to the check scripts. Placement modes give very different results with this
 design (75-83 MHz at a 96 MHz target; a placement-3 image that met 78 MHz
-failed PPP intermittently, see PIPELINE-2026-10-12.md). The first pipeline, without
+failed PPP intermittently, see ../../docs/2026-10-12-TANGNANO20K-PIPELINE.md). The first pipeline, without
 multiply, forwarding from execute or branch prediction, closed 96 MHz. The
 phases alone, before the pipeline (commit bae9999), closed 117 MHz in mode 2
-([MEMORY-PORT-2026-10-12.md](MEMORY-PORT-2026-10-12.md)), and Gowin's license server refuses
+([2026-10-12-TANGNANO20K-MEMORY-PORT.md](../../docs/2026-10-12-TANGNANO20K-MEMORY-PORT.md)), and Gowin's license server refuses
 builds intermittently; retry those.
 
 The build checks the requested clock and rejects any internal setup or hold
 violation. Gowin can generate a bitstream even when timing fails; the separate
 `check_gowin_timing.py` guard makes that failure visible to callers.
 
-The historical [vendor baseline](GOWIN-TIMING-2026-10-06.md) failed at
+The historical [vendor baseline](../../docs/2026-10-06-TANGNANO20K-GOWIN-TIMING.md) failed at
 96 MHz (84.444 MHz maximum). The
-[execution experiment](EXECUTE-TIMING-2026-10-06.md) records the staged ALU,
+[execution experiment](../../docs/2026-10-06-TANGNANO20K-EXECUTE-TIMING.md) records the staged ALU,
 split comparisons, registered CSR selection, timing trials and board results.
 Those measurements describe the earlier serial core; the current pipeline is
 described above.
@@ -387,20 +387,20 @@ set and FP-RISC uses a 2 MiB allocation on this image. Use `--freq-mhz 54`
 (or 66) with the board tools. The boot ROM's `Q` command loads Base images of up to 2 MiB, and
 `M` clears only the first 64 KiB. SRAM programming leaves flash unchanged.
 
-The [new SDRAM pipeline](sdram/PIPELINE-2026-10-16.md) overlaps instructions
+The [new SDRAM pipeline](../../docs/2026-10-16-TANGNANO20K-SDRAM-PIPELINE.md) overlaps instructions
 through a unified 2 KiB cache with 16-byte burst fills and four masked posted
 writes. Its corrected IM image is board-tested at 54 MHz and optional C mode
 at 27/48 MHz, including six FP-RISC stress programs. Its first board-loader
 failure exposed a one-clock-late SDRAM burst capture and pin model. Four-beat
 variants now use a 135-degree SDRAM clock. The report separates
 physical results, timing candidates and remaining limits.
-The [split-clock experiment](sdram/CLOCKS-2026-10-18.md) now passes vendor
+The [split-clock experiment](../../docs/2026-10-18-TANGNANO20K-SDRAM-CLOCKS.md) now passes vendor
 timing and all 12 physical FP-RISC/SD cases at 72 MHz CPU / 54 MHz SDRAM.
 The 108/54 MHz trial fails timing and compressed-instruction execution.
 The new 72 MHz classifier takes 36.1% longer than the prior 48 MHz image;
 the timing margin is only 3 ps. See the report for the remaining CPU paths,
 the larger classifier's guest-heap limit and the SD file evidence.
-The pipeline's [microSD SPI byte port](sdram/SD-SPI-2026-10-18.md) is mapped at
+The pipeline's [microSD SPI byte port](../../docs/2026-10-18-TANGNANO20K-SDRAM-SD-SPI.md) is mapped at
 `0x10001000`, with capability `0x53445031` at `+0x0c`. SPI DMA remains limited
 to the separate BRAM image.
 

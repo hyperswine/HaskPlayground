@@ -26,7 +26,7 @@ three-logical-clock cache port. `build.sh core` and `pipeline` select this image
   20..0 select all 2,097,152 SDRAM words. The map remains RAM at
   `0x80000000..0x807fffff`, ROM at `0..0x7ff`, plus the existing UART, finisher,
   CLINT and PLIC registers. The SPI byte port was added on 2026-10-18;
-  the SPI DMA registers remain unmapped. See [SD-SPI-2026-10-18.md](SD-SPI-2026-10-18.md).
+  the SPI DMA registers remain unmapped. See [2026-10-18-TANGNANO20K-SDRAM-SD-SPI.md](2026-10-18-TANGNANO20K-SDRAM-SD-SPI.md).
 
 The physical controller uses CAS2, sequential four-word reads and single-word
 masked writes. Refresh runs independently, with priority before accepting an

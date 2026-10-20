@@ -11,7 +11,7 @@ with the library's location:
 The .sfz files name samples under "VSCO-2-CE/", so set NEOMUSIC_SAMPLES to the
 directory that contains the library.
 
-Pitches were measured, not assumed (see neomusic-samples.md):
+Pitches were measured, not assumed (see docs/2026-10-14-NEOMUSIC-SAMPLES.md):
 - Most folders name notes one octave low (their "A3" sounds at 440 Hz); the
   harp names them as sounding (its A4 is 440 Hz) and is 7 cents flat.
 - The timpani files name drums, not notes. Each drum's principal pitch comes

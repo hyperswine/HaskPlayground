@@ -50,7 +50,7 @@ candidates and half-width comparisons in Execute, then selects/composes results
 in ExecuteFinish. Ordinary instructions take nine clocks, shifts ten and CSR
 reads eleven; iterative multiply/divide bypasses ExecuteFinish. CSR selection
 is registered and host reset preserves overwritten pipeline temporaries.
-See [the experiment report](boards/tangnano20k/EXECUTE-TIMING-2026-10-06.md)
+See [the experiment report](2026-10-06-TANGNANO20K-EXECUTE-TIMING.md)
 for vendor timing and physical tests. This improves timing without completing
 step 5's instruction overlap. Step 3 finished on 2026-10-11 (below).
 
@@ -65,7 +65,7 @@ than the original uncached 54 MHz image. It does not yet satisfy this roadmap's
 96 MHz completion gate. Since step 3 it shares the boot ROM and memory map
 (no zero alias or `H` command); loader images remain limited to 64 KiB.
 This serial implementation remains available as `sdram/build.sh serial`.
-See [the measured results](boards/tangnano20k/sdram/README.md).
+See [the measured results](../boards/tangnano20k/sdram/README.md).
 
 ## SDRAM pipeline experiment (2026-10-16)
 
@@ -83,7 +83,7 @@ clock restores the corrected burst read window at 48/54 MHz; the standalone
 54 MHz checker passes all 8 MiB. The corrected IM54 placement also passes its
 board and six FP-RISC checks, with only +0.002 ns internal setup slack. C-mode
 remains opt-in. This does not complete the
-96 MHz roadmap gate. See [the report and reproduction commands](boards/tangnano20k/sdram/PIPELINE-2026-10-16.md).
+96 MHz roadmap gate. See [the report and reproduction commands](2026-10-16-TANGNANO20K-SDRAM-PIPELINE.md).
 
 ## SDRAM cache and clock bridge (2026-10-19)
 
@@ -95,7 +95,7 @@ from 6.61 to 2.84 seconds on the board (2.33 times). Keeping lines valid on
 store hits initially failed on the board; the subsequent 512x32 BSRAM bank
 layout fixed that failure and made write-update the default, reaching
 2.06 seconds physically. See
-[the report](boards/tangnano20k/sdram/CACHE-2026-10-19.md).
+[the report](2026-10-19-TANGNANO20K-SDRAM-CACHE.md).
 
 ## Branch integration and regression coverage (2026-10-19)
 
@@ -112,7 +112,7 @@ Regression coverage now includes all 32 cache banks under both write
 policies, negative controls, timer interrupts becoming due during cache
 misses, compressed straddled instructions and branch-flush stores. The
 architecture runner rejects incomplete runs and stale generated RTL.
-See [the integration report](boards/tangnano20k/INTEGRATION-2026-10-19.md)
+See [the integration report](2026-10-19-TANGNANO20K-INTEGRATION.md)
 for final counts, board evidence and reproduction commands.
 
 ## Implementation status (2026-10-12): step 5 started
@@ -153,7 +153,7 @@ counting. Both images pass their full board regressions plus
 `check_interrupts.py`: BRAM at 96 MHz (Gowin 96.474 MHz, +0.051 ns, placement
 mode 1) and SDRAM at 66 MHz (72.073 MHz, +1.277 ns). All 42 SimpleRisc
 properties pass. See
-[the step 2 report](boards/tangnano20k/INTERRUPTS-2026-10-11.md).
+[the step 2 report](2026-10-11-TANGNANO20K-INTERRUPTS.md).
 
 ## Implementation status (2026-10-11): step 3 complete
 
@@ -171,7 +171,7 @@ Both images pass their full board regressions through the ROM: BRAM at
 72.429 MHz, +1.345 ns), including the FP-RISC harness on both, the seven FP-RISC
 stress workloads and factorial on BRAM, and the 2 MiB SDRAM fixture. All 36
 SimpleRisc properties pass. See
-[the step 3 report](boards/tangnano20k/BOOT-ROM-2026-10-11.md). Next: step 4,
+[the step 3 report](2026-10-11-TANGNANO20K-BOOT-ROM.md). Next: step 4,
 the official architecture tests, which can now use the finisher and the RAM
 map.
 
@@ -184,7 +184,7 @@ read-only aliases. The final counter image passes at 96 MHz: 270 counter
 assertions, 267 guest trap assertions, the processor regression, 30,720 RV32M
 and 3,840 RV32I comparisons. All 26 SimpleRisc properties and the generated
 RTL smoke test pass. FP-RISC uses the matching CSR adapter and counter fixture.
-See [the implementation and measured results](boards/tangnano20k/MACHINE-MODE-2026-10-05.md).
+See [the implementation and measured results](2026-10-05-TANGNANO20K-MACHINE-MODE.md).
 
 The RAM map and host protocol remain in place. Step 3 now starts with an
 explicit finisher at `0x00100000` and registered device selection; C and
@@ -199,7 +199,7 @@ the existing CPU, counter, trap and RV32IM regressions at 96 MHz. Its
 request/response interface preserves precise faults and waits for completion
 before changing the PC or destination register. The rest of step 3 is
 RAM relocation and boot ROM, followed by step 4's conformance
-baseline. See [the system separation slice](boards/tangnano20k/SYSTEM-BUS-2026-10-05.md).
+baseline. See [the system separation slice](2026-10-05-TANGNANO20K-SYSTEM-BUS.md).
 
 ## Step 1: machine mode (Zicsr and traps)
 
@@ -396,7 +396,7 @@ RAM; they pass on SDRAM. 3.9.1 has no Zicsr suite: CSR instructions are
 exercised only through the trap handler. No applicable test raises an
 illegal-instruction trap or uses interrupts. The board path (signature over
 the UART) is not built. See
-[the report](boards/tangnano20k/ARCH-TESTS-2026-10-19.md).
+[the report](2026-10-19-TANGNANO20K-ARCH-TESTS.md).
 
 ## Step 5: a real pipeline
 
@@ -465,7 +465,7 @@ accesses trapping from step 1.
 ## Separate RV64/Base experiment, 2026-10-06
 
 The user-requested 64-bit variant is in
-[boards/tangnano20k/rv64](boards/tangnano20k/rv64/README.md). It is a serial
+[boards/tangnano20k/rv64](../boards/tangnano20k/rv64/README.md). It is a serial
 Verilog RV64IM core using the existing unified cache and 8 MiB SDRAM. It is
 verified on this board at 27 MHz, with 1,628 arithmetic/load/store reference
 cases, precise synchronous traps and a single-threaded FP-RISC Base host.

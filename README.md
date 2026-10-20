@@ -30,8 +30,8 @@ packages chat listing, message reading, and thread reading for local desktop use
 
 ## Tang Nano 20K
 
-Building the Clash designs (including the SimpleRisc RV32IM core) for the Tang Nano 20K, the clock speeds reached on the board, and a known USB-UART bridge issue: see [boards/tangnano20k/README.md](boards/tangnano20k/README.md). The plan for turning SimpleRisc into a full RISC-V core (machine mode, interrupts, a boot ROM, the official architecture tests, a pipeline) is in [simple-risc-roadmap.md](simple-risc-roadmap.md).
+Building the Clash designs (including the SimpleRisc RV32IM core) for the Tang Nano 20K, the clock speeds reached on the board, and a known USB-UART bridge issue: see [boards/tangnano20k/README.md](boards/tangnano20k/README.md). The plan for turning SimpleRisc into a full RISC-V core (machine mode, interrupts, a boot ROM, the official architecture tests, a pipeline) is in [2026-10-05-SIMPLE-RISC-ROADMAP.md](docs/2026-10-05-SIMPLE-RISC-ROADMAP.md).
 
 ## NeoMusic
 
-Algebraic scores with `.neomusic` authoring, WAV/MP3/FLAC audio, MIDI, numeric notation by default, and optional LilyPond/PDF piano sheets. Start with [the language and score guide](examples/NeoMusicLanguage.md), or see the [legacy audio guide](examples/NeoMusic.md) and [design draft](neo-music-design.md).
+Algebraic scores with `.neomusic` authoring, WAV/MP3/FLAC audio, MIDI, numeric notation by default, and optional LilyPond/PDF piano sheets. Start with [the language and score guide](docs/2026-09-22-NEOMUSIC-LANGUAGE.md), or see the [legacy audio guide](docs/2026-09-12-NEOMUSIC-V1.md) and [design draft](docs/2026-09-12-NEOMUSIC-DESIGN.md).

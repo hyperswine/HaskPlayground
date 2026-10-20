@@ -49,7 +49,7 @@ data Osc = Osc
 -- | How a sound changes while a note plays, in seconds since note-on. A sound
 -- has two anchors: note-on, where attack and decay count from, and note-off,
 -- where 'Release' starts from wherever the sound has got to. See
--- neomusic-patch.md.
+-- docs/2026-10-14-NEOMUSIC-PATCH.md.
 data Mod
   = K Double                      -- ^ a constant
   | Linear Double Double Double   -- ^ from a to b over d seconds, then holds b
@@ -309,7 +309,7 @@ validPatch p = do
 -- Voices ----------------------------------------------------------------------
 
 -- | A voice: an audio signal built from three sources and a few shapers, each
--- shaper acting on the voice inside it (see neomusic-voice.md). Sources sound
+-- shaper acting on the voice inside it (see docs/2026-10-14-NEOMUSIC-VOICE.md). Sources sound
 -- at unit amplitude, at the pitch that reaches them: the note's, raised by every
 -- 'Bend' above. Inside a 'Bend', 'Key' is that raised pitch. A 'Classic' patch
 -- is a named shorthand; its meaning is 'expandClassic'.

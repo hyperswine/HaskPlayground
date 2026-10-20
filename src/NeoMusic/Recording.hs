@@ -1,4 +1,4 @@
--- | Recordings: WAV files and SFZ instrument mappings (see neomusic-samples.md).
+-- | Recordings: WAV files and SFZ instrument mappings (see docs/2026-10-14-NEOMUSIC-SAMPLES.md).
 --
 -- A 'Recording' is read in two steps: its header at once (so a missing or
 -- unreadable file is an error before anything renders), and its audio only
@@ -185,7 +185,7 @@ findFile here dirs path
     present (p : ps) = doesFileExist p >>= \ok -> if ok then pure (Just p) else present ps
 
 -- | An SFZ file's regions, each as its opcodes (group and control opcodes
--- included). The supported subset is in neomusic-samples.md; any other opcode
+-- included). The supported subset is in docs/2026-10-14-NEOMUSIC-SAMPLES.md; any other opcode
 -- or header is an error naming it.
 parseSfz :: String -> Either String [M.Map String String]
 parseSfz text = do

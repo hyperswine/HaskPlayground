@@ -39,14 +39,14 @@ data Event = Event
 type Phrase = [Event]
 -- | 'Tempo' says how fast its music is performed relative to the written beats.
 -- It acts on everything sounding during its written extent, in every voice:
--- the score has one shared clock (see "neomusic-timemap.md").
+-- the score has one shared clock (see "docs/2026-10-12-NEOMUSIC-TIMEMAP.md").
 data Score = Line Name Phrase | Silence Rational | Score :>>: Score | Score :||: Score
   | Tempo Shape Score
   deriving (Eq, Show)
 
 -- | A tempo factor over a node's written extent: 1 is as written, 1/2 half speed.
 -- Every shape is piecewise log-linear (equal tempo ratio per beat), so nested
--- shapes multiply into the same family. See neomusic-cycle.md.
+-- shapes multiply into the same family. See docs/2026-10-14-NEOMUSIC-CYCLE.md.
 data Shape
   = Ramp Rational Rational        -- ^ from factor a at the start to b at the end (a == b: constant)
   | Cycle [(Rational, Shape)]     -- ^ these segments (written beats, shape), repeated from the start
@@ -217,7 +217,7 @@ pedal score = fst (go 0 score)
 -- crescendo over a passage). Each note gets the part of the signal within its
 -- sounding time; its value at the note's start joins the note's strength, so
 -- a crescendo plays louder (velocity, and velocity-to-cutoff), and only the
--- rest of the shape varies within the note. See neomusic-phrase.md.
+-- rest of the shape varies within the note. See docs/2026-10-14-NEOMUSIC-PHRASE.md.
 levelAcross :: Signal -> Score -> Either String Score
 levelAcross = across (\piece e -> Right e {level = times (strengthFirst piece) (level e)})
   where

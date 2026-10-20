@@ -60,7 +60,7 @@ The report still has no paths for the external `clk_sdram` domain; the
 QN88 SDRAM I/O model lacks required bounds. The 33 I/O-model/refusal tests
 pass and the strict qualification gate remains in place. The physical
 tests below are ambient functional evidence, not electrical/PVT signoff.
-See [the I/O audit](sdram/SDRAM-IO-2026-10-18.md).
+See [the I/O audit](2026-10-18-TANGNANO20K-SDRAM-IO.md).
 
 ## Regression coverage
 
@@ -140,7 +140,7 @@ remains on the board; a power cycle removes it.
 ## Evidence and reproduction
 
 Compact evidence is in
-[`sdram/evidence/2026-10-19-integration/`](sdram/evidence/2026-10-19-integration/manifest.json).
+[`evidence/2026-10-19-integration/`](evidence/2026-10-19-integration/manifest.json).
 It includes source/RTL/bitstream hashes, the architecture result matrix,
 cache results, physical case commands/results, and selected logs. Full local
 builds and logs are under `output/tangnano20k/integration-20261019/`;
@@ -205,7 +205,7 @@ The accepted larger-workload image is
 `032849eeb6fe291eb8b73038ed0ef88f9ffacfe24e1e834342672683ac539f40`.
 The board is left on this 48/48 MHz volatile SRAM image. No flash/SD writes
 were performed. See the sibling FP-RISC
-[reclamation report](../../../fprisc/docs/2026-10-20-TANGNANO20K-GC.md)
+[reclamation report](../../fprisc/docs/2026-10-20-TANGNANO20K-GC.md)
 and its tracked evidence for both the passing run and rejected 72 MHz run.
 
 Rebuild from HaskPlayground:

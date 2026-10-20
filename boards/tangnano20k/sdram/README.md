@@ -1,42 +1,42 @@
 # Tang Nano 20K SDRAM experiment
 
-The [integration report](../INTEGRATION-2026-10-19.md) records the combined
+The [integration report](../../../docs/2026-10-19-TANGNANO20K-INTEGRATION.md) records the combined
 cache and architecture-test branches, the selected decode-hazard timing
 change, and fresh simulation and physical regressions at CPU72/SDRAM54.
 The selected build uses 15,827 logic cells and closes internal timing at
 +0.008 ns worst setup slack; that tight margin does not qualify SDRAM I/O.
 
-The [cache and clock-bridge report](CACHE-2026-10-19.md) makes the 72/54 MHz
+The [cache and clock-bridge report](../../../docs/2026-10-19-TANGNANO20K-SDRAM-CACHE.md) makes the 72/54 MHz
 pipeline 2.33 times faster on the board's FP-RISC classifier (2.84 s against
 6.61 s): a 64 KiB cache (`SDRAM_CACHE_LINE_BITS`, default 12), refills that
 drain only stores to their own line, and an asynchronous-FIFO clock bridge
 with posted writes. `run_perf.py` simulates where the cycles go and matched
 the board within 1.4%.
 
-The [write-update follow-up](WRITE-UPDATE-2026-10-19.md) keeps lines valid on
+The [write-update follow-up](../../../docs/2026-10-19-TANGNANO20K-SDRAM-WRITE-UPDATE.md) keeps lines valid on
 store hits (`WRITE_UPDATE`, now default 1): 2.06 s, 1.38 times faster again.
 It failed on the board until the data array was built from 512x32 BSRAM
 banks; Gowin's narrow BSRAM slices corrupted other words under isolated
 writes. `run_gls.py` simulates a whole Gowin netlist under Verilator
 (`gowin_models.v`), and `bsram-rdw/` probes block-RAM behaviour on the board.
 
-The [I/O timing audit](SDRAM-IO-2026-10-18.md) records the missing embedded
+The [I/O timing audit](../../../docs/2026-10-18-TANGNANO20K-SDRAM-IO.md) records the missing embedded
 memory bounds, a sourced constraint generator and the strict model gate.
 Current builds explicitly distinguish internal STA from full SDRAM I/O
 signoff; the supplied QN88 model remains incomplete.
 `SDRAM_PHASE_DEGREES` selects an experimental memory-clock phase in
-22.5-degree steps. The [phase checks](SDRAM-IO-2026-10-18.md#local-phase-experiments-while-waiting-for-the-vendor)
+22.5-degree steps. The [phase checks](../../../docs/2026-10-18-TANGNANO20K-SDRAM-IO.md#local-phase-experiments-while-waiting-for-the-vendor)
 verify PLL/SDC alignment and functional read-window sensitivity; they do not
 qualify the electrical interface.
 
-The [physical 54 MHz sweep](SDRAM-PHASE-SWEEP-2026-10-18.md) tested every
+The [physical 54 MHz sweep](../../../docs/2026-10-18-TANGNANO20K-SDRAM-PHASE-SWEEP.md) tested every
 22.5-degree step: 90, 112.5, 135 and 157.5 degrees passed all 8 MiB twice;
 all other steps failed despite identical passing internal STA. The tested
 CPU72/SDRAM54 image at 135 degrees was restored and FP-RISC numeric checks
 passed. This is an ambient board result, with full I/O signoff still pending.
 
 The board's 64-Mbit, 32-bit SDR SDRAM is usable as 8 MiB of main memory.
-The current [pipelined experiment](PIPELINE-2026-10-16.md) uses a unified cache
+The current [pipelined experiment](../../../docs/2026-10-16-TANGNANO20K-SDRAM-PIPELINE.md) uses a unified cache
 (64 KiB since 2026-10-19, originally 2 KiB) with 16-byte lines, four posted
 masked writes and four-word SDRAM bursts.
 `build.sh core` or `pipeline` selects it; `serial` retains the earlier 1 KiB
@@ -44,7 +44,7 @@ word-cache image described in the historical results below. The BRAM image
 remains separate. RV32IM is the default. The optional C frontend passes board
 checks and six FP-RISC stress programs at 27 and 48 MHz. Four-beat variants
 use a 135-degree SDRAM clock; the legacy single-word variants keep 225 degrees.
-The pipeline also exposes the [microSD SPI byte port](SD-SPI-2026-10-18.md)
+The pipeline also exposes the [microSD SPI byte port](../../../docs/2026-10-18-TANGNANO20K-SDRAM-SD-SPI.md)
 at `0x10001000`, with a capability register at `+0x0c`; DMA remains unmapped.
 
 ## Cached 66 MHz experiment (2026-10-06)
@@ -168,7 +168,7 @@ outstanding memory transaction, buffers received UART data and continues the
 cycle counter. One outstanding transaction and registered data keep instruction
 fetch, byte-store read/modify/write and loader accesses ordered. Refresh gets
 priority before accepting work and runs at least every roughly 10 us.
-The [new pipeline report](PIPELINE-2026-10-16.md) describes its fixed-latency
+The [new pipeline report](../../../docs/2026-10-16-TANGNANO20K-SDRAM-PIPELINE.md) describes its fixed-latency
 port, physical holds, burst refills and posted writes.
 
 ## Build and test

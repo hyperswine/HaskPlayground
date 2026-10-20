@@ -1,6 +1,6 @@
 # Write-update on the board: narrow BSRAM slices, 2026-10-19
 
-The [cache report](CACHE-2026-10-19.md) left one problem open: with
+The [cache report](2026-10-19-TANGNANO20K-SDRAM-CACHE.md) left one problem open: with
 `WRITE_UPDATE=1` (a store that hits writes its word into the cache and keeps
 the line), the FP-RISC classifier passed every simulation but panicked on the
 board right after `DTREE BEGIN`.

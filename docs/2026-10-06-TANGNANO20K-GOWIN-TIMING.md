@@ -56,6 +56,6 @@ Reports are under `output/tangnano20k/gowin/impl/pnr/`:
 by this analysis.
 
 The current script builds the newer execution experiment with timing optimization.
-See [EXECUTE-TIMING-2026-10-06.md](EXECUTE-TIMING-2026-10-06.md) for subsequent
+See [2026-10-06-TANGNANO20K-EXECUTE-TIMING.md](2026-10-06-TANGNANO20K-EXECUTE-TIMING.md) for subsequent
 source changes and physical validation; the results above describe only the
 original baseline.

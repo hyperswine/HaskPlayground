@@ -91,7 +91,7 @@ from Spike's at word 1.
 - **mtval.** The tests check `mtval` for misaligned accesses (the faulting
   address) and EBREAK (the pc), and SimpleRisc agrees with Spike on both. No
   selected test raises an illegal-instruction trap, so SimpleRisc's choice of
-  the instruction word there (`REFERENCE-MODEL-2026-10-12.md`) is not
+  the instruction word there (`2026-10-12-TANGNANO20K-REFERENCE-MODEL.md`) is not
   exercised. No 3.9.1 test that applies uses interrupts.
 - The BRAM figures are for the BRAM image built from this source in
   simulation, not for a bitstream.

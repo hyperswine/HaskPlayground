@@ -6,7 +6,7 @@
 -- 'Osc' runs at a rate in cycles per beat. 'Cents' marks a part measured in
 -- cents rather than steps; the tuning converts it at render. 'Noise' and
 -- 'Start' are for humanizing: a repeatable random signal, and a signal's value
--- at the note's start, held. See neomusic-signals.md and neomusic-humanize.md.
+-- at the note's start, held. See docs/2026-10-13-NEOMUSIC-SIGNALS.md and docs/2026-10-14-NEOMUSIC-HUMANIZE.md.
 module NeoMusic.Signal
   ( Signal(..), Wave(..)
   , plus, times, negateSignal, constantValue, terms, factors

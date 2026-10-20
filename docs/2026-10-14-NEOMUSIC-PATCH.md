@@ -50,7 +50,7 @@ This is the score's old problem (one field per feature) repeated inside the soun
 
 ## 2. The idea: patch parameters are signals over the note's physical time
 
-The score's signals (`neomusic-signals.md`) live in musical time: a fraction of
+The score's signals (`2026-10-13-NEOMUSIC-SIGNALS.md`) live in musical time: a fraction of
 the note, or beats. A sound lives in **seconds**: an attack takes 5 ms whatever
 the tempo. And a sound's shape has two anchors:
 - **Note-on:** the attack and decay count from here.

@@ -2,7 +2,7 @@
 
 **Status:** decided and implemented 2026-10-14 (asked to continue "in the
 spirit of NeoMusic's bottom line"). Recommendation 3 of the orchestral review.
-It follows the recorded-instruments round (neomusic-samples.md): real
+It follows the recorded-instruments round (2026-10-14-NEOMUSIC-SAMPLES.md): real
 recordings made it obvious that every part was exactly even.
 
 ## 1. Problem

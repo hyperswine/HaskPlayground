@@ -1,6 +1,6 @@
 # Machine-mode roadmap: precise exception entry, 2026-10-05
 
-This records two independent slices of `simple-risc-roadmap.md` step 1.
+This records two independent slices of `2026-10-05-SIMPLE-RISC-ROADMAP.md` step 1.
 The exception foundation was committed as `0b03fb8`; the CSR/trap-return
 continuation below makes the handler state software-visible. Machine mode
 remains incomplete until split cycle and retirement counters are implemented.
