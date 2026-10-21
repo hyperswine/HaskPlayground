@@ -1,37 +1,30 @@
 # HaskPlayground
 
-Put everything else into examples.
-There's a script to auto copy stuff from verilog output to examples. Use lushay code to build and flash.
+Scratch Haskell: small experiments that have not grown into projects of their
+own. The project builds with cabal (GHC 9.8.2, which ghcup installs):
+`cabal.project` pins the compiler and `cabal.project.freeze` every
+dependency's version. `cabal build all` builds everything, `cabal test` runs
+the test suite, and `cabal repl haskplayground` loads the library in GHCi.
 
-The project builds with cabal (GHC 9.8.2, which ghcup installs): `cabal.project`
-pins the compiler and `cabal.project.freeze` every dependency's version.
+## What is here
 
-`cabal build all` builds everything; `cabal test` runs the test suite.
+| path | what it is |
+|---|---|
+| `src/WASM/` | a WebAssembly interpreter: a WAT parser, the VM, and a capability-based actor scheduler. `examples/*.wat` are its inputs and `examples/difftest.py` checks it against wasmtime |
+| `src/DTs.hs` | a histogram-binned decision tree (`cabal run haskplayground-exe -- dt`) |
+| `src/QuantUI.hs` | a mobile-style OS shell built with Brick (`cabal run haskplayground-exe -- quantui`) |
+| `src/MyClash.hs`, `src/MyData.hs`, `src/MyStuff.hs` | Clash, DFT and byte-parsing exercises |
+| `docs/` | dated design notes, indexed in [docs/README.md](docs/README.md): NewML and its editor |
 
-`cabal run clash -- src/SimpleRisc.hs --verilog` runs the Clash compiler (the
-`clash` executable in `haskplayground.cabal`; `cabal.project` writes the GHC
-environment file it uses to find the project's packages).
+## Moved out on 2026-10-21
 
-`cabal repl haskplayground` loads the library in GHCi.
+Three projects that started here now live in their own repositories, with
+their history:
 
-## Google Chat
-
-`cabal run google-chat -- login spaces` signs in as `support@vpply.com`;
-`cabal run google-chat -- spaces` lists accessible conversations. See the
-[setup and command guide](app/google-chat/README.md) for private credentials,
-message reading, and sending.
-
-The [Google Chat MCP plugin](plugins/google-chat-readonly/README.md)
-packages chat listing, message reading, and thread reading for local desktop use.
-
-`cabal run haskplayground-exe -- examples/fact.fpl` For speed.
-
-`cabal run haskplayground-exe -- zonesim` to run a thing.
-
-## Tang Nano 20K
-
-Building the Clash designs (including the SimpleRisc RV32IM core) for the Tang Nano 20K, the clock speeds reached on the board, and a known USB-UART bridge issue: see [boards/tangnano20k/README.md](boards/tangnano20k/README.md). The plan for turning SimpleRisc into a full RISC-V core (machine mode, interrupts, a boot ROM, the official architecture tests, a pipeline) is in [2026-10-05-SIMPLE-RISC-ROADMAP.md](docs/2026-10-05-SIMPLE-RISC-ROADMAP.md).
-
-## NeoMusic
-
-Algebraic scores with `.neomusic` authoring, WAV/MP3/FLAC audio, MIDI, numeric notation by default, and optional LilyPond/PDF piano sheets. Start with [the language and score guide](docs/2026-09-22-NEOMUSIC-LANGUAGE.md), or see the [legacy audio guide](docs/2026-09-12-NEOMUSIC-V1.md) and [design draft](docs/2026-09-12-NEOMUSIC-DESIGN.md).
+- [neomusic](https://github.com/hyperswine/neomusic): algebraic music
+  notation, `.neomusic` scores to audio, MIDI and piano sheets.
+- [simple-risc](https://github.com/hyperswine/simple-risc): the SimpleRisc
+  RV32IM(C) soft core in Clash, the Tang Nano 20K boards, SDRAM and PSRAM
+  variants, the boot ROM and the architecture tests.
+- [google-chat-mcp](https://github.com/hyperswine/google-chat-mcp): the
+  Haskell Google Chat client and the local MCP plugin.

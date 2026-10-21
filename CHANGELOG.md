@@ -8,6 +8,14 @@ and this project adheres to the
 
 ## Release
 
+## Unreleased - 2026-10-21
+
+NeoMusic, SimpleRisc with the Tang Nano 20K boards, and the Google Chat
+client and plugin moved to their own repositories: `neomusic`,
+`simple-risc` and `google-chat-mcp` under github.com/hyperswine. The
+playground keeps the WASM interpreter, the decision tree, QuantUI and the
+scratch modules.
+
 ## 0.1.0.0 - 2026-03-15
 
 Most.

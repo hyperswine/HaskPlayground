@@ -12,12 +12,7 @@ license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
-    app/google-chat/README.md
     CHANGELOG.md
-    docs/2026-09-22-NEOMUSIC-LANGUAGE.md
-    examples/neomusic/*.neomusic
-    test/golden/neomusic/*.ly
-    src/NeoMusic/prelude.neomusic
 
 source-repository head
   type: git
@@ -30,46 +25,17 @@ common warnings
     -Wpartial-fields -Wredundant-constraints
   default-language: Haskell2010
 
--- Every component shares the library's dependencies (as the hpack file did).
 common deps
   build-depends:
         aeson
       , array
-      , async
       , base >=4.7 && <5
-      , binary
       , brick
       , bytestring
       , clash-prelude
       , containers
-      , cryptohash-sha1
       , directory
       , filepath
-      , free
-      , hashable
-      , haskeline
-      , hedgehog
-      , http-conduit
-      , linear
-      , linear-base
-      , megaparsec
-      , mtl
-      , parsec
-      , parser-combinators
-      , prettyprinter
-      , prettyprinter-ansi-terminal
-      , process
-      , random
-      , recursion-schemes
-      , regex-tdfa
-      , row-types
-      , stm
-      , template-haskell
-      , temporary
-      , text
-      , time
-      , unix
-      , unordered-containers
       , vector
       , vty
       , vty-crossplatform
@@ -82,22 +48,7 @@ library
       , MyClash
       , MyData
       , MyStuff
-      , NeoMusic.Audio
-      , NeoMusic.Language
-      , NeoMusic.Midi
-      , NeoMusic.Numeric
-      , NeoMusic.Pitch
-      , NeoMusic.Prelude
-      , NeoMusic.Recording
-      , NeoMusic.Score
-      , NeoMusic.Sheet
-      , NeoMusic.Signal
-      , PsramRegs
       , QuantUI
-      , RiscVCompressed
-      , SdramSimpleRisc
-      , SdramPipeline
-      , SimpleRisc
       , WASM.Actors
       , WASM.Main
       , WASM.TestMain
@@ -111,87 +62,10 @@ executable haskplayground-exe
   build-depends: haskplayground
   ghc-options: -O2 -threaded -rtsopts -with-rtsopts=-N
 
-executable neo-music
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/neo-music
-  build-depends: haskplayground
-  ghc-options: -O2
-
-executable screw-anime
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-anime
-  build-depends: haskplayground
-  ghc-options: -O2
-
-executable screw-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/screw-bgm
-  build-depends: haskplayground
-  ghc-options: -O2
-
-executable terra-bgm
-  import: warnings, deps
-  main-is: Main.hs
-  hs-source-dirs: app/terra-bgm
-  build-depends: haskplayground
-  ghc-options: -O2
-
--- The Clash compiler, for the board builds: cabal run clash -- <file> --verilog
-common google-chat-deps
-  import: warnings
-  build-depends:
-      base >=4.18 && <5, aeson, bytestring, text, directory, filepath,
-      http-client, http-client-tls, http-types, network, unix, time, process
-
-executable google-chat
-  import: google-chat-deps
-  main-is: Main.hs
-  hs-source-dirs: app/google-chat
-  other-modules: GoogleChat
-  ghc-options: -threaded
-
-executable google-chat-reader
-  import: google-chat-deps
-  main-is: ReaderMain.hs
-  hs-source-dirs: app/google-chat
-  other-modules: GoogleChat
-  ghc-options: -threaded
-
-executable google-chat-writer
-  import: google-chat-deps
-  main-is: WriterMain.hs
-  hs-source-dirs: app/google-chat
-  other-modules: GoogleChat
-  ghc-options: -threaded
-
-test-suite google-chat-test
-  import: google-chat-deps
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  hs-source-dirs: test/google-chat, app/google-chat
-  other-modules: GoogleChat
-  ghc-options: -threaded
-
-executable clash
-  import: warnings
-  main-is: Clash.hs
-  hs-source-dirs: bin
-  build-depends: base, clash-ghc
-  ghc-options: -threaded -rtsopts
-
 test-suite haskplayground-test
   import: warnings, deps
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs: test
-  other-modules:
-      NeoMusicScoreTests
-    , NeoMusicTests
-    , PsramRegs
-    , Rv32Model
-    , SimpleRisc
-  build-depends: haskplayground
+  build-depends: haskplayground, hedgehog
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
